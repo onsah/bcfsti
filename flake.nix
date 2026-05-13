@@ -20,7 +20,7 @@
       nativeBuildInputs = with pkgs; [
       ];
       rust-toolchain = pkgs.rust-bin.stable.latest.default.override {
-        extensions = [ "rust-src" "rustfmt" "rust-docs" "clippy" ];
+        extensions = [ "rust-src" "rustfmt" "rust-docs" "clippy" "rust-analyzer" ];
       };
       LD_LIBRARY_PATH = "${pkgs.lib.makeLibraryPath buildInputs}";
       # Allow cargo to pull from private git repositories via local SSH key.
@@ -37,7 +37,7 @@
       };
       devShells.default = pkgs.mkShell {
         inherit buildInputs LD_LIBRARY_PATH CARGO_NET_GIT_FETCH_WITH_CLI;
-        nativeBuildInputs = nativeBuildInputs ++ [ rust-toolchain pkgs.rust-analyzer ];
+        nativeBuildInputs = nativeBuildInputs ++ [ rust-toolchain ];
         RUST_BACKTRACE = 1;
       };
     }
