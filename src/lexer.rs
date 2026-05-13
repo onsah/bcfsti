@@ -207,12 +207,12 @@ pub enum Token<'a> {
     NewLine,
 }
 
-pub fn lex_plain(s: &str) -> impl Iterator<Item = (Result<Token, LexingError>, Span)> + '_ {
+pub fn lex_plain(s: &'_ str) -> impl Iterator<Item = (Result<Token<'_>, LexingError>, Span)> + '_ {
     let lex: Lexer<Token> = Token::lexer(s);
     lex.spanned()
 }
 
-pub fn lex(src: &str) -> Result<SpannedToks<Token>, LexerError> {
+pub fn lex(src: &'_ str) -> Result<SpannedToks<'_, Token<'_>>, LexerError> {
     let lex: Lexer<Token> = Token::lexer(src);
     let toks = lex
         .spanned()
