@@ -19,3 +19,7 @@ auto/
 
 # MACOS
 .DS_Store
+
+# Nix
+.direnv
+result
