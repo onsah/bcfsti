@@ -1,5 +1,6 @@
 pub mod args;
 pub mod error_reporting;
+pub mod freest;
 pub mod fresh_var;
 pub mod lexer;
 pub mod parser;
@@ -14,6 +15,9 @@ pub mod util;
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+extern crate proptest;
 
 use std::process::exit;
 

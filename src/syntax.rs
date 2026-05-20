@@ -511,3 +511,43 @@ impl Eff {
         }
     }
 }
+
+/////////////////////////// Context Free ////////////////////////////
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum CFSession {
+    Skip,
+    Semi {
+        first: Box<SCFSession>,
+        second: Box<SCFSession>,
+    },
+    End(SessionOp),
+    BorrowEnd(SessionOp),
+    Op(SessionOp, Box<SCFType>),
+    Choice(SessionOp, Vec<(SLabel, SCFSession)>),
+    Mu(SId, Box<SCFSession>),
+    Var(SId),
+}
+pub type SCFSession = Spanned<CFSession>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum CFType {
+    Chan(CFSession),
+    Arr {
+        mult: SMult,
+        eff: SEff,
+        param: Box<SCFType>,
+        ret: Box<SCFType>,
+    },
+    Prod {
+        mult: SMult,
+        first: Box<SCFType>,
+        second: Box<SCFType>,
+    },
+    Variant(Vec<(SLabel, SCFType)>),
+    Unit,
+    Int,
+    Bool,
+    String,
+}
+pub type SCFType = Spanned<CFType>;
