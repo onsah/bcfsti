@@ -13,3 +13,7 @@ clap = { version = "4.3.23", features = ["derive"] }
 logos = "0.13.0"
 peg = "0.8.2"
 rand = "0.8.5"
+tempfile = "3.27.0"
+
+[dev-dependencies]
+proptest = "1.11.0"

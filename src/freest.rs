@@ -1,4 +1,7 @@
-use std::vec;
+use std::{
+    fmt::{self, write},
+    vec,
+};
 
 use crate::syntax::{CFSession, CFType, Eff, Label, Mult, SessionOp};
 
@@ -45,6 +48,35 @@ enum FreestType {
         body: Box<FreestType>,
     },
     Var(Label),
+}
+
+impl fmt::Display for FreestType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FreestType::Unit => write!(f, "()"),
+            FreestType::Int => write!(f, "Int"),
+            FreestType::Bool => write!(f, "Bool"),
+            FreestType::String => write!(f, "String"),
+            FreestType::Tuple(tys) => {
+                write!(f, "(")?;
+                for ty in &tys[..tys.len() - 1] {
+                    write!(f, "{}, ", ty)?;
+                }
+                write!(f, "{}", tys.last().unwrap())?;
+                write!(f, ")")?;
+                Ok(())
+            }
+            FreestType::Arrow { param, ret } => todo!(),
+            FreestType::Skip => todo!(),
+            FreestType::End(session_op) => todo!(),
+            FreestType::Semi { first, second } => todo!(),
+            FreestType::Message { dir, ty } => todo!(),
+            FreestType::Choice { dir, branches } => todo!(),
+            FreestType::Forall { var, body } => todo!(),
+            FreestType::Rec { var, body } => todo!(),
+            FreestType::Var(_) => todo!(),
+        }
+    }
 }
 
 impl From<CFType> for Type {
@@ -177,6 +209,65 @@ impl Mult {
             Mult::Lin => "linear",
             Mult::OrdR => "right",
             Mult::OrdL => "left",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs::File,
+        io::{Read, Write},
+        process::Command,
+    };
+
+    // Bring the macros and other important things into scope.
+    use proptest::prelude::*;
+    use tempfile::{Builder, NamedTempFile};
+
+    use crate::freest::FreestType;
+
+    fn freest_primitive_strategy() -> impl Strategy<Value = FreestType> {
+        prop_oneof![
+            Just(FreestType::Bool),
+            Just(FreestType::Int),
+            Just(FreestType::String),
+            Just(FreestType::Unit),
+        ]
+    }
+
+    fn freest_tuple_strategy() -> impl Strategy<Value = Box<FreestType>> {
+        let leaf = freest_primitive_strategy().prop_map(Box::new);
+        leaf.prop_recursive(
+            4, // depth
+            16,
+            4,
+            |inner| {
+                prop::collection::vec(inner.clone(), 1..10)
+                    .prop_map(FreestType::Tuple)
+                    .prop_map(Box::new)
+            },
+        )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            // Setting both fork and timeout is redundant since timeout implies
+            // fork, but both are shown for clarity.
+            fork: true,
+            cases: 100,
+            max_global_rejects: 1,
+            .. ProptestConfig::default()
+        })]
+        #[test]
+        fn primitive(ty in freest_tuple_strategy()) {
+            let mut test_file = Builder::new().suffix(".fst").disable_cleanup(true).tempfile()?;
+            writeln!(test_file, "type T = {}", ty)?;
+            test_file.flush()?;
+
+            let freest_cmd = Command::new("freest").arg("--subtyping").arg(test_file.path()).output()?;
+
+            assert!(freest_cmd.status.success());
         }
     }
 }
