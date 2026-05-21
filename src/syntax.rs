@@ -1,5 +1,5 @@
 use crate::util::span::{fake_span, Spanned};
-use std::{collections::HashSet, hash::Hash};
+use std::{collections::HashSet, fmt, hash::Hash, path::Display};
 
 pub type Id = String;
 pub type SId = Spanned<Id>;

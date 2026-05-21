@@ -23,3 +23,6 @@ auto/
 # Nix
 .direnv
 result
+
+# Temp Freest files
+*.temp.fst

@@ -66,11 +66,23 @@ impl fmt::Display for FreestType {
                 write!(f, ")")?;
                 Ok(())
             }
-            FreestType::Arrow { param, ret } => todo!(),
-            FreestType::Skip => todo!(),
-            FreestType::End(session_op) => todo!(),
-            FreestType::Semi { first, second } => todo!(),
-            FreestType::Message { dir, ty } => todo!(),
+            FreestType::Arrow { param, ret } => write!(f, "{} -> {}", param, ret),
+            FreestType::Skip => write!(f, "Skip"),
+            FreestType::End(session_op) => {
+                let session_op = match session_op {
+                    SessionOp::Recv => "Wait",
+                    SessionOp::Send => "Close",
+                };
+                write!(f, "{}", session_op)
+            }
+            FreestType::Semi { first, second } => write!(f, "{}; {}", first, second),
+            FreestType::Message { dir, ty } => {
+                let dir = match dir {
+                    SessionOp::Recv => "?",
+                    SessionOp::Send => "!",
+                };
+                write!(f, "{}({})", dir, ty)
+            }
             FreestType::Choice { dir, branches } => todo!(),
             FreestType::Forall { var, body } => todo!(),
             FreestType::Rec { var, body } => todo!(),
@@ -215,19 +227,21 @@ impl Mult {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        fs::File,
-        io::{Read, Write},
-        process::Command,
-    };
+    use std::sync::OnceLock;
+    use std::{io::Write, process::Command};
 
     // Bring the macros and other important things into scope.
     use proptest::prelude::*;
-    use tempfile::{Builder, NamedTempFile};
+    use tempfile::Builder;
 
     use crate::freest::FreestType;
+    use crate::syntax::SessionOp;
 
-    fn freest_primitive_strategy() -> impl Strategy<Value = FreestType> {
+    fn session_op() -> impl Strategy<Value = SessionOp> {
+        prop_oneof![Just(SessionOp::Recv), Just(SessionOp::Send)]
+    }
+
+    fn freest_functional_primitive() -> impl Strategy<Value = FreestType> {
         prop_oneof![
             Just(FreestType::Bool),
             Just(FreestType::Int),
@@ -236,18 +250,58 @@ mod tests {
         ]
     }
 
-    fn freest_tuple_strategy() -> impl Strategy<Value = Box<FreestType>> {
-        let leaf = freest_primitive_strategy().prop_map(Box::new);
+    fn freest_session_primitive() -> impl Strategy<Value = FreestType> {
+        prop_oneof![
+            Just(FreestType::Skip),
+            session_op().prop_map(FreestType::End),
+            (session_op(), freest_functional_type())
+                .prop_map(|(dir, ty)| FreestType::Message { dir, ty })
+        ]
+    }
+
+    fn freest_functional_type() -> impl Strategy<Value = Box<FreestType>> {
+        let leaf = freest_functional_primitive().prop_map(Box::new);
         leaf.prop_recursive(
-            4, // depth
-            16,
-            4,
+            4,  // depth
+            32, // desired_size
+            4,  // expected_branch_size
             |inner| {
-                prop::collection::vec(inner.clone(), 1..10)
-                    .prop_map(FreestType::Tuple)
-                    .prop_map(Box::new)
+                prop_oneof![
+                    prop::collection::vec(inner.clone(), 1..10)
+                        .prop_map(FreestType::Tuple)
+                        .prop_map(Box::new),
+                    (inner.clone(), inner.clone())
+                        .prop_map(|(param, ret)| FreestType::Arrow { param, ret })
+                        .prop_map(Box::new),
+                ]
             },
         )
+    }
+
+    fn freest_session_type() -> impl Strategy<Value = Box<FreestType>> {
+        let leaf = freest_session_primitive().prop_map(Box::new);
+        leaf.prop_recursive(
+            4,  // depth
+            32, // desired_size
+            4,  // expected_branch_size
+            |inner| {
+                prop_oneof![(inner.clone(), inner.clone())
+                    .prop_map(|(first, second)| FreestType::Semi { first, second })
+                    .prop_map(Box::new),]
+            },
+        )
+    }
+
+    static FREEST_AVAILABLE: OnceLock<bool> = OnceLock::new();
+
+    fn freest_available() -> bool {
+        *FREEST_AVAILABLE.get_or_init(|| {
+            Command::new("freest")
+                .arg("--help")
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false)
+        })
     }
 
     proptest! {
@@ -260,14 +314,43 @@ mod tests {
             .. ProptestConfig::default()
         })]
         #[test]
-        fn primitive(ty in freest_tuple_strategy()) {
+        fn freest_functional_type_display(ty in freest_functional_type()) {
+            assert!(freest_available(), "'freest' executable not found on PATH");
+
             let mut test_file = Builder::new().suffix(".fst").disable_cleanup(true).tempfile()?;
             writeln!(test_file, "type T = {}", ty)?;
             test_file.flush()?;
 
             let freest_cmd = Command::new("freest").arg("--subtyping").arg(test_file.path()).output()?;
+            let error_output = String::from_utf8(freest_cmd.stderr)?;
 
-            assert!(freest_cmd.status.success());
+            assert!(freest_cmd.status.success(), "{}", error_output);
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            // Setting both fork and timeout is redundant since timeout implies
+            // fork, but both are shown for clarity.
+            fork: true,
+            cases: 100,
+            max_global_rejects: 1,
+            .. ProptestConfig::default()
+        })]
+        #[test]
+        fn freest_session_type_display(ty in freest_session_type()) {
+            assert!(freest_available(), "'freest' executable not found on PATH");
+
+            let mut test_file = Builder::new().suffix(".fst").disable_cleanup(true).tempfile()?;
+            writeln!(test_file, "type T = {}", ty)?;
+            test_file.flush()?;
+
+            println!("Type: {}", ty);
+
+            let freest_cmd = Command::new("freest").arg("--subtyping").arg(test_file.path()).output()?;
+            let error_output = String::from_utf8(freest_cmd.stderr)?;
+
+            assert!(freest_cmd.status.success(), "TEST OUTPUT: {}", error_output);
         }
     }
 }
