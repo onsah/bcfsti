@@ -26,3 +26,6 @@ result
 
 # Temp Freest files
 *.temp.fst
+
+# proptest
+proptest-regressions
