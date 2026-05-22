@@ -83,7 +83,25 @@ impl fmt::Display for FreestType {
                 };
                 write!(f, "{}({})", dir, ty)
             }
-            FreestType::Choice { dir, branches } => todo!(),
+            FreestType::Choice { dir, branches } => {
+                write!(
+                    f,
+                    "{}",
+                    match dir {
+                        SessionOp::Recv => "&",
+                        SessionOp::Send => "+",
+                    }
+                )?;
+                write!(f, "{{ ")?;
+                for (label, ty) in branches[..branches.len() - 1].iter() {
+                    write!(f, "{}: {}, ", label, ty)?;
+                }
+                {
+                    let (label, ty) = branches.last().unwrap();
+                    write!(f, "{}: {}", label, ty)?;
+                }
+                write!(f, "}}")
+            }
             FreestType::Forall { var, body } => todo!(),
             FreestType::Rec { var, body } => todo!(),
             FreestType::Var(_) => todo!(),
@@ -285,9 +303,23 @@ mod tests {
             32, // desired_size
             4,  // expected_branch_size
             |inner| {
-                prop_oneof![(inner.clone(), inner.clone())
-                    .prop_map(|(first, second)| FreestType::Semi { first, second })
-                    .prop_map(Box::new),]
+                prop_oneof![
+                    (inner.clone(), inner.clone())
+                        .prop_map(|(first, second)| FreestType::Semi { first, second })
+                        .prop_map(Box::new),
+                    (
+                        session_op(),
+                        prop::collection::vec(
+                            (
+                                prop::string::string_regex("[a-zA-Z]+").unwrap(),
+                                inner.clone()
+                            ),
+                            1..10
+                        )
+                    )
+                        .prop_map(|(dir, branches)| { FreestType::Choice { dir, branches } })
+                        .prop_map(Box::new)
+                ]
             },
         )
     }
