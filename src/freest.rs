@@ -1,5 +1,5 @@
 use std::{
-    fmt::{self, write},
+    fmt::{self},
     vec,
 };
 
@@ -281,13 +281,23 @@ mod tests {
             })
     }
 
-    fn freest_functional_primitive() -> impl Strategy<Value = FreestType> {
-        prop_oneof![
+    fn freest_functional_primitive(bound_vars: Vec<String>) -> BoxedStrategy<Box<FreestType>> {
+        let basic_primitives = prop_oneof![
             Just(FreestType::Bool),
             Just(FreestType::Int),
             Just(FreestType::String),
             Just(FreestType::Unit),
-        ]
+        ];
+        if bound_vars.is_empty() {
+            basic_primitives.prop_map(Box::new).boxed()
+        } else {
+            prop_oneof![
+                basic_primitives,
+                proptest::sample::select(bound_vars.clone()).prop_map(FreestType::Var)
+            ]
+            .prop_map(Box::new)
+            .boxed()
+        }
     }
 
     fn freest_session_primitive() -> impl Strategy<Value = FreestType> {
@@ -300,16 +310,7 @@ mod tests {
     }
 
     fn freest_functional_type(bound_vars: Vec<String>) -> impl Strategy<Value = Box<FreestType>> {
-        let leaf = match bound_vars.is_empty() {
-            true => freest_functional_primitive().prop_map(Box::new).boxed(),
-            false => prop_oneof![
-                freest_functional_primitive().prop_map(Box::new),
-                proptest::sample::select(bound_vars.clone())
-                    .prop_map(FreestType::Var)
-                    .prop_map(Box::new)
-            ]
-            .boxed(),
-        };
+        let leaf = freest_functional_primitive(bound_vars.clone());
         leaf.prop_recursive(
             4,  // depth
             32, // desired_size
