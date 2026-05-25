@@ -102,9 +102,9 @@ impl fmt::Display for FreestType {
                 }
                 write!(f, "}}")
             }
-            FreestType::Forall { var, body } => todo!(),
+            FreestType::Forall { var, body } => write!(f, "forall {}. {}", var, body),
             FreestType::Rec { var, body } => todo!(),
-            FreestType::Var(_) => todo!(),
+            FreestType::Var(label) => write!(f, "{}", label),
         }
     }
 }
@@ -253,10 +253,32 @@ mod tests {
     use tempfile::Builder;
 
     use crate::freest::FreestType;
-    use crate::syntax::SessionOp;
+    use crate::syntax::{Label, SessionOp};
 
     fn session_op() -> impl Strategy<Value = SessionOp> {
         prop_oneof![Just(SessionOp::Recv), Just(SessionOp::Send)]
+    }
+
+    fn label() -> impl Strategy<Value = Label> {
+        prop::string::string_regex("[a-zA-Z]+").unwrap()
+    }
+
+    fn ty_label() -> impl Strategy<Value = Label> {
+        (
+            prop::char::range('a', 'z'),
+            prop::collection::vec(
+                prop_oneof![prop::char::range('a', 'z'), prop::char::range('A', 'Z')],
+                0..4,
+            ),
+        )
+            .prop_map(|(c, cs)| {
+                let mut str = String::new();
+                str.push(c);
+                for c in cs {
+                    str.push(c);
+                }
+                str
+            })
     }
 
     fn freest_functional_primitive() -> impl Strategy<Value = FreestType> {
@@ -272,13 +294,22 @@ mod tests {
         prop_oneof![
             Just(FreestType::Skip),
             session_op().prop_map(FreestType::End),
-            (session_op(), freest_functional_type())
+            (session_op(), freest_functional_type(Vec::new()))
                 .prop_map(|(dir, ty)| FreestType::Message { dir, ty })
         ]
     }
 
-    fn freest_functional_type() -> impl Strategy<Value = Box<FreestType>> {
-        let leaf = freest_functional_primitive().prop_map(Box::new);
+    fn freest_functional_type(bound_vars: Vec<String>) -> impl Strategy<Value = Box<FreestType>> {
+        let leaf = match bound_vars.is_empty() {
+            true => freest_functional_primitive().prop_map(Box::new).boxed(),
+            false => prop_oneof![
+                freest_functional_primitive().prop_map(Box::new),
+                proptest::sample::select(bound_vars.clone())
+                    .prop_map(FreestType::Var)
+                    .prop_map(Box::new)
+            ]
+            .boxed(),
+        };
         leaf.prop_recursive(
             4,  // depth
             32, // desired_size
@@ -294,6 +325,17 @@ mod tests {
                 ]
             },
         )
+        // Add forall quantifiers on top
+        .prop_map(move |ty| {
+            let mut ty = ty;
+            for var in bound_vars.iter() {
+                ty = Box::new(FreestType::Forall {
+                    var: var.clone(),
+                    body: ty,
+                })
+            }
+            ty
+        })
     }
 
     fn freest_session_type() -> impl Strategy<Value = Box<FreestType>> {
@@ -309,13 +351,7 @@ mod tests {
                         .prop_map(Box::new),
                     (
                         session_op(),
-                        prop::collection::vec(
-                            (
-                                prop::string::string_regex("[a-zA-Z]+").unwrap(),
-                                inner.clone()
-                            ),
-                            1..10
-                        )
+                        prop::collection::vec((label(), inner.clone()), 1..10)
                     )
                         .prop_map(|(dir, branches)| { FreestType::Choice { dir, branches } })
                         .prop_map(Box::new)
@@ -346,17 +382,22 @@ mod tests {
             .. ProptestConfig::default()
         })]
         #[test]
-        fn freest_functional_type_display(ty in freest_functional_type()) {
+        fn freest_functional_type_display(
+            ty in prop::collection::vec(ty_label(), 0..5)
+                .prop_flat_map(freest_functional_type)
+        ) {
             assert!(freest_available(), "'freest' executable not found on PATH");
 
             let mut test_file = Builder::new().suffix(".fst").disable_cleanup(true).tempfile()?;
             writeln!(test_file, "type T = {}", ty)?;
             test_file.flush()?;
 
+            println!("Type: {}", ty);
+
             let freest_cmd = Command::new("freest").arg("--subtyping").arg(test_file.path()).output()?;
             let error_output = String::from_utf8(freest_cmd.stderr)?;
 
-            assert!(freest_cmd.status.success(), "{}", error_output);
+            assert!(freest_cmd.status.success(), "TEST OUTPUT: {}", error_output);
         }
     }
 
