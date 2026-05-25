@@ -1,5 +1,7 @@
 use std::{
+    collections::HashSet,
     fmt::{self},
+    hash::Hash,
     vec,
 };
 
@@ -48,6 +50,103 @@ enum FreestType {
         body: Box<FreestType>,
     },
     Var(Label),
+}
+
+impl FreestType {
+    fn free_variables(&self) -> HashSet<Label> {
+        match self {
+            FreestType::Unit | FreestType::Int | FreestType::Bool | FreestType::String => {
+                HashSet::default()
+            }
+            FreestType::Tuple(fields) => {
+                let mut result = HashSet::new();
+                for ty in fields {
+                    result.extend(ty.free_variables());
+                }
+                result
+            }
+            FreestType::Arrow { param, ret } => {
+                let mut result = param.free_variables();
+                result.extend(ret.free_variables());
+                result
+            }
+            FreestType::Skip => HashSet::default(),
+            FreestType::End(_) => HashSet::default(),
+            FreestType::Semi { first, second } => {
+                let mut result = first.free_variables();
+                result.extend(second.free_variables());
+                result
+            }
+            FreestType::Message { ty, .. } => ty.free_variables(),
+            FreestType::Choice { branches, .. } => {
+                let mut result = HashSet::new();
+                for (_, ty) in branches {
+                    result.extend(ty.free_variables());
+                }
+                result
+            }
+            FreestType::Forall { var, body } => {
+                let mut free_in_body = body.free_variables();
+                free_in_body.remove(var);
+                free_in_body
+            }
+            FreestType::Rec { var, body } => {
+                let mut free_in_body = body.free_variables();
+                free_in_body.remove(var);
+                free_in_body
+            }
+            FreestType::Var(label) => HashSet::from([label.clone()]),
+        }
+    }
+
+    fn is_terminated(&self) -> bool {
+        match self {
+            FreestType::Unit
+            | FreestType::Int
+            | FreestType::Bool
+            | FreestType::String
+            | FreestType::Skip => true,
+            FreestType::Tuple(_) => true,
+            FreestType::Arrow { .. } => true,
+            FreestType::End(_) => false,
+            FreestType::Choice { .. } => false,
+            FreestType::Message { .. } => false,
+            FreestType::Var(_) => true,
+            FreestType::Semi { first, second } => first.is_terminated() && second.is_terminated(),
+            FreestType::Forall { body, .. } => body.is_terminated(),
+            FreestType::Rec { body, .. } => body.is_terminated(),
+        }
+    }
+
+    // TODO: Implement
+    fn is_contractive(&self, on: &Label, polymorphic_vars: &HashSet<&Label>) -> bool {
+        match self {
+            FreestType::Unit | FreestType::Int | FreestType::Bool | FreestType::String => true,
+            FreestType::Tuple(_) => true,
+            FreestType::Arrow { .. } => true,
+            FreestType::Skip => true,
+            FreestType::End(_) => true,
+            FreestType::Semi { first, second } => match first.is_terminated() {
+                true => second.is_contractive(on, polymorphic_vars),
+                false => first.is_contractive(on, polymorphic_vars),
+            },
+            FreestType::Message { .. } => true,
+            FreestType::Choice { .. } => true,
+            FreestType::Forall { body, .. } => body.is_contractive(on, polymorphic_vars),
+            FreestType::Rec { body, .. } => body.is_contractive(on, polymorphic_vars),
+            FreestType::Var(label) => on != label && !polymorphic_vars.contains(on),
+        }
+    }
+
+    /// Set of bound polymorphic variables in this type.
+    fn polymorphic_variables(&self) -> HashSet<Label> {
+        todo!()
+    }
+
+    /// Vector of bound recursive variables in this type.
+    fn recursive_variables(&self) -> Vec<Label> {
+        todo!()
+    }
 }
 
 impl fmt::Display for FreestType {
@@ -103,7 +202,7 @@ impl fmt::Display for FreestType {
                 write!(f, "}}")
             }
             FreestType::Forall { var, body } => write!(f, "forall {}. {}", var, body),
-            FreestType::Rec { var, body } => todo!(),
+            FreestType::Rec { var, body } => write!(f, "rec {}. {}", var, body),
             FreestType::Var(label) => write!(f, "{}", label),
         }
     }
@@ -245,6 +344,7 @@ impl Mult {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::sync::OnceLock;
     use std::{io::Write, process::Command};
 
@@ -300,13 +400,40 @@ mod tests {
         }
     }
 
-    fn freest_session_primitive() -> impl Strategy<Value = FreestType> {
-        prop_oneof![
+    fn freest_session_primitive(
+        bound_vars: Vec<String>,
+        rec_vars: Vec<String>,
+    ) -> BoxedStrategy<FreestType> {
+        let mut strategy = prop_oneof![
             Just(FreestType::Skip),
             session_op().prop_map(FreestType::End),
             (session_op(), freest_functional_type(Vec::new()))
-                .prop_map(|(dir, ty)| FreestType::Message { dir, ty })
+                .prop_map(|(dir, ty)| FreestType::Message { dir, ty }),
         ]
+        .boxed();
+        if !bound_vars.is_empty() {
+            strategy = prop_oneof![
+                strategy,
+                proptest::sample::select(bound_vars.clone()).prop_map(FreestType::Var),
+            ]
+            .boxed();
+        }
+        if !rec_vars.is_empty() {
+            strategy = prop_oneof![
+                strategy,
+                proptest::sample::select(rec_vars.clone()).prop_map(FreestType::Var),
+            ]
+            .boxed();
+        }
+        strategy
+            // Filter contractive types
+            .prop_filter("Not contractive", move |prop| {
+                let bound_vars_set = HashSet::from_iter(bound_vars.iter());
+                rec_vars
+                    .iter()
+                    .all(|rec_var| prop.is_contractive(rec_var, &bound_vars_set))
+            })
+            .boxed()
     }
 
     fn freest_functional_type(bound_vars: Vec<String>) -> impl Strategy<Value = Box<FreestType>> {
@@ -339,8 +466,12 @@ mod tests {
         })
     }
 
-    fn freest_session_type() -> impl Strategy<Value = Box<FreestType>> {
-        let leaf = freest_session_primitive().prop_map(Box::new);
+    fn freest_session_type(
+        forall_vars: Vec<String>,
+        rec_vars: Vec<String>,
+    ) -> impl Strategy<Value = Box<FreestType>> {
+        let leaf =
+            freest_session_primitive(forall_vars.clone(), rec_vars.clone()).prop_map(Box::new);
         leaf.prop_recursive(
             4,  // depth
             32, // desired_size
@@ -359,6 +490,21 @@ mod tests {
                 ]
             },
         )
+        // Add forall & rec quantifiers on top
+        .prop_map(move |ty| {
+            let mut ty = ty;
+            // Only quantify for the used variables
+            for var in ty.free_variables().into_iter() {
+                if forall_vars.contains(&var) {
+                    ty = Box::new(FreestType::Forall { var: var, body: ty });
+                } else {
+                    assert!(rec_vars.contains(&var));
+                    ty = Box::new(FreestType::Rec { var, body: ty });
+                }
+            }
+            ty
+        })
+        // TODO: Filter non-contractive types
     }
 
     static FREEST_AVAILABLE: OnceLock<bool> = OnceLock::new();
@@ -412,7 +558,10 @@ mod tests {
             .. ProptestConfig::default()
         })]
         #[test]
-        fn freest_session_type_display(ty in freest_session_type()) {
+        fn freest_session_type_display(
+            ty in (prop::collection::vec(ty_label(), 0..5), prop::collection::vec(ty_label(), 0..5))
+                .prop_flat_map(|(forall_vars, rec_vars)| freest_session_type(forall_vars, rec_vars))
+        ) {
             assert!(freest_available(), "'freest' executable not found on PATH");
 
             let mut test_file = Builder::new().suffix(".fst").disable_cleanup(true).tempfile()?;
