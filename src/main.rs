@@ -1,4 +1,5 @@
 pub mod args;
+pub mod equivalence;
 pub mod error_reporting;
 pub mod freest;
 pub mod fresh_var;

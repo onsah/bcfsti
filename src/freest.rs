@@ -7,11 +7,20 @@ use std::{
 
 use crate::syntax::{CFSession, CFType, Eff, Label, Mult, SessionOp};
 
-pub fn is_equivalent(_type1: &Type, _type2: &Type) -> bool {
-    todo!()
-}
-
 pub struct Type(FreestType);
+
+impl From<CFType> for Type {
+    fn from(value: CFType) -> Self {
+        Type(FreestType::Forall {
+            var: FreestType::RET_VAR_NAME.into(),
+            body: FreestType::Forall {
+                var: FreestType::ACQ_VAR_NAME.into(),
+                body: Box::new(value.into()),
+            }
+            .into(),
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 enum FreestType {
@@ -53,6 +62,9 @@ enum FreestType {
 }
 
 impl FreestType {
+    const RET_VAR_NAME: &str = "ret";
+    const ACQ_VAR_NAME: &str = "acq";
+
     fn free_variables(&self) -> HashSet<Label> {
         match self {
             FreestType::Unit | FreestType::Int | FreestType::Bool | FreestType::String => {
@@ -137,16 +149,6 @@ impl FreestType {
             FreestType::Var(label) => on != label && !polymorphic_vars.contains(on),
         }
     }
-
-    /// Set of bound polymorphic variables in this type.
-    fn polymorphic_variables(&self) -> HashSet<Label> {
-        todo!()
-    }
-
-    /// Vector of bound recursive variables in this type.
-    fn recursive_variables(&self) -> Vec<Label> {
-        todo!()
-    }
 }
 
 impl fmt::Display for FreestType {
@@ -208,22 +210,6 @@ impl fmt::Display for FreestType {
     }
 }
 
-impl From<CFType> for Type {
-    fn from(value: CFType) -> Self {
-        Type(FreestType::Forall {
-            var: RET_VAR_NAME.into(),
-            body: FreestType::Forall {
-                var: ACQ_VAR_NAME.into(),
-                body: Box::new(value.into()),
-            }
-            .into(),
-        })
-    }
-}
-
-static RET_VAR_NAME: &str = "ret";
-static ACQ_VAR_NAME: &str = "acq";
-
 impl From<CFSession> for FreestType {
     fn from(value: CFSession) -> FreestType {
         match value {
@@ -250,8 +236,8 @@ impl From<CFSession> for FreestType {
             },
             CFSession::Var(var) => FreestType::Var(var.val),
             CFSession::BorrowEnd(session_op) => match session_op {
-                SessionOp::Send => FreestType::Var(RET_VAR_NAME.into()),
-                SessionOp::Recv => FreestType::Var(ACQ_VAR_NAME.into()),
+                SessionOp::Send => FreestType::Var(FreestType::RET_VAR_NAME.into()),
+                SessionOp::Recv => FreestType::Var(FreestType::ACQ_VAR_NAME.into()),
             },
         }
     }
