@@ -551,3 +551,300 @@ pub enum CFType {
     String,
 }
 pub type SCFType = Spanned<CFType>;
+
+#[macro_export]
+macro_rules! session_type {
+    (@seq [$($items:expr),*] [$($curr:tt)*] ; $($rest:tt)*) => {
+        session_type!(@seq [$($items,)* session_type!(@atom $($curr)+)] [] $($rest)*)
+    };
+    (@seq [$($items:expr),*] [] mu $var:ident . $($body:tt)+) => {
+        session_type!(@fold [$($items,)* session_type!(@atom mu $var . $($body)+)])
+    };
+    (@seq [$($items:expr),*] [$($curr:tt)*] $tok:tt $($rest:tt)*) => {
+        session_type!(@seq [$($items),*] [$($curr)* $tok] $($rest)*)
+    };
+    (@seq [$($items:expr),*] [$($curr:tt)*]) => {
+        session_type!(@fold [$($items,)* session_type!(@atom $($curr)+)])
+    };
+
+    (@fold [$single:expr]) => {
+        $single
+    };
+    (@fold [$first:expr, $($rest:expr),+]) => {
+        session_type!(@semi $first, session_type!(@fold [$($rest),+]))
+    };
+
+    (@atom ! Int) => {
+        session_type!(@op $crate::syntax::SessionOp::Send, session_type!(@type Int))
+    };
+    (@atom ! Bool) => {
+        session_type!(@op $crate::syntax::SessionOp::Send, session_type!(@type Bool))
+    };
+    (@atom ! String) => {
+        session_type!(@op $crate::syntax::SessionOp::Send, session_type!(@type String))
+    };
+    (@atom ! Unit) => {
+        session_type!(@op $crate::syntax::SessionOp::Send, session_type!(@type Unit))
+    };
+    (@atom ! Chan ( $($sess:tt)+ )) => {
+        session_type!(@op $crate::syntax::SessionOp::Send, session_type!(@type Chan ( $($sess)+ )))
+    };
+    (@atom ! ($t:expr)) => {
+        session_type!(@op $crate::syntax::SessionOp::Send, session_type!(@type ($t)))
+    };
+    (@atom ! $t:path) => {
+        session_type!(@op $crate::syntax::SessionOp::Send, session_type!(@type $t))
+    };
+
+    (@atom ? Int) => {
+        session_type!(@op $crate::syntax::SessionOp::Recv, session_type!(@type Int))
+    };
+    (@atom ? Bool) => {
+        session_type!(@op $crate::syntax::SessionOp::Recv, session_type!(@type Bool))
+    };
+    (@atom ? String) => {
+        session_type!(@op $crate::syntax::SessionOp::Recv, session_type!(@type String))
+    };
+    (@atom ? Unit) => {
+        session_type!(@op $crate::syntax::SessionOp::Recv, session_type!(@type Unit))
+    };
+    (@atom ? Chan ( $($sess:tt)+ )) => {
+        session_type!(@op $crate::syntax::SessionOp::Recv, session_type!(@type Chan ( $($sess)+ )))
+    };
+    (@atom ? ($t:expr)) => {
+        session_type!(@op $crate::syntax::SessionOp::Recv, session_type!(@type ($t)))
+    };
+    (@atom ? $t:path) => {
+        session_type!(@op $crate::syntax::SessionOp::Recv, session_type!(@type $t))
+    };
+
+    (@atom + { $($branches:tt)* }) => {
+        session_type!(@choice $crate::syntax::SessionOp::Send, session_type!(@branches [] $($branches)*))
+    };
+    (@atom & { $($branches:tt)* }) => {
+        session_type!(@choice $crate::syntax::SessionOp::Recv, session_type!(@branches [] $($branches)*))
+    };
+    (@atom Close) => {
+        session_type!(@end $crate::syntax::SessionOp::Send)
+    };
+    (@atom Wait) => {
+        session_type!(@end $crate::syntax::SessionOp::Recv)
+    };
+    (@atom Ret) => {
+        session_type!(@borrow_end $crate::syntax::SessionOp::Send)
+    };
+    (@atom Acq) => {
+        session_type!(@borrow_end $crate::syntax::SessionOp::Recv)
+    };
+    (@atom Skip) => {
+        session_type!(@spanned $crate::syntax::CFSession::Skip)
+    };
+    (@atom mu $var:ident . $($body:tt)+) => {
+        session_type!(@mu $var, session_type!($($body)+))
+    };
+    (@atom $var:ident) => {
+        session_type!(@spanned $crate::syntax::CFSession::Var(session_type!(@sid $var)))
+    };
+    (@atom ( $($inner:tt)+ )) => {
+        session_type!($($inner)+)
+    };
+
+    (@branches [$($acc:expr),*]) => {
+        vec![$($acc),*]
+    };
+    (@branches [$($acc:expr),*] ,) => {
+        vec![$($acc),*]
+    };
+    (@branches [$($acc:expr),*] $label:ident : $($rest:tt)+) => {
+        session_type!(@branch_value [$($acc),*] $label [] $($rest)+)
+    };
+    (@branch_value [$($acc:expr),*] $label:ident [$($sess:tt)*] , $($rest:tt)*) => {
+        session_type!(@branches [$($acc,)* session_type!(@branch $label [$($sess)*]) ] $($rest)*)
+    };
+    (@branch_value [$($acc:expr),*] $label:ident [$($sess:tt)*]) => {
+        session_type!(@branches_done [$($acc,)* session_type!(@branch $label [$($sess)*]) ])
+    };
+    (@branch_value [$($acc:expr),*] $label:ident [$($sess:tt)*] $tok:tt $($rest:tt)*) => {
+        session_type!(@branch_value [$($acc),*] $label [$($sess)* $tok] $($rest)*)
+    };
+    (@branches_done [$($acc:expr),*]) => {
+        vec![$($acc),*]
+    };
+    (@branch $label:ident [$($sess:tt)+]) => {
+        (session_type!(@label $label), session_type!($($sess)+))
+    };
+    (@label $label:ident) => {
+        $crate::util::span::Spanned::new(stringify!($label).to_string(), 0..0)
+    };
+
+    (@type Int) => {
+        $crate::util::span::Spanned::new($crate::syntax::CFType::Int, 0..0)
+    };
+    (@type Bool) => {
+        $crate::util::span::Spanned::new($crate::syntax::CFType::Bool, 0..0)
+    };
+    (@type String) => {
+        $crate::util::span::Spanned::new($crate::syntax::CFType::String, 0..0)
+    };
+    (@type Unit) => {
+        $crate::util::span::Spanned::new($crate::syntax::CFType::Unit, 0..0)
+    };
+    (@type Chan ( $($sess:tt)+ )) => {
+        $crate::util::span::Spanned::new(
+            $crate::syntax::CFType::Chan(session_type!($($sess)+).val),
+            0..0,
+        )
+    };
+    (@type ($t:expr)) => {
+        $crate::util::span::Spanned::new($t, 0..0)
+    };
+    (@type $t:path) => {
+        $crate::util::span::Spanned::new($t, 0..0)
+    };
+
+    (@spanned $val:expr) => {
+        $crate::util::span::Spanned::new($val, 0..0)
+    };
+    (@semi $first:expr, $second:expr) => {
+        session_type!(@spanned $crate::syntax::CFSession::Semi {
+            first: Box::new($first),
+            second: Box::new($second),
+        })
+    };
+    (@op $op:expr, $ty:expr) => {
+        session_type!(@spanned $crate::syntax::CFSession::Op($op, Box::new($ty)))
+    };
+    (@choice $op:expr, $branches:expr) => {
+        session_type!(@spanned $crate::syntax::CFSession::Choice($op, $branches))
+    };
+    (@end $op:expr) => {
+        session_type!(@spanned $crate::syntax::CFSession::End($op))
+    };
+    (@borrow_end $op:expr) => {
+        session_type!(@spanned $crate::syntax::CFSession::BorrowEnd($op))
+    };
+    (@mu $var:ident, $body:expr) => {
+        session_type!(@spanned $crate::syntax::CFSession::Mu(
+            session_type!(@sid $var),
+            Box::new($body),
+        ))
+    };
+    (@sid $var:ident) => {
+        $crate::util::span::Spanned::new(stringify!($var).to_string(), 0..0)
+    };
+
+    ($($tokens:tt)+) => {
+        session_type!(@seq [] [] $($tokens)+)
+    };
+}
+
+#[cfg(test)]
+mod session_type_tests {
+    use super::{CFSession, CFType, SCFSession, SessionOp};
+    use crate::util::span::Spanned;
+
+    fn spanned_session(session: CFSession) -> SCFSession {
+        Spanned::new(session, 0..0)
+    }
+
+    fn session_op(session_op: SessionOp, typ: CFType) -> CFSession {
+        CFSession::Op(session_op, Box::new(Spanned::new(typ, 0..0)))
+    }
+
+    #[test]
+    fn session_type_send_recv_semi() {
+        let got = session_type!(!Int; ?Bool; Close);
+        let expected = spanned_session(CFSession::Semi {
+            first: Box::new(spanned_session(CFSession::Op(
+                SessionOp::Send,
+                Box::new(Spanned::new(CFType::Int, 0..0)),
+            ))),
+            second: Box::new(spanned_session(CFSession::Semi {
+                first: Box::new(spanned_session(CFSession::Op(
+                    SessionOp::Recv,
+                    Box::new(Spanned::new(CFType::Bool, 0..0)),
+                ))),
+                second: Box::new(spanned_session(CFSession::End(SessionOp::Send))),
+            })),
+        });
+
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn session_type_semi_parentheses() {
+        let got = session_type!(!Int; (?Bool; !String));
+        let expected = spanned_session(CFSession::Semi {
+            first: Box::new(spanned_session(session_op(SessionOp::Send, CFType::Int))),
+            second: Box::new(spanned_session(CFSession::Semi {
+                first: Box::new(spanned_session(session_op(SessionOp::Recv, CFType::Bool))),
+                second: Box::new(spanned_session(session_op(SessionOp::Send, CFType::String))),
+            })),
+        });
+
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn session_type_choice_offer_select() {
+        let got = session_type!(+{ left: !Int, right: ?String });
+        let expected = spanned_session(CFSession::Choice(
+            SessionOp::Send,
+            vec![
+                (
+                    Spanned::new("left".to_string(), 0..0),
+                    spanned_session(CFSession::Op(
+                        SessionOp::Send,
+                        Box::new(Spanned::new(CFType::Int, 0..0)),
+                    )),
+                ),
+                (
+                    Spanned::new("right".to_string(), 0..0),
+                    spanned_session(CFSession::Op(
+                        SessionOp::Recv,
+                        Box::new(Spanned::new(CFType::String, 0..0)),
+                    )),
+                ),
+            ],
+        ));
+
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn session_type_recursive_and_vars() {
+        let got = session_type!(mu X. ?Int; X);
+        let expected = spanned_session(CFSession::Mu(
+            Spanned::new("X".to_string(), 0..0),
+            Box::new(spanned_session(CFSession::Semi {
+                first: Box::new(spanned_session(CFSession::Op(
+                    SessionOp::Recv,
+                    Box::new(Spanned::new(CFType::Int, 0..0)),
+                ))),
+                second: Box::new(spanned_session(CFSession::Var(Spanned::new(
+                    "X".to_string(),
+                    0..0,
+                )))),
+            })),
+        ));
+
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn session_type_borrow_and_skip() {
+        let got = session_type!(Ret; Skip; Acq; Wait);
+        let expected = spanned_session(CFSession::Semi {
+            first: Box::new(spanned_session(CFSession::BorrowEnd(SessionOp::Send))),
+            second: Box::new(spanned_session(CFSession::Semi {
+                first: Box::new(spanned_session(CFSession::Skip)),
+                second: Box::new(spanned_session(CFSession::Semi {
+                    first: Box::new(spanned_session(CFSession::BorrowEnd(SessionOp::Recv))),
+                    second: Box::new(spanned_session(CFSession::End(SessionOp::Recv))),
+                })),
+            })),
+        });
+
+        assert_eq!(got, expected);
+    }
+}
