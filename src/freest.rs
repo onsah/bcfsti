@@ -9,8 +9,8 @@ use crate::syntax::{CFSession, CFType, Eff, Label, Mult, SessionOp};
 
 pub struct Type(FreestType);
 
-impl From<CFType> for Type {
-    fn from(value: CFType) -> Self {
+impl From<&CFType> for Type {
+    fn from(value: &CFType) -> Self {
         Type(FreestType::Forall {
             var: FreestType::RET_VAR_NAME.into(),
             body: FreestType::Forall {
@@ -19,6 +19,25 @@ impl From<CFType> for Type {
             }
             .into(),
         })
+    }
+}
+
+impl From<&CFSession> for Type {
+    fn from(value: &CFSession) -> Self {
+        Type(FreestType::Forall {
+            var: FreestType::RET_VAR_NAME.into(),
+            body: FreestType::Forall {
+                var: FreestType::ACQ_VAR_NAME.into(),
+                body: Box::new(value.into()),
+            }
+            .into(),
+        })
+    }
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
@@ -123,14 +142,13 @@ impl FreestType {
             FreestType::End(_) => false,
             FreestType::Choice { .. } => false,
             FreestType::Message { .. } => false,
-            FreestType::Var(_) => true,
+            FreestType::Var(_) => false,
             FreestType::Semi { first, second } => first.is_terminated() && second.is_terminated(),
             FreestType::Forall { body, .. } => body.is_terminated(),
             FreestType::Rec { body, .. } => body.is_terminated(),
         }
     }
 
-    // TODO: Implement
     fn is_contractive(&self, on: &Label, polymorphic_vars: &HashSet<&Label>) -> bool {
         match self {
             FreestType::Unit | FreestType::Int | FreestType::Bool | FreestType::String => true,
@@ -146,7 +164,7 @@ impl FreestType {
             FreestType::Choice { .. } => true,
             FreestType::Forall { body, .. } => body.is_contractive(on, polymorphic_vars),
             FreestType::Rec { body, .. } => body.is_contractive(on, polymorphic_vars),
-            FreestType::Var(label) => on != label && !polymorphic_vars.contains(on),
+            FreestType::Var(label) => on != label && !polymorphic_vars.contains(label),
         }
     }
 }
@@ -210,31 +228,31 @@ impl fmt::Display for FreestType {
     }
 }
 
-impl From<CFSession> for FreestType {
-    fn from(value: CFSession) -> FreestType {
+impl From<&CFSession> for FreestType {
+    fn from(value: &CFSession) -> FreestType {
         match value {
             CFSession::Skip => FreestType::Skip,
             CFSession::Semi { first, second } => FreestType::Semi {
-                first: Box::new(first.val.into()),
-                second: Box::new(second.val.into()),
+                first: Box::new((&first.val).into()),
+                second: Box::new((&second.val).into()),
             },
-            CFSession::End(session_op) => FreestType::End(session_op),
+            CFSession::End(session_op) => FreestType::End(*session_op),
             CFSession::Op(session_op, ty) => FreestType::Message {
-                dir: session_op,
-                ty: Box::new(ty.val.into()),
+                dir: *session_op,
+                ty: Box::new((&ty.val).into()),
             },
             CFSession::Choice(session_op, items) => FreestType::Choice {
-                dir: session_op,
+                dir: *session_op,
                 branches: items
                     .into_iter()
-                    .map(|(label, ty)| (label.val, Box::new(ty.val.into())))
+                    .map(|(label, ty)| (label.val.clone(), Box::new((&ty.val).into())))
                     .collect(),
             },
             CFSession::Mu(var, body) => FreestType::Rec {
-                var: var.val,
-                body: Box::new(body.val.into()),
+                var: var.val.clone(),
+                body: Box::new((&body.val).into()),
             },
-            CFSession::Var(var) => FreestType::Var(var.val),
+            CFSession::Var(var) => FreestType::Var(var.val.clone()),
             CFSession::BorrowEnd(session_op) => match session_op {
                 SessionOp::Send => FreestType::Var(FreestType::RET_VAR_NAME.into()),
                 SessionOp::Recv => FreestType::Var(FreestType::ACQ_VAR_NAME.into()),
@@ -243,8 +261,8 @@ impl From<CFSession> for FreestType {
     }
 }
 
-impl From<CFType> for FreestType {
-    fn from(value: CFType) -> FreestType {
+impl From<&CFType> for FreestType {
+    fn from(value: &CFType) -> FreestType {
         match value {
             CFType::Chan(cfsession) => cfsession.into(),
             CFType::Variant(items) => FreestType::Tuple(vec![
@@ -252,7 +270,7 @@ impl From<CFType> for FreestType {
                     dir: SessionOp::Recv,
                     branches: items
                         .into_iter()
-                        .map(|(label, ty)| (label.val, Box::new(ty.val.into())))
+                        .map(|(label, ty)| (label.val.clone(), Box::new((&ty.val).into())))
                         .collect(),
                 }),
                 Box::new(FreestType::Choice {
@@ -260,10 +278,10 @@ impl From<CFType> for FreestType {
                     branches: vec![("variant".into(), FreestType::Skip.into())],
                 }),
             ]),
-            CFType::Unit => todo!(),
-            CFType::Int => todo!(),
-            CFType::Bool => todo!(),
-            CFType::String => todo!(),
+            CFType::Unit => FreestType::Unit,
+            CFType::Int => FreestType::Int,
+            CFType::Bool => FreestType::Bool,
+            CFType::String => FreestType::String,
             CFType::Arr {
                 mult,
                 eff,
@@ -277,8 +295,8 @@ impl From<CFType> for FreestType {
 
                 FreestType::Tuple(vec![
                     FreestType::Arrow {
-                        param: Box::new(param.val.into()),
-                        ret: Box::new(ret.val.into()),
+                        param: Box::new((&param.val).into()),
+                        ret: Box::new((&ret.val).into()),
                     }
                     .into(),
                     FreestType::Choice {
@@ -296,8 +314,8 @@ impl From<CFType> for FreestType {
                 first,
                 second,
             } => FreestType::Tuple(vec![
-                Box::new(first.val.into()),
-                Box::new(second.val.into()),
+                Box::new((&first.val).into()),
+                Box::new((&second.val).into()),
                 FreestType::Choice {
                     dir: SessionOp::Recv,
                     branches: vec![(mult.to_label().into(), FreestType::Skip.into())],
@@ -349,6 +367,8 @@ mod tests {
         prop::string::string_regex("[a-zA-Z]+").unwrap()
     }
 
+    const KEYWORDS: [&str; 1] = ["if"];
+
     fn ty_label() -> impl Strategy<Value = Label> {
         (
             prop::char::range('a', 'z'),
@@ -365,6 +385,7 @@ mod tests {
                 }
                 str
             })
+            .prop_filter("keyword", |label| !KEYWORDS.contains(&label.as_str()))
     }
 
     fn freest_functional_primitive(bound_vars: Vec<String>) -> BoxedStrategy<Box<FreestType>> {
@@ -411,15 +432,7 @@ mod tests {
             ]
             .boxed();
         }
-        strategy
-            // Filter contractive types
-            .prop_filter("Not contractive", move |prop| {
-                let bound_vars_set = HashSet::from_iter(bound_vars.iter());
-                rec_vars
-                    .iter()
-                    .all(|rec_var| prop.is_contractive(rec_var, &bound_vars_set))
-            })
-            .boxed()
+        strategy.boxed()
     }
 
     fn freest_functional_type(bound_vars: Vec<String>) -> impl Strategy<Value = Box<FreestType>> {
@@ -458,6 +471,10 @@ mod tests {
     ) -> impl Strategy<Value = Box<FreestType>> {
         let leaf =
             freest_session_primitive(forall_vars.clone(), rec_vars.clone()).prop_map(Box::new);
+
+        let forall_vars_clone = forall_vars.clone();
+        let rec_vars_clone = rec_vars.clone();
+
         leaf.prop_recursive(
             4,  // depth
             32, // desired_size
@@ -480,15 +497,24 @@ mod tests {
         .prop_map(move |ty| {
             let mut ty = ty;
             // Only quantify for the used variables
-            for var in ty.free_variables().into_iter() {
-                if forall_vars.contains(&var) {
-                    ty = Box::new(FreestType::Forall { var: var, body: ty });
-                } else {
-                    assert!(rec_vars.contains(&var));
-                    ty = Box::new(FreestType::Rec { var, body: ty });
-                }
+            let (free_poly_vars, free_rec_vars): (Vec<String>, Vec<String>) = ty
+                .free_variables()
+                .into_iter()
+                .partition(|var| forall_vars.contains(var));
+            for var in free_rec_vars {
+                ty = Box::new(FreestType::Rec { var, body: ty });
+            }
+            for var in free_poly_vars {
+                ty = Box::new(FreestType::Forall { var: var, body: ty });
             }
             ty
+        })
+        // Filter contractive types
+        .prop_filter("Not contractive", move |prop| {
+            let bound_vars_set = HashSet::from_iter(forall_vars_clone.iter());
+            rec_vars_clone
+                .iter()
+                .all(|rec_var| prop.is_contractive(rec_var, &bound_vars_set))
         })
         // TODO: Filter non-contractive types
     }
