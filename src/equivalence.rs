@@ -49,7 +49,8 @@ fn check_equivalence(type1: &CFSession, type2: &CFSession) -> TypecheckResult {
 mod tests {
     use crate::{
         equivalence::check_equivalence,
-        syntax::{CFSession, CFType, SCFSession, SCFType, SessionOp},
+        session_type,
+        syntax::{CFSession, CFType, SCFSession, SCFType, SLabel, SessionOp},
         util::span::Spanned,
     };
 
@@ -57,26 +58,30 @@ mod tests {
         Spanned::new(cf_type, 0..0)
     }
 
-    fn spanned_session(cf_session: CFSession) -> Box<SCFSession> {
-        Box::new(Spanned::new(cf_session, 0..0))
+    fn spanned_session(cf_session: CFSession) -> SCFSession {
+        Spanned::new(cf_session, 0..0)
     }
 
     fn session_op(session_op: SessionOp, typ: CFType) -> CFSession {
         CFSession::Op(session_op, Box::new(spanned_type(typ)))
     }
 
+    fn label(label: &str) -> SLabel {
+        Spanned::new(label.to_string(), 0..0)
+    }
+
     #[test]
     fn equivalence_skip_identity() {
         // !Int; Skip
         let type1 = CFSession::Semi {
-            first: spanned_session(session_op(SessionOp::Send, CFType::Int)),
-            second: spanned_session(CFSession::Skip),
+            first: Box::new(spanned_session(session_op(SessionOp::Send, CFType::Int))),
+            second: Box::new(spanned_session(CFSession::Skip)),
         };
 
         // Skip; !Int
         let type2 = CFSession::Semi {
-            first: spanned_session(CFSession::Skip),
-            second: spanned_session(session_op(SessionOp::Send, CFType::Int)),
+            first: Box::new(spanned_session(CFSession::Skip)),
+            second: Box::new(spanned_session(session_op(SessionOp::Send, CFType::Int))),
         };
 
         // !Int
@@ -85,5 +90,38 @@ mod tests {
         assert!(check_equivalence(&type1, &type2).is_success());
         assert!(check_equivalence(&type2, &type3).is_success());
         assert!(check_equivalence(&type1, &type3).is_success());
+    }
+
+    #[test]
+    fn equivalence_semi_associative() {
+        // !Int; (!Bool; !String)
+        let type1 = session_type! { !Int; (!Bool; !String) };
+
+        // (!Int; !Bool); !String
+        let type2 = session_type! { (!Int; !Bool); !String };
+
+        assert!(check_equivalence(&type1, &type2).is_success());
+    }
+
+    #[test]
+    fn equivalence_branch_semi() {
+        // &{ l1: !Int, l2: !Bool }; ?Int
+        let type1 = session_type! { &{ l1: !Int, l2: !Bool }; ?Int };
+
+        // &{ l1: !Int; ?Int, l2: !Bool; ?Int }
+        let type2 = session_type! { &{ l1: !Int; ?Int, l2: !Bool; ?Int } };
+
+        assert!(check_equivalence(&type1, &type2).is_success());
+    }
+
+    #[test]
+    fn equivalence_rec_non_occurence() {
+        // rec x. !Int; ?Int
+        let type1 = session_type! { mu x. !Int; ?Int };
+
+        // !Int; ?Int
+        let type2 = session_type! { !Int; ?Int };
+
+        assert!(check_equivalence(&type1, &type2).is_success());
     }
 }
