@@ -552,6 +552,7 @@ pub enum CFType {
 }
 pub type SCFType = Spanned<CFType>;
 
+/// let s = session_type! { ... };
 #[macro_export]
 macro_rules! session_type {
     (@seq [$($items:expr),*] [$($curr:tt)*] ; $($rest:tt)*) => {
