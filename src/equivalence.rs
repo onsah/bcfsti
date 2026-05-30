@@ -1,4 +1,7 @@
-use crate::{freest, syntax::CFSession};
+use crate::{
+    freest::FreestType,
+    syntax::{CFSession, CFType, Eff, Mult, SessionOp},
+};
 
 use std::{io::Write, process::Command};
 
@@ -8,17 +11,13 @@ enum TypecheckResult {
 }
 
 fn check_equivalence(type1: &CFSession, type2: &CFSession) -> TypecheckResult {
-    let mut test_file = tempfile::Builder::new()
-        .suffix(".fst")
-        .disable_cleanup(true)
-        .tempfile()
-        .unwrap();
+    let mut test_file = tempfile::Builder::new().suffix(".fst").tempfile().unwrap();
 
     writeln!(test_file, "data Ret = Ret").unwrap();
-
-    let freest_type1 = freest::Type::from(type1);
+    // Convert CFSession -> FreestType and then wrap in freest::Type for display
+    let freest_type1 = FreestType::from(type1);
     writeln!(test_file, "type T1 = {}", freest_type1).unwrap();
-    let freest_type2 = freest::Type::from(type2);
+    let freest_type2 = FreestType::from(type2);
     writeln!(test_file, "type T2 = {}", freest_type2).unwrap();
 
     writeln!(test_file, "left : T1 -> T2").unwrap();
@@ -38,6 +37,132 @@ fn check_equivalence(type1: &CFSession, type2: &CFSession) -> TypecheckResult {
     } else {
         let reason = String::from_utf8_lossy(&freest_cmd.stderr).to_string();
         TypecheckResult::Error { reason }
+    }
+}
+
+impl FreestType {
+    /// Ret -> !Ret, Acq -> ?Ret
+    const RET: &str = "Ret";
+}
+
+// Implement conversions from the syntax types to freest internal representation here so
+// the equivalence module owns the translation logic used for tests.
+impl From<&CFSession> for FreestType {
+    /// Assumes type Ret is defined as: `data Ret = Ret`
+    fn from(value: &CFSession) -> FreestType {
+        match value {
+            CFSession::Skip => FreestType::Skip,
+            CFSession::Semi { first, second } => FreestType::Semi {
+                first: Box::new((&first.val).into()),
+                second: Box::new((&second.val).into()),
+            },
+            CFSession::End(session_op) => FreestType::End(*session_op),
+            CFSession::Op(session_op, ty) => FreestType::Message {
+                dir: *session_op,
+                ty: Box::new((&ty.val).into()),
+            },
+            CFSession::Choice(session_op, items) => FreestType::Choice {
+                dir: *session_op,
+                branches: items
+                    .into_iter()
+                    .map(|(label, ty)| (label.val.clone(), Box::new((&ty.val).into())))
+                    .collect(),
+            },
+            CFSession::Mu(var, body) => FreestType::Rec {
+                var: var.val.clone(),
+                body: Box::new((&body.val).into()),
+            },
+            CFSession::Var(var) => FreestType::Var(var.val.clone()),
+            CFSession::BorrowEnd(session_op) => FreestType::Message {
+                dir: *session_op,
+                ty: Box::new(FreestType::Var(FreestType::RET.into())),
+            },
+        }
+    }
+}
+
+impl From<&CFType> for FreestType {
+    fn from(value: &CFType) -> FreestType {
+        match value {
+            CFType::Chan(cfsession) => cfsession.into(),
+            CFType::Variant(items) => FreestType::Tuple(vec![
+                Box::new(FreestType::Choice {
+                    dir: SessionOp::Recv,
+                    branches: items
+                        .into_iter()
+                        .map(|(label, ty)| (label.val.clone(), Box::new((&ty.val).into())))
+                        .collect(),
+                }),
+                Box::new(FreestType::Choice {
+                    dir: SessionOp::Recv,
+                    branches: vec![("variant".into(), FreestType::Skip.into())],
+                }),
+            ]),
+            CFType::Unit => FreestType::Unit,
+            CFType::Int => FreestType::Int,
+            CFType::Bool => FreestType::Bool,
+            CFType::String => FreestType::String,
+            CFType::Arr {
+                mult,
+                eff,
+                param,
+                ret,
+            } => {
+                let mut labels = vec![mult.to_label()];
+                if let Some(label) = eff.to_label() {
+                    labels.push(label);
+                }
+
+                FreestType::Tuple(vec![
+                    FreestType::Arrow {
+                        param: Box::new((&param.val).into()),
+                        ret: Box::new((&ret.val).into()),
+                    }
+                    .into(),
+                    FreestType::Choice {
+                        dir: SessionOp::Recv,
+                        branches: labels
+                            .into_iter()
+                            .map(|label| (label.into(), Box::new(FreestType::Skip)))
+                            .collect(),
+                    }
+                    .into(),
+                ])
+            }
+            CFType::Prod {
+                mult,
+                first,
+                second,
+            } => FreestType::Tuple(vec![
+                Box::new((&first.val).into()),
+                Box::new((&second.val).into()),
+                FreestType::Choice {
+                    dir: SessionOp::Recv,
+                    branches: vec![(mult.to_label().into(), FreestType::Skip.into())],
+                }
+                .into(),
+            ]),
+        }
+    }
+}
+
+impl Eff {
+    fn to_label(self) -> Option<&'static str> {
+        match self {
+            Eff::Yes => Some("static"),
+            Eff::No => None,
+        }
+    }
+}
+
+impl Mult {
+    fn to_label(self) -> &'static str {
+        match self {
+            Mult::Unr => "unrestricted",
+            Mult::Lin => "linear",
+            Mult::OrdR => "right",
+            Mult::OrdL => "left",
+        }
     }
 }
 

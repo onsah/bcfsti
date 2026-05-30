@@ -2,33 +2,12 @@ use std::{
     collections::HashSet,
     fmt::{self},
     hash::Hash,
-    vec,
 };
 
-use crate::syntax::{CFSession, CFType, Eff, Label, Mult, SessionOp};
-
-pub struct Type(FreestType);
-
-impl From<&CFType> for Type {
-    fn from(value: &CFType) -> Self {
-        Type(value.into())
-    }
-}
-
-impl From<&CFSession> for Type {
-    fn from(value: &CFSession) -> Self {
-        Type(value.into())
-    }
-}
-
-impl fmt::Display for Type {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
+use crate::syntax::{Label, SessionOp};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-enum FreestType {
+pub(crate) enum FreestType {
     // Simple types
     Unit,
     Int,
@@ -67,9 +46,6 @@ enum FreestType {
 }
 
 impl FreestType {
-    /// Ret -> !Ret, Acq -> ?Ret
-    const RET: &str = "Ret";
-
     fn free_variables(&self) -> HashSet<Label> {
         match self {
             FreestType::Unit | FreestType::Int | FreestType::Bool | FreestType::String => {
@@ -214,124 +190,11 @@ impl fmt::Display for FreestType {
     }
 }
 
-impl From<&CFSession> for FreestType {
-    /// Assumes type Ret is defined as: `data Ret = Ret`
-    fn from(value: &CFSession) -> FreestType {
-        match value {
-            CFSession::Skip => FreestType::Skip,
-            CFSession::Semi { first, second } => FreestType::Semi {
-                first: Box::new((&first.val).into()),
-                second: Box::new((&second.val).into()),
-            },
-            CFSession::End(session_op) => FreestType::End(*session_op),
-            CFSession::Op(session_op, ty) => FreestType::Message {
-                dir: *session_op,
-                ty: Box::new((&ty.val).into()),
-            },
-            CFSession::Choice(session_op, items) => FreestType::Choice {
-                dir: *session_op,
-                branches: items
-                    .into_iter()
-                    .map(|(label, ty)| (label.val.clone(), Box::new((&ty.val).into())))
-                    .collect(),
-            },
-            CFSession::Mu(var, body) => FreestType::Rec {
-                var: var.val.clone(),
-                body: Box::new((&body.val).into()),
-            },
-            CFSession::Var(var) => FreestType::Var(var.val.clone()),
-            CFSession::BorrowEnd(session_op) => FreestType::Message {
-                dir: *session_op,
-                ty: Box::new(FreestType::Var(FreestType::RET.into())),
-            },
-        }
-    }
-}
+// Conversion from CFSession is implemented in the `equivalence` module.
 
-impl From<&CFType> for FreestType {
-    fn from(value: &CFType) -> FreestType {
-        match value {
-            CFType::Chan(cfsession) => cfsession.into(),
-            CFType::Variant(items) => FreestType::Tuple(vec![
-                Box::new(FreestType::Choice {
-                    dir: SessionOp::Recv,
-                    branches: items
-                        .into_iter()
-                        .map(|(label, ty)| (label.val.clone(), Box::new((&ty.val).into())))
-                        .collect(),
-                }),
-                Box::new(FreestType::Choice {
-                    dir: SessionOp::Recv,
-                    branches: vec![("variant".into(), FreestType::Skip.into())],
-                }),
-            ]),
-            CFType::Unit => FreestType::Unit,
-            CFType::Int => FreestType::Int,
-            CFType::Bool => FreestType::Bool,
-            CFType::String => FreestType::String,
-            CFType::Arr {
-                mult,
-                eff,
-                param,
-                ret,
-            } => {
-                let mut labels = vec![mult.to_label()];
-                if let Some(label) = eff.to_label() {
-                    labels.push(label);
-                }
+// Conversion from CFType is implemented in the `equivalence` module.
 
-                FreestType::Tuple(vec![
-                    FreestType::Arrow {
-                        param: Box::new((&param.val).into()),
-                        ret: Box::new((&ret.val).into()),
-                    }
-                    .into(),
-                    FreestType::Choice {
-                        dir: SessionOp::Recv,
-                        branches: labels
-                            .into_iter()
-                            .map(|label| (label.into(), Box::new(FreestType::Skip)))
-                            .collect(),
-                    }
-                    .into(),
-                ])
-            }
-            CFType::Prod {
-                mult,
-                first,
-                second,
-            } => FreestType::Tuple(vec![
-                Box::new((&first.val).into()),
-                Box::new((&second.val).into()),
-                FreestType::Choice {
-                    dir: SessionOp::Recv,
-                    branches: vec![(mult.to_label().into(), FreestType::Skip.into())],
-                }
-                .into(),
-            ]),
-        }
-    }
-}
-
-impl Eff {
-    fn to_label(self) -> Option<&'static str> {
-        match self {
-            Eff::Yes => Some("static"),
-            Eff::No => None,
-        }
-    }
-}
-
-impl Mult {
-    fn to_label(self) -> &'static str {
-        match self {
-            Mult::Unr => "unrestricted",
-            Mult::Lin => "linear",
-            Mult::OrdR => "right",
-            Mult::OrdL => "left",
-        }
-    }
-}
+// Conversion helpers for Eff/Mult are implemented in the `equivalence` module.
 
 #[cfg(test)]
 mod tests {
