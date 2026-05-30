@@ -11,27 +11,13 @@ pub struct Type(FreestType);
 
 impl From<&CFType> for Type {
     fn from(value: &CFType) -> Self {
-        Type(FreestType::Forall {
-            var: FreestType::RET_VAR_NAME.into(),
-            body: FreestType::Forall {
-                var: FreestType::ACQ_VAR_NAME.into(),
-                body: Box::new(value.into()),
-            }
-            .into(),
-        })
+        Type(value.into())
     }
 }
 
 impl From<&CFSession> for Type {
     fn from(value: &CFSession) -> Self {
-        Type(FreestType::Forall {
-            var: FreestType::RET_VAR_NAME.into(),
-            body: FreestType::Forall {
-                var: FreestType::ACQ_VAR_NAME.into(),
-                body: Box::new(value.into()),
-            }
-            .into(),
-        })
+        Type(value.into())
     }
 }
 
@@ -81,8 +67,8 @@ enum FreestType {
 }
 
 impl FreestType {
-    const RET_VAR_NAME: &str = "ret";
-    const ACQ_VAR_NAME: &str = "acq";
+    /// Ret -> !Ret, Acq -> ?Ret
+    const RET: &str = "Ret";
 
     fn free_variables(&self) -> HashSet<Label> {
         match self {
@@ -229,6 +215,7 @@ impl fmt::Display for FreestType {
 }
 
 impl From<&CFSession> for FreestType {
+    /// Assumes type Ret is defined as: `data Ret = Ret`
     fn from(value: &CFSession) -> FreestType {
         match value {
             CFSession::Skip => FreestType::Skip,
@@ -253,9 +240,9 @@ impl From<&CFSession> for FreestType {
                 body: Box::new((&body.val).into()),
             },
             CFSession::Var(var) => FreestType::Var(var.val.clone()),
-            CFSession::BorrowEnd(session_op) => match session_op {
-                SessionOp::Send => FreestType::Var(FreestType::RET_VAR_NAME.into()),
-                SessionOp::Recv => FreestType::Var(FreestType::ACQ_VAR_NAME.into()),
+            CFSession::BorrowEnd(session_op) => FreestType::Message {
+                dir: *session_op,
+                ty: Box::new(FreestType::Var(FreestType::RET.into())),
             },
         }
     }
@@ -367,7 +354,7 @@ mod tests {
         prop::string::string_regex("[a-zA-Z]+").unwrap()
     }
 
-    const KEYWORDS: [&str; 1] = ["if"];
+    const KEYWORDS: [&str; 2] = ["if", "of"];
 
     fn ty_label() -> impl Strategy<Value = Label> {
         (
