@@ -1,5 +1,4 @@
 use std::{
-    collections::HashSet,
     fmt::{self},
     hash::Hash,
 };
@@ -34,6 +33,7 @@ pub(crate) enum FreestType {
         branches: Vec<(Label, Box<FreestType>)>,
     },
     // Polymorphism and recursive types
+    #[allow(dead_code)]
     Forall {
         var: Label,
         body: Box<FreestType>,
@@ -43,92 +43,6 @@ pub(crate) enum FreestType {
         body: Box<FreestType>,
     },
     Var(Label),
-}
-
-impl FreestType {
-    fn free_variables(&self) -> HashSet<Label> {
-        match self {
-            FreestType::Unit | FreestType::Int | FreestType::Bool | FreestType::String => {
-                HashSet::default()
-            }
-            FreestType::Tuple(fields) => {
-                let mut result = HashSet::new();
-                for ty in fields {
-                    result.extend(ty.free_variables());
-                }
-                result
-            }
-            FreestType::Arrow { param, ret } => {
-                let mut result = param.free_variables();
-                result.extend(ret.free_variables());
-                result
-            }
-            FreestType::Skip => HashSet::default(),
-            FreestType::End(_) => HashSet::default(),
-            FreestType::Semi { first, second } => {
-                let mut result = first.free_variables();
-                result.extend(second.free_variables());
-                result
-            }
-            FreestType::Message { ty, .. } => ty.free_variables(),
-            FreestType::Choice { branches, .. } => {
-                let mut result = HashSet::new();
-                for (_, ty) in branches {
-                    result.extend(ty.free_variables());
-                }
-                result
-            }
-            FreestType::Forall { var, body } => {
-                let mut free_in_body = body.free_variables();
-                free_in_body.remove(var);
-                free_in_body
-            }
-            FreestType::Rec { var, body } => {
-                let mut free_in_body = body.free_variables();
-                free_in_body.remove(var);
-                free_in_body
-            }
-            FreestType::Var(label) => HashSet::from([label.clone()]),
-        }
-    }
-
-    fn is_terminated(&self) -> bool {
-        match self {
-            FreestType::Unit
-            | FreestType::Int
-            | FreestType::Bool
-            | FreestType::String
-            | FreestType::Skip => true,
-            FreestType::Tuple(_) => true,
-            FreestType::Arrow { .. } => true,
-            FreestType::End(_) => false,
-            FreestType::Choice { .. } => false,
-            FreestType::Message { .. } => false,
-            FreestType::Var(_) => false,
-            FreestType::Semi { first, second } => first.is_terminated() && second.is_terminated(),
-            FreestType::Forall { body, .. } => body.is_terminated(),
-            FreestType::Rec { body, .. } => body.is_terminated(),
-        }
-    }
-
-    fn is_contractive(&self, on: &Label, polymorphic_vars: &HashSet<&Label>) -> bool {
-        match self {
-            FreestType::Unit | FreestType::Int | FreestType::Bool | FreestType::String => true,
-            FreestType::Tuple(_) => true,
-            FreestType::Arrow { .. } => true,
-            FreestType::Skip => true,
-            FreestType::End(_) => true,
-            FreestType::Semi { first, second } => match first.is_terminated() {
-                true => second.is_contractive(on, polymorphic_vars),
-                false => first.is_contractive(on, polymorphic_vars),
-            },
-            FreestType::Message { .. } => true,
-            FreestType::Choice { .. } => true,
-            FreestType::Forall { body, .. } => body.is_contractive(on, polymorphic_vars),
-            FreestType::Rec { body, .. } => body.is_contractive(on, polymorphic_vars),
-            FreestType::Var(label) => on != label && !polymorphic_vars.contains(label),
-        }
-    }
 }
 
 impl fmt::Display for FreestType {
@@ -208,6 +122,94 @@ mod tests {
 
     use crate::freest::FreestType;
     use crate::syntax::{Label, SessionOp};
+
+    impl FreestType {
+        fn free_variables(&self) -> HashSet<Label> {
+            match self {
+                FreestType::Unit | FreestType::Int | FreestType::Bool | FreestType::String => {
+                    HashSet::default()
+                }
+                FreestType::Tuple(fields) => {
+                    let mut result = HashSet::new();
+                    for ty in fields {
+                        result.extend(ty.free_variables());
+                    }
+                    result
+                }
+                FreestType::Arrow { param, ret } => {
+                    let mut result = param.free_variables();
+                    result.extend(ret.free_variables());
+                    result
+                }
+                FreestType::Skip => HashSet::default(),
+                FreestType::End(_) => HashSet::default(),
+                FreestType::Semi { first, second } => {
+                    let mut result = first.free_variables();
+                    result.extend(second.free_variables());
+                    result
+                }
+                FreestType::Message { ty, .. } => ty.free_variables(),
+                FreestType::Choice { branches, .. } => {
+                    let mut result = HashSet::new();
+                    for (_, ty) in branches {
+                        result.extend(ty.free_variables());
+                    }
+                    result
+                }
+                FreestType::Forall { var, body } => {
+                    let mut free_in_body = body.free_variables();
+                    free_in_body.remove(var);
+                    free_in_body
+                }
+                FreestType::Rec { var, body } => {
+                    let mut free_in_body = body.free_variables();
+                    free_in_body.remove(var);
+                    free_in_body
+                }
+                FreestType::Var(label) => HashSet::from([label.clone()]),
+            }
+        }
+
+        fn is_terminated(&self) -> bool {
+            match self {
+                FreestType::Unit
+                | FreestType::Int
+                | FreestType::Bool
+                | FreestType::String
+                | FreestType::Skip => true,
+                FreestType::Tuple(_) => true,
+                FreestType::Arrow { .. } => true,
+                FreestType::End(_) => false,
+                FreestType::Choice { .. } => false,
+                FreestType::Message { .. } => false,
+                FreestType::Var(_) => false,
+                FreestType::Semi { first, second } => {
+                    first.is_terminated() && second.is_terminated()
+                }
+                FreestType::Forall { body, .. } => body.is_terminated(),
+                FreestType::Rec { body, .. } => body.is_terminated(),
+            }
+        }
+
+        fn is_contractive(&self, on: &Label, polymorphic_vars: &HashSet<&Label>) -> bool {
+            match self {
+                FreestType::Unit | FreestType::Int | FreestType::Bool | FreestType::String => true,
+                FreestType::Tuple(_) => true,
+                FreestType::Arrow { .. } => true,
+                FreestType::Skip => true,
+                FreestType::End(_) => true,
+                FreestType::Semi { first, second } => match first.is_terminated() {
+                    true => second.is_contractive(on, polymorphic_vars),
+                    false => first.is_contractive(on, polymorphic_vars),
+                },
+                FreestType::Message { .. } => true,
+                FreestType::Choice { .. } => true,
+                FreestType::Forall { body, .. } => body.is_contractive(on, polymorphic_vars),
+                FreestType::Rec { body, .. } => body.is_contractive(on, polymorphic_vars),
+                FreestType::Var(label) => on != label && !polymorphic_vars.contains(label),
+            }
+        }
+    }
 
     fn session_op() -> impl Strategy<Value = SessionOp> {
         prop_oneof![Just(SessionOp::Recv), Just(SessionOp::Send)]

@@ -5,11 +5,13 @@ use crate::{
 
 use std::{io::Write, process::Command};
 
+#[allow(dead_code)]
 enum TypecheckResult {
     Success,
     Error { reason: String },
 }
 
+#[allow(dead_code)]
 fn check_equivalence(type1: &CFSession, type2: &CFSession) -> TypecheckResult {
     let mut test_file = tempfile::Builder::new().suffix(".fst").tempfile().unwrap();
 
@@ -222,6 +224,14 @@ mod tests {
     fn equivalence_rec_unfold() {
         let type1 = session_type! { mu x. !Int; x };
         let type2 = session_type! { !Int; (mu x. !Int; x) };
+
+        assert_success(check_equivalence(&type1, &type2));
+    }
+
+    #[test]
+    fn equivalence_rec_unfold_cf() {
+        let type1 = session_type! { mu x. !Int; x; x };
+        let type2 = session_type! { !Int; (mu x. !Int; x; x); (mu x. !Int; x; x) };
 
         assert_success(check_equivalence(&type1, &type2));
     }
