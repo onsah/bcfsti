@@ -197,33 +197,6 @@ pub fn eval_(env: &Env, e: &SExpr) -> Result<Value, EvalError> {
                 )),
             }
         }
-        Expr::AppL(e1, e2) => {
-            let v1 = eval_(env, e1)?;
-            let v2 = eval_(env, e2)?;
-            match v2 {
-                Value::Abs(env, x, e) => {
-                    let env = env.ext(x.val, v1);
-                    eval_(&env, &e)
-                }
-                _ => Err(EvalError::ValMismatch(
-                    e.clone(),
-                    format!("function"),
-                    v1.clone(),
-                )),
-            }
-        }
-        Expr::Borrow(x) => {
-            let v = env.get(x)?;
-            let Value::Chan(c) = v else {
-                return Err(EvalError::ValMismatch(
-                    e.clone(),
-                    format!("channel"),
-                    v.clone(),
-                ));
-            };
-            let c2 = c.borrow();
-            Ok(Value::Chan(c2))
-        }
         Expr::Let(x, e1, e2) => {
             let v1 = eval_(env, e1)?;
             eval_(&env.ext(x.val.clone(), v1), e2)
@@ -354,7 +327,7 @@ pub fn eval_(env: &Env, e: &SExpr) -> Result<Value, EvalError> {
             }
             Ok(Value::Const(Const::Unit))
         }
-        Expr::Offer(e1) => {
+        Expr::Branch(e1) => {
             let v1 = eval_(&env, e1)?;
             let Value::Chan(c) = v1 else {
                 return Err(EvalError::ValMismatch(
@@ -382,7 +355,7 @@ pub fn eval_(env: &Env, e: &SExpr) -> Result<Value, EvalError> {
             }
             Ok(Value::Inj(l, Box::new(Value::Chan(c))))
         }
-        Expr::Drop(e1) => {
+        Expr::BorrowEnd(SessionOp::Send, e1) => {
             let v1 = eval_(env, e1)?;
             let Value::Chan(c) = v1 else {
                 return Err(EvalError::ValMismatch(
@@ -398,6 +371,7 @@ pub fn eval_(env: &Env, e: &SExpr) -> Result<Value, EvalError> {
             }
             Ok(Value::Const(Const::Unit))
         }
+        Expr::BorrowEnd(SessionOp::Recv, e1) => todo!(),
         Expr::End(op, e1) => {
             let v1 = eval_(env, e1)?;
             let Value::Chan(c) = v1 else {
@@ -509,27 +483,9 @@ pub fn eval_(env: &Env, e: &SExpr) -> Result<Value, EvalError> {
             };
             eval_(env, if *b { e2 } else { e3 })
         }
-        Expr::LetDecl(x, _t, cs, e2) => {
-            let c = cs.first().unwrap();
-            let v1 = if c.pats.len() > 0 {
-                let mut fun = c.body.clone();
-                for p in c.pats.iter().rev() {
-                    let y = fresh_var();
-                    fun = fake_span(Expr::Abs(
-                        y.clone(),
-                        Box::new(pattern_to_let_chain(y, p, fun)),
-                    ));
-                }
-                let Expr::Abs(y, e) = fun.val else {
-                    unreachable!()
-                };
-                Value::AbsRec(x.clone(), env.clone(), y, *e)
-            } else {
-                eval_(env, &c.body)?
-            };
-            let env = env.ext(x.val.clone(), v1);
-            eval_(&env, &e2)
-        }
+        Expr::LSplit(spanned, spanned1) => todo!(),
+        Expr::RSplit(spanned, spanned1) => todo!(),
+        Expr::LetDecl(spanned, spanned1, spanned2, spanned3) => todo!(),
     }
 }
 

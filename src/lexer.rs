@@ -55,8 +55,10 @@ pub enum Token<'a> {
     Not,
     #[token("new")]
     New,
-    #[token("split")]
-    Split,
+    #[token("lsplit")]
+    LSplit,
+    #[token("rsplit")]
+    RSplit,
     #[token("unit")]
     Unit,
     #[token("Unit")]
@@ -69,6 +71,8 @@ pub enum Token<'a> {
     StringT,
     #[token("drop")]
     Drop,
+    #[token("acquire")]
+    Acquire,
     #[token("unr")]
     Unr,
     #[token("lin")]
@@ -239,7 +243,8 @@ impl<'a> Token<'a> {
             Token::Import => "import",
             Token::Not => "not",
             Token::New => "new",
-            Token::Split => "split",
+            Token::LSplit => "lsplit",
+            Token::RSplit => "rsplit",
             Token::Unit => "unit",
             Token::UnitT => "Unit",
             Token::Drop => "drop",
@@ -307,6 +312,7 @@ impl<'a> Token<'a> {
             Token::Mu => "µ",
             Token::Select => "select",
             Token::Branch => "branch",
+            Token::Acquire => "acquire",
         }
     }
 }

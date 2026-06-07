@@ -4,7 +4,6 @@ use crate::{
     lexer::LexerError,
     semantics::EvalError,
     type_checker::TypeError,
-    usage_map::UsageMap,
     util::{pretty::pretty_def, span::Span},
 };
 use ariadne::{ColorGenerator, IndexType, Label, Report, ReportKind, Source};
@@ -439,54 +438,6 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                             "The expected type {} is not a prefix of the variables type {}.",
                             pretty_def(s1),
                             pretty_def(s)
-                        ),
-                    )],
-                );
-            }
-            TypeError::CaseDifferentBranchUsageMaps(e, l1, r1, l2, r2) => {
-                let pretty_rep = |r: &UsageMap| {
-                    let mut s = String::new();
-                    for (x, t) in &r.map {
-                        s += &format!("  {} : {}\n", x, pretty_def(t));
-                    }
-                    s
-                };
-                report(
-                    &src,
-                    e.span.clone(),
-                    "Type Error",
-                    [label(
-                        e.span,
-                        format!(
-                            "This case expression uses channels inconsistently in the branches for '{}' and '{}'.\nThe usage map for the branch for '{}' is:\n{}\nThe usage map for the branch for '{}' is:\n{}",
-                            l1,
-                            l2,
-                            l1,
-                            pretty_rep(&r1),
-                            l2,
-                            pretty_rep(&r2),
-                        ),
-                    )],
-                );
-            }
-            TypeError::IfDifferentBranchUsageMaps(e, r1, r2) => {
-                let pretty_rep = |r: &UsageMap| {
-                    let mut s = String::new();
-                    for (x, t) in &r.map {
-                        s += &format!("  {} : {}\n", x, pretty_def(t));
-                    }
-                    s
-                };
-                report(
-                    &src,
-                    e.span.clone(),
-                    "Type Error",
-                    [label(
-                        e.span,
-                        format!(
-                            "This if-expression uses channels inconsistently across its branches.\nThe usage map for the true-branch is:\n{}\nThe usage map for the false-branch is:\n{}",
-                            pretty_rep(&r1),
-                            pretty_rep(&r2),
                         ),
                     )],
                 );

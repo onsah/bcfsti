@@ -48,7 +48,7 @@ peg::parser! {
             = quiet!{tok(True) { Const::Bool(true) }}
             / quiet!{tok(False) { Const::Bool(false) }}
             / expected!("boolean literal")
-        pub rule constant() -> Const 
+        pub rule constant() -> Const
             = quiet!{ string() / int() / bool() / unit() } / expected!("literal")
 
         // Multiplicities
@@ -71,14 +71,17 @@ peg::parser! {
 
         // Types
 
+        #[cache_left_rec]
         pub rule session() -> Session
-            = tok(Return) { Session::Return }
+            = s1:ssession() tok(Semicolon) s2:ssession()
+              { Session::Semi { first: Box::new(s1), second: Box::new(s2) } }
+            / tok(Return) { Session::BorrowEnd(SessionOp::Send) }
             / tok(Wait) { Session::End(SessionOp::Recv) }
             / tok(Close) { Session::End(SessionOp::Send) }
-            / tok(Bang) t:stype_atom() tok(Period) s:ssession() 
-              { Session::Op(SessionOp::Send, Box::new(t), Box::new(s)) }
-            / tok(QuestionMark) t:stype_atom() tok(Period) s:ssession() 
-              { Session::Op(SessionOp::Recv, Box::new(t), Box::new(s)) }
+            / tok(Bang) t:stype_atom()
+              { Session::Op(SessionOp::Send, Box::new(t)) }
+            / tok(QuestionMark) t:stype_atom()
+              { Session::Op(SessionOp::Recv, Box::new(t)) }
             / tok(Amp) tok(BraceL) cs:((l:sid() tok(Colon) s:ssession() { (l, s) })** tok(Comma)) tok(Comma)? tok(BraceR)
               { Session::Choice(SessionOp::Recv, cs) }
             / tok(Plus) tok(BraceL) cs:((l:sid() tok(Colon) s:ssession() { (l, s) })** tok(Comma)) tok(Comma)? tok(BraceR)
@@ -95,21 +98,21 @@ peg::parser! {
 
         #[cache_left_rec]
         pub rule type_arrow() -> Type
-            = t1:stype_prod() tok(Minus) tok(BracketL) m:smult() tok(Semicolon)? e:seffect()
-              tok(BracketR) tok(Arrow) t2:stype_arrow()
-              { Type::Arr(m, e, Box::new(t1), Box::new(t2)) }
+            = param:stype_prod() tok(Minus) tok(BracketL) mult:smult() tok(Semicolon)? eff:seffect()
+              tok(BracketR) tok(Arrow) ret:stype_arrow()
+              { Type::Arr{ mult, eff, param: Box::new(param), ret: Box::new(ret) } }
             / t:type_prod() { t }
         pub rule stype_arrow() -> SType = spanned(<type_arrow()>)
 
         pub rule type_prod() -> Type
-            = t1:stype_atom() tok(Star) tok(BracketL) m:smult() tok(BracketR) t2:stype_prod()
-              { Type::Prod(m, Box::new(t1), Box::new(t2)) }
-            / t1:stype_atom() tok(StarOrdL) t2:stype_prod()
-              { Type::Prod(fake_span(Mult::OrdR), Box::new(t1), Box::new(t2)) }
-            / t1:stype_atom() tok(StarLin) t2:stype_prod()
-              { Type::Prod(fake_span(Mult::Lin), Box::new(t1), Box::new(t2)) }
+            = first:stype_atom() tok(Star) tok(BracketL) mult:smult() tok(BracketR) second:stype_prod()
+              { Type::Prod { mult, first: Box::new(first), second: Box::new(second) } }
+            / first:stype_atom() tok(StarOrdL) second:stype_prod()
+              { Type::Prod { mult: fake_span(Mult::OrdL), first: Box::new(first), second: Box::new(second) } }
+            / first:stype_atom() tok(StarLin) second:stype_prod()
+              { Type::Prod { mult: fake_span(Mult::Lin), first: Box::new(first), second: Box::new(second) } }
             / t:type_atom() { t }
-         
+
         pub rule stype_prod() -> SType = spanned(<type_prod()>)
 
         pub rule type_atom() -> Type
@@ -118,7 +121,7 @@ peg::parser! {
             / tok(BoolT) { Type::Bool }
             / tok(StringT) { Type::String }
             / tok(ParenL) t:type_() tok(ParenR) { t }
-            / tok(Chan)? s:ssession() { Type::Chan(s) }
+            / tok(Chan)? s:ssession() { Type::Chan(s.val) }
             / tok(Lt) cs:((l:sid() tok(Colon) t:stype() { (l , t) }) ** tok(Comma)) tok(Comma)? tok(Gt) { Type::Variant(cs) }
         pub rule stype_atom() -> SType = spanned(<type_atom()>)
 
@@ -144,11 +147,11 @@ peg::parser! {
               { Expr::LetPair(x, y, Box::new(e1), Box::new(e2)) }
             / tok(Let) x:sid() tok(Equals) e1:sexpr_ann() tok(In) e2:sexpr_lam()
               { Expr::Let(x, Box::new(e1), Box::new(e2)) }
-            / tok(Let) x:sid() tok(Colon) t:stype() cs:sclause()* tok(In) e:sexpr_lam()
-              { Expr::LetDecl(x, t, cs, Box::new(e)) }
+            / tok(Let) x:sid() tok(Colon) t:stype() c:sclause()? tok(In) e:sexpr_lam()
+              { Expr::LetDecl(x, t, c.map(Box::new), Box::new(e)) }
             / tok(If) e:sexpr_lam() tok(Then) e1:sexpr_lam() tok(Else) e2:sexpr_lam()
               { Expr::If(Box::new(e), Box::new(e1), Box::new(e2)) }
-            / e1:sexpr_or() tok(Semicolon) e2:sexpr_lam() 
+            / e1:sexpr_or() tok(Semicolon) e2:sexpr_lam()
               { Expr::Seq(Box::new(e1), Box::new(e2)) }
             / e:expr_or() { e }
         pub rule sexpr_lam() -> SExpr = spanned(<expr_lam()>)
@@ -212,16 +215,17 @@ peg::parser! {
             = tok(New) s:ssession() { Expr::New(s) }
             / tok(Send) e1:sexpr_atom() e2:sexpr_atom() { Expr::Send(Box::new(e1), Box::new(e2)) }
             / tok(Recv) e:sexpr_atom() { Expr::Recv(Box::new(e)) }
-            / tok(Drop) e:sexpr_atom() { Expr::Drop(Box::new(e)) }
+            / tok(Drop) e:sexpr_atom() { Expr::BorrowEnd(SessionOp::Send, Box::new(e)) }
+            / tok(Acquire) e:sexpr_atom() { Expr::BorrowEnd(SessionOp::Recv, Box::new(e)) }
             / tok(Close) e:sexpr_atom() { Expr::End(SessionOp::Send, Box::new(e)) }
             / tok(Wait) e:sexpr_atom() { Expr::End(SessionOp::Recv, Box::new(e)) }
             / tok(Select) l:sid() e:sexpr_atom() { Expr::Select(l, Box::new(e)) }
-            / tok(Branch) e:sexpr_atom() { Expr::Offer(Box::new(e)) }
+            / tok(Branch) e:sexpr_atom() { Expr::Branch(Box::new(e)) }
             / tok(Inj) l:sid() e:sexpr_atom() { Expr::Inj(l, Box::new(e)) }
             / tok(Fork) e:sexpr_atom() { Expr::Fork(Box::new(e)) }
             / tok(ToStr) e:sexpr_atom() { Expr::Op1(Op1::ToStr, Box::new(e)) }
             / tok(Print) e:sexpr_atom() { Expr::Op1(Op1::Print, Box::new(e)) }
-            / e1:sexpr_app() tok(TriRight) e2:sexpr_atom() { Expr::AppL(Box::new(e1), Box::new(e2)) }
+            / tok(LSplit) s:ssession() e:sexpr_atom() { Expr::LSplit(s, Box::new(e)) }
             / e1:sexpr_app() e2:sexpr_atom() { Expr::App(Box::new(e1), Box::new(e2)) }
             / e:expr_atom() { e }
         pub rule sexpr_app() -> SExpr = spanned(<expr_app()>)
@@ -231,7 +235,6 @@ peg::parser! {
             = tok(ParenL) e:expr() tok(ParenR) { e }
             / tok(ParenL) e1:sexpr() tok(Comma) e2:sexpr() tok(ParenR)
               { Expr::Pair(Box::new(e1), Box::new(e2)) }
-            / tok(Amp) x:sid() { Expr::Borrow(x) }
             / c:constant() { Expr::Const(c) }
             / x:sid() { Expr::Var(x.to_owned()) }
         pub rule sexpr_atom() -> SExpr = spanned(<expr_atom()>)
@@ -256,11 +259,71 @@ peg::parser! {
     }
 }
 
-// #[test]
-// fn parse_int() {
-//     assert_eq!(nix_parser::expr("-323"), Ok(Expr::Int(-323)));
-//     assert_eq!(
-//         nix_parser::expr_s("-323"),
-//         Ok(Spanned::new(Expr::Int(-323), Span { start: 0, end: 4 }))
-//     );
-// }
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::path::PathBuf;
+
+    use crate::{
+        lexer::{self, Token},
+        parser,
+        util::lexer_offside::{self, Braced},
+    };
+
+    macro_rules! logln {
+        ($($args:tt)*) => {
+            writeln!(::std::io::stdout(), $($args)*).unwrap()
+        };
+    }
+
+    #[test]
+    fn parse() {
+        let positives: Vec<PathBuf> = std::fs::read_dir("examples/positive")
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .collect();
+
+        for (i, p) in positives.iter().enumerate() {
+            let name = p.to_string_lossy().to_string();
+            logln!(
+                "\n================================================================================"
+            );
+            logln!(
+                "Running positive test {} / {}: {}\n",
+                i + 1,
+                positives.len(),
+                name
+            );
+            let src = std::fs::read_to_string(p).unwrap();
+
+            let toks = lexer::lex(&src).unwrap();
+            let mut toks = lexer_offside::process_indent(toks, |_| false, |_| false);
+            toks.toks = toks
+                .toks
+                .into_iter()
+                .filter(|t| t.val != Braced::Token(Token::NewLine))
+                .collect::<Vec<_>>();
+
+            let mut failures_pos = vec![];
+
+            let res = parser::parse(&toks);
+            if res.is_ok() {
+                logln!("TEST SUCCEEDED.")
+            } else {
+                logln!("TEST FAILED.");
+                failures_pos.push(name.clone())
+            }
+
+            logln!("\n================================================================================\n");
+            if failures_pos.len() == 0 {
+                logln!("ALL {} TESTS PASSED!", positives.len());
+            } else {
+                logln!("{} TESTS FAILED:\n", failures_pos.len());
+                for n in failures_pos {
+                    logln!("  {n}")
+                }
+                assert!(false)
+            }
+        }
+    }
+}

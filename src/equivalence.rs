@@ -1,6 +1,6 @@
 use crate::{
     freest::FreestType,
-    syntax::{CFSession, CFType, Eff, Mult, SessionOp},
+    syntax::{Eff, Mult, Session, SessionOp, Type},
 };
 
 use std::{io::Write, process::Command};
@@ -12,7 +12,7 @@ enum TypecheckResult {
 }
 
 #[allow(dead_code)]
-fn check_equivalence(type1: &CFSession, type2: &CFSession) -> TypecheckResult {
+fn check_equivalence(type1: &Session, type2: &Session) -> TypecheckResult {
     let mut test_file = tempfile::Builder::new().suffix(".fst").tempfile().unwrap();
 
     writeln!(test_file, "data Ret = Ret").unwrap();
@@ -49,33 +49,33 @@ impl FreestType {
 
 // Implement conversions from the syntax types to freest internal representation here so
 // the equivalence module owns the translation logic used for tests.
-impl From<&CFSession> for FreestType {
+impl From<&Session> for FreestType {
     /// Assumes type Ret is defined as: `data Ret = Ret`
-    fn from(value: &CFSession) -> FreestType {
+    fn from(value: &Session) -> FreestType {
         match value {
-            CFSession::Skip => FreestType::Skip,
-            CFSession::Semi { first, second } => FreestType::Semi {
+            Session::Skip => FreestType::Skip,
+            Session::Semi { first, second } => FreestType::Semi {
                 first: Box::new((&first.val).into()),
                 second: Box::new((&second.val).into()),
             },
-            CFSession::End(session_op) => FreestType::End(*session_op),
-            CFSession::Op(session_op, ty) => FreestType::Message {
+            Session::End(session_op) => FreestType::End(*session_op),
+            Session::Op(session_op, ty) => FreestType::Message {
                 dir: *session_op,
                 ty: Box::new((&ty.val).into()),
             },
-            CFSession::Choice(session_op, items) => FreestType::Choice {
+            Session::Choice(session_op, items) => FreestType::Choice {
                 dir: *session_op,
                 branches: items
                     .into_iter()
                     .map(|(label, ty)| (label.val.clone(), Box::new((&ty.val).into())))
                     .collect(),
             },
-            CFSession::Mu(var, body) => FreestType::Rec {
+            Session::Mu(var, body) => FreestType::Rec {
                 var: var.val.clone(),
                 body: Box::new((&body.val).into()),
             },
-            CFSession::Var(var) => FreestType::Var(var.val.clone()),
-            CFSession::BorrowEnd(session_op) => FreestType::Message {
+            Session::Var(var) => FreestType::Var(var.val.clone()),
+            Session::BorrowEnd(session_op) => FreestType::Message {
                 dir: *session_op,
                 ty: Box::new(FreestType::Var(FreestType::RET.into())),
             },
@@ -83,11 +83,11 @@ impl From<&CFSession> for FreestType {
     }
 }
 
-impl From<&CFType> for FreestType {
-    fn from(value: &CFType) -> FreestType {
+impl From<&Type> for FreestType {
+    fn from(value: &Type) -> FreestType {
         match value {
-            CFType::Chan(cfsession) => cfsession.into(),
-            CFType::Variant(items) => FreestType::Tuple(vec![
+            Type::Chan(cfsession) => cfsession.into(),
+            Type::Variant(items) => FreestType::Tuple(vec![
                 Box::new(FreestType::Choice {
                     dir: SessionOp::Recv,
                     branches: items
@@ -100,11 +100,11 @@ impl From<&CFType> for FreestType {
                     branches: vec![("variant".into(), FreestType::Skip.into())],
                 }),
             ]),
-            CFType::Unit => FreestType::Unit,
-            CFType::Int => FreestType::Int,
-            CFType::Bool => FreestType::Bool,
-            CFType::String => FreestType::String,
-            CFType::Arr {
+            Type::Unit => FreestType::Unit,
+            Type::Int => FreestType::Int,
+            Type::Bool => FreestType::Bool,
+            Type::String => FreestType::String,
+            Type::Arr {
                 mult,
                 eff,
                 param,
@@ -131,7 +131,7 @@ impl From<&CFType> for FreestType {
                     .into(),
                 ])
             }
-            CFType::Prod {
+            Type::Prod {
                 mult,
                 first,
                 second,

@@ -1,4 +1,5 @@
 pub mod args;
+pub mod constraint;
 pub mod equivalence;
 pub mod error_reporting;
 pub mod freest;
@@ -11,7 +12,6 @@ pub mod semantics;
 pub mod syntax;
 pub mod type_checker;
 pub mod type_context;
-pub mod usage_map;
 pub mod util;
 
 #[cfg(test)]
@@ -47,22 +47,22 @@ fn main() {
     }
 }
 
-pub fn run(args: &Args) -> Result<(), IErr> {
+fn run(args: &Args) -> Result<(), IErr> {
     let src = std::fs::read_to_string(&args.src_path).unwrap();
     if args.verbose {
         println!("===== SRC =====");
         println!("{src}");
         println!();
     }
-    let (e, _t, _p) = typecheck(&src, args.verbose)?;
+    let (_e, _t, _p) = typecheck(&src, args.verbose)?;
 
-    println!("===== EVALUATION =====");
-    println!("Program stdout:");
-    let v = eval(&e).map_err(IErr::Eval)?;
-    println!(
-        "Program terminated successfully with value `{}`.",
-        pretty_def(&v)
-    );
+    // println!("===== EVALUATION =====");
+    // println!("Program stdout:");
+    // let v = eval(&e).map_err(IErr::Eval)?;
+    // println!(
+    //     "Program terminated successfully with value `{}`.",
+    //     pretty_def(&v)
+    // );
     Ok(())
 }
 
@@ -101,11 +101,13 @@ pub fn typecheck(src: &str, verbose: bool) -> Result<(SExpr, Type, Eff), IErr> {
         println!();
     }
 
-    println!("===== TYPECHECKER =====");
-    let (t, p) = type_checker::infer_type(&e).map_err(IErr::Typing)?;
-    println!("Type:    {}", pretty_def(&t));
-    println!("Effect:  {}", pretty_def(&p));
-    println!();
+    // println!("===== TYPECHECKER =====");
+    // let (t, p) = type_checker::infer_type(&e).map_err(IErr::Typing)?;
+    // println!("Type:    {}", pretty_def(&t));
+    // println!("Effect:  {}", pretty_def(&p));
+    // println!();
 
-    Ok((e, t.val, p))
+    // Ok((e, t.val, p))
+    //
+    Ok((e, Type::Unit, Eff::No))
 }

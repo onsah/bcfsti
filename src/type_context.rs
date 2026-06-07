@@ -3,7 +3,6 @@ use std::hash::Hash;
 
 use crate::ren::Ren;
 use crate::syntax::{Id, Mult, SId, SType, Session, SessionOp, Type, TypeSemEq};
-use crate::usage_map::UsageMap;
 use crate::util::boxed::Boxed;
 use crate::util::graph::Graph;
 use crate::util::pretty::{Pretty, PrettyEnv};
@@ -306,36 +305,6 @@ impl Ctx {
         self.to_sem().is_subctx_of(&other.to_sem())
     }
 
-    // ⋯ʳ operator from Agda
-    pub fn replace(&self, u: &UsageMap) -> Ctx {
-        let mut ctx = self.clone();
-        ctx.map_binds_mut(&mut |x: &mut Id, t: &mut Type| {
-            if let Type::Chan(_) = &t {
-                if let Some(s) = u.map.get(x) {
-                    *t = Type::Chan(fake_span(s.clone()));
-                }
-            }
-        });
-        ctx
-    }
-
-    // %ᶜ operator from Agda
-    pub fn split_off(&self, u: &UsageMap) -> Ctx {
-        let mut ctx = self.clone();
-        ctx.map_binds_mut(&mut |x: &mut Id, t: &mut Type| {
-            if let Type::Chan(s) = &t {
-                if let Some(s1) = u.map.get(x) {
-                    if s1.is_borrowed() {
-                        if let Some(s2) = s.split(&s1) {
-                            *t = Type::Chan(fake_span(s2.clone()));
-                        }
-                    }
-                }
-            }
-        });
-        ctx
-    }
-
     // ⋯ᵘ operator from Agda
     pub fn rename(&self, r: &Ren) -> Ctx {
         let mut ctx = self.clone();
@@ -352,19 +321,20 @@ impl Ctx {
         self.flatmap_binds(&mut |x, t| {
             if let Some(s1) = sis.get(&x) {
                 if let Type::Chan(s) = &t {
-                    if let Some(s2) = s.split(s1) {
-                        return Ctx::Join(
-                            Box::new(Ctx::Bind(
-                                fake_span(r1.map.get(&x).unwrap().clone()),
-                                fake_span(Type::Chan(fake_span(s1.clone()))),
-                            )),
-                            Box::new(Ctx::Bind(
-                                fake_span(r2.map.get(&x).unwrap().clone()),
-                                fake_span(Type::Chan(fake_span(s2))),
-                            )),
-                            JoinOrd::Ordered,
-                        );
-                    }
+                    todo!()
+                    // if let Some(s2) = s.split(s1) {
+                    //     return Ctx::Join(
+                    //         Box::new(Ctx::Bind(
+                    //             fake_span(r1.map.get(&x).unwrap().clone()),
+                    //             fake_span(Type::Chan(fake_span(s1.clone()))),
+                    //         )),
+                    //         Box::new(Ctx::Bind(
+                    //             fake_span(r2.map.get(&x).unwrap().clone()),
+                    //             fake_span(Type::Chan(fake_span(s2))),
+                    //         )),
+                    //         JoinOrd::Ordered,
+                    //     );
+                    // }
                 }
             }
             Ctx::Bind(fake_span(x), fake_span(t))
@@ -532,19 +502,6 @@ impl CtxCtx {
             },
         }
     }
-
-    // ⋯ʳᶜ operator from Agda
-    pub fn replace(&self, u: &UsageMap) -> Self {
-        self.flatmap_binds(&mut |x: Id, mut t: Type| {
-            if let Type::Chan(_) = &t {
-                if let Some(s) = u.map.get(&x) {
-                    t = Type::Chan(fake_span(s.clone()));
-                }
-            }
-            Ctx::Bind(fake_span(x), fake_span(t))
-        })
-    }
-
     // ⋯ᵘᶜ operator from Agda
     pub fn rename(&self, r: &Ren) -> Self {
         let mut ctx = self.clone();
@@ -748,11 +705,11 @@ pub fn gen_ctx(cats: &[usize], vars: &[Id], i: usize) -> Option<Ctx> {
     if vars.len() == 0 {
         return None;
     } else if vars.len() == 1 {
-        // return Some(Ctx::Bind(fake_span(vars[0].clone()), fake_span(Type::Unit)));
-        return Some(Ctx::Bind(
-            fake_span(vars[0].clone()),
-            fake_span(Type::Chan(fake_span(Session::End(SessionOp::Send)))),
-        ));
+        todo!()
+        // return Some(Ctx::Bind(
+        //     fake_span(vars[0].clone()),
+        //     fake_span(Type::Chan(fake_span(Session::End(SessionOp::Send)))),
+        // ));
     }
     for x in 1..n {
         cur += cats[x] * cats[n - x] * 2;

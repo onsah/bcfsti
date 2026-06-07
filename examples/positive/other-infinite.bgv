@@ -1,14 +1,15 @@
 let
-  two_shot : ?Int.?Int.return -[ u 1 ]-> Int
+  two_shot : ?Int;?Int -[ u 1 ]-> Int
   two_shot c =
-    recv &c + recv c
+    let c1, c2 = lsplit ?Int c in
+    recv c1 + recv c2
 in
-
 let
-  main : (mu X. ?Int. X) *[p] (mu X. !Int. X) -[u 1]-> Unit
+  main : (mu X. ?Int; X) *[p] (mu X. !Int; X) -[u 1]-> Unit
   main (cin, cout) =
-    send (two_shot &cin) &cout ;
-    main (cin, cout)
+    let cin1, cin2 = lsplit (?Int; ?Int) cin in
+    let cout1, cout2 = lsplit !Int cout in
+    send (two_shot cin1) cout1;
+    main (cin2, cout2)
 in
-
 unit

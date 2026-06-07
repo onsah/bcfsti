@@ -29,25 +29,40 @@ pub type SSessionOp = Spanned<SessionOp>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Session {
-    Var(SId),
-    Mu(SId, Box<SSession>),
-    Op(SessionOp, Box<SType>, Box<SSession>),
-    Choice(SessionOp, Vec<(SLabel, SSession)>),
+    Skip,
+    Semi {
+        first: Box<SSession>,
+        second: Box<SSession>,
+    },
     End(SessionOp),
-    Return,
+    BorrowEnd(SessionOp),
+    Op(SessionOp, Box<SType>),
+    Choice(SessionOp, Vec<(SLabel, SSession)>),
+    Mu(SId, Box<SSession>),
+    Var(SId),
 }
 pub type SSession = Spanned<Session>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
-    Chan(SSession),
-    Arr(SMult, SEff, Box<SType>, Box<SType>),
-    Prod(SMult, Box<SType>, Box<SType>),
+    Chan(Session),
+    Arr {
+        mult: SMult,
+        eff: SEff,
+        param: Box<SType>,
+        ret: Box<SType>,
+    },
+    Prod {
+        mult: SMult,
+        first: Box<SType>,
+        second: Box<SType>,
+    },
     Variant(Vec<(SLabel, SType)>),
     Unit,
     Int,
     Bool,
     String,
+    // TODO: UVar(Label),
 }
 pub type SType = Spanned<Type>;
 
@@ -115,37 +130,43 @@ pub enum Op2 {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr {
+    Const(Const),
+
+    New(SSession),
+    Fork(Box<SExpr>),
+
+    End(SessionOp, Box<SExpr>),
+
+    Send(Box<SExpr>, Box<SExpr>),
+    Recv(Box<SExpr>),
+
+    LSplit(SSession, Box<SExpr>),
+    RSplit(SSession, Box<SExpr>),
+    BorrowEnd(SessionOp, Box<SExpr>),
+
     Var(SId),
     Abs(SId, Box<SExpr>),
     App(Box<SExpr>, Box<SExpr>),
-    AppL(Box<SExpr>, Box<SExpr>),
-    Borrow(SId),
+
+    Seq(Box<SExpr>, Box<SExpr>),
+    Pair(Box<SExpr>, Box<SExpr>),
 
     Let(SId, Box<SExpr>, Box<SExpr>),
-
-    Pair(Box<SExpr>, Box<SExpr>),
+    LetDecl(SId, SType, Option<Box<SClause>>, Box<SExpr>),
     LetPair(SId, SId, Box<SExpr>, Box<SExpr>),
 
     Inj(SLabel, Box<SExpr>),
     CaseSum(Box<SExpr>, Vec<(SLabel, SId, SExpr)>),
-    If(Box<SExpr>, Box<SExpr>, Box<SExpr>),
 
-    Fork(Box<SExpr>),
-    New(SSession),
-    Send(Box<SExpr>, Box<SExpr>),
-    Recv(Box<SExpr>),
     Select(SLabel, Box<SExpr>),
-    Offer(Box<SExpr>),
-    Drop(Box<SExpr>),
-    End(SessionOp, Box<SExpr>),
-    Const(Const),
+    Branch(Box<SExpr>),
 
     Ann(Box<SExpr>, SType),
 
-    LetDecl(SId, SType, Vec<SClause>, Box<SExpr>),
-    Seq(Box<SExpr>, Box<SExpr>),
     Op1(Op1, Box<SExpr>),
     Op2(Op2, Box<SExpr>, Box<SExpr>),
+
+    If(Box<SExpr>, Box<SExpr>, Box<SExpr>),
 }
 pub type SExpr = Spanned<Expr>;
 
@@ -199,11 +220,7 @@ impl Session {
             Session::Var(y) if *x == **y => s_new.clone(),
             Session::Var(y) => Session::Var(y.clone()),
             Session::Mu(y, e) => Session::Mu(y.clone(), Box::new(fake_span(e.subst(x, s_new)))),
-            Session::Op(op, t, s) => Session::Op(
-                op.clone(),
-                t.clone(),
-                Box::new(fake_span(s.subst(x, s_new))),
-            ),
+            Session::Op(_, _) => self.clone(),
             Session::Choice(op, cs) => {
                 let cs2 = cs
                     .iter()
@@ -212,7 +229,12 @@ impl Session {
                 Session::Choice(op.clone(), cs2)
             }
             Session::End(op) => Session::End(op.clone()),
-            Session::Return => Session::Return,
+            Session::BorrowEnd(_) => self.clone(),
+            Session::Skip => todo!(),
+            Session::Semi { first, second } => Self::Semi {
+                first: Box::new(fake_span(first.subst(x, s_new))),
+                second: Box::new(fake_span(second.subst(x, s_new))),
+            },
         }
     }
     fn unfold(&self, x: &SId) -> Self {
@@ -233,11 +255,9 @@ impl Session {
             return true;
         } else {
             match (self, other) {
-                (Session::Op(op1, t1, s1), Session::Op(op2, t2, s2)) => {
-                    op1 == op2 && t1.sem_eq(t2) && s1.sem_eq_(s2, &seen)
-                }
+                (Session::Op(op1, t1), Session::Op(op2, t2)) => todo!(), // op1 == op2 && t1.sem_eq(t2),
                 (Session::End(op1), Session::End(op2)) => op1 == op2,
-                (Session::Return, Session::Return) => true,
+                (Session::BorrowEnd(end1), Session::BorrowEnd(end2)) => end1 == end2,
                 (Session::Choice(op1, cs1), Session::Choice(op2, cs2)) if op1 == op2 => {
                     if let Some(cs) = merge_clauses(&cs1, &cs2, false) {
                         cs.iter().all(|(_, s1, s2)| s1.sem_eq_(s2, &seen))
@@ -273,12 +293,11 @@ impl Session {
                         Err(())
                     }
                 }
-                (_, Session::Return) => Ok(Some(self.clone())),
-                (Session::Op(op1, t1, s1), Session::Op(op2, t2, s2))
-                    if op1 == op2 && t1.sem_eq(t2) =>
-                {
-                    s1.split_(s2, &seen)
-                }
+                (_, Session::BorrowEnd(_)) => todo!(), // Ok(Some(self.clone())),
+                (Session::Op(op1, t1), Session::Op(op2, t2)) => todo!(),
+                // if op1 == op2 && t1.sem_eq(t2) => {
+                // s1.split_(s2, &seen)
+                // }
                 (Session::Choice(op1, cs1), Session::Choice(op2, cs2)) if op1 == op2 => {
                     if let Some(cs) = merge_clauses(&cs1, &cs2, *op1 == SessionOp::Send) {
                         let cs = cs
@@ -313,9 +332,7 @@ impl Session {
     }
     pub fn dual(&self) -> Self {
         match self {
-            Session::Op(op, t, s) => {
-                Session::Op(op.dual(), t.clone(), Box::new(fake_span(s.dual())))
-            }
+            Session::Op(op, t) => Session::Op(op.dual(), t.clone()),
             Session::Choice(op, cs) => {
                 let cs2: Vec<(SLabel, SSession)> = cs
                     .iter()
@@ -324,17 +341,20 @@ impl Session {
                 Session::Choice(op.dual(), cs2)
             }
             Session::End(op) => Session::End(op.dual()),
-            Session::Return => Session::Return,
+            Session::BorrowEnd(op) => Session::BorrowEnd(op.dual()),
             Session::Mu(x, s) => Session::Mu(x.clone(), Box::new(fake_span(s.dual()))),
             Session::Var(x) => Session::Var(x.clone()),
+            Session::Skip => todo!(),
+            Session::Semi { first, second } => Session::Semi {
+                first: Box::new(fake_span(first.dual())),
+                second: Box::new(fake_span(second.dual())),
+            },
         }
     }
 
     pub fn join(&self, s: &Session) -> Session {
         match self {
-            Session::Op(o, t, s1) => {
-                Session::Op(o.clone(), t.clone(), Box::new(fake_span(s1.join(s))))
-            }
+            Session::Op(o, t) => Session::Op(o.clone(), t.clone()),
             Session::Choice(op, cs) => {
                 let cs2: Vec<(SLabel, SSession)> = cs
                     .iter()
@@ -342,25 +362,20 @@ impl Session {
                     .collect();
                 Session::Choice(*op, cs2)
             }
-            Session::Return | Session::End(_) => s.clone(),
+            Session::BorrowEnd(_) | Session::End(_) => s.clone(),
             Session::Mu(x, s1) => Session::Mu(x.clone(), Box::new(fake_span(s1.join(s)))),
             Session::Var(x) => Session::Var(x.clone()),
+            Session::Skip => todo!(),
+            Session::Semi { first, second } => todo!(),
         }
     }
 
     pub fn is_owned(&self) -> bool {
-        match self {
-            Session::Var(_x) => true,
-            Session::Mu(_x, s) => s.is_owned(),
-            Session::Op(_op, _t, s) => s.is_owned(),
-            Session::Choice(_op, cs) => cs.iter().all(|(_l, s)| s.is_owned()),
-            Session::End(_op) => true,
-            Session::Return => false,
-        }
+        todo!("Delete this function")
     }
 
     pub fn is_borrowed(&self) -> bool {
-        !self.is_owned()
+        todo!("Delete this function")
     }
 }
 
@@ -385,7 +400,7 @@ impl Expr {
         match self {
             Expr::Const(_) => HashSet::new(),
             Expr::New(_r) => HashSet::new(),
-            Expr::Drop(e) => e.free_vars(),
+            Expr::BorrowEnd(_, e) => e.free_vars(),
             Expr::Var(x) => HashSet::from([x.val.clone()]),
             Expr::Abs(x, e) => without(e.free_vars(), &x.val),
             Expr::App(e1, e2) => union(e1.free_vars(), e2.free_vars()),
@@ -396,15 +411,6 @@ impl Expr {
             Expr::Ann(e, _t) => e.free_vars(),
             Expr::Let(x, e1, e2) => union(e1.free_vars(), without(e2.free_vars(), x)),
             Expr::Seq(e1, e2) => union(e1.free_vars(), e2.free_vars()),
-            Expr::LetDecl(_x, _t, cs, e) => {
-                let mut xs = HashSet::new();
-                for c in cs {
-                    xs.extend(c.free_vars())
-                }
-                union(xs, e.free_vars())
-            }
-            Expr::AppL(e1, e2) => union(e1.free_vars(), e2.free_vars()),
-            Expr::Borrow(x) => HashSet::from([x.val.clone()]),
             Expr::Inj(_l, e) => e.free_vars(),
             Expr::CaseSum(e, cs) => {
                 let mut xs = e.free_vars();
@@ -421,7 +427,10 @@ impl Expr {
             Expr::Op2(_op2, e1, e2) => union(e1.free_vars(), e2.free_vars()),
             Expr::If(e, e1, e2) => union(e.free_vars(), union(e1.free_vars(), e2.free_vars())),
             Expr::Select(_l, e) => e.free_vars(),
-            Expr::Offer(e) => e.free_vars(),
+            Expr::Branch(e) => e.free_vars(),
+            Expr::LSplit(_, e) => e.free_vars(),
+            Expr::RSplit(_, e) => e.free_vars(),
+            Expr::LetDecl(spanned, spanned1, spanned2, spanned3) => todo!(),
         }
     }
 }
@@ -456,13 +465,33 @@ impl Pattern {
 impl Type {
     pub fn sem_eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Type::Chan(s1), Type::Chan(s2)) => s1.sem_eq(s2),
-            (Type::Arr(m1, p1, t11, t12), Type::Arr(m2, p2, t21, t22)) => {
-                m1 == m2 && p1 == p2 && t11.sem_eq(t21) && t12.sem_eq(t22)
-            }
-            (Type::Prod(m1, t11, t12), Type::Prod(m2, t21, t22)) => {
-                m1 == m2 && t11.sem_eq(t21) && t12.sem_eq(t22)
-            }
+            (Type::Chan(s1), Type::Chan(s2)) => todo!(),
+            (
+                Type::Arr {
+                    mult: m1,
+                    eff: p1,
+                    param: t11,
+                    ret: t12,
+                },
+                Type::Arr {
+                    mult: m2,
+                    eff: p2,
+                    param: t21,
+                    ret: t22,
+                },
+            ) => m1 == m2 && p1 == p2 && t11.sem_eq(t21) && t12.sem_eq(t22),
+            (
+                Type::Prod {
+                    mult: m1,
+                    first: t11,
+                    second: t12,
+                },
+                Type::Prod {
+                    mult: m2,
+                    first: t21,
+                    second: t22,
+                },
+            ) => m1 == m2 && t11.sem_eq(t21) && t12.sem_eq(t22),
             (Type::Variant(cs1), Type::Variant(cs2)) => {
                 if let Some(cs) = merge_clauses(&cs1, &cs2, false) {
                     cs.iter().all(|(_, t1, t2)| t1.sem_eq(t2))
@@ -480,8 +509,12 @@ impl Type {
     pub fn is_unr(&self) -> bool {
         match self {
             Type::Chan(_) => false,
-            Type::Arr(m, _, _, _) => m.val == Mult::Unr,
-            Type::Prod(m, t1, t2) => m.val == Mult::Unr || (t1.is_unr() && t2.is_unr()),
+            Type::Arr { mult: m, .. } => m.val == Mult::Unr,
+            Type::Prod {
+                mult: m,
+                first: t1,
+                second: t2,
+            } => m.val == Mult::Unr || (t1.is_unr() && t2.is_unr()),
             Type::Variant(cs) => cs.iter().all(|(_, t)| t.is_unr()),
             Type::Unit => true,
             Type::Int => true,
@@ -512,45 +545,7 @@ impl Eff {
     }
 }
 
-/////////////////////////// Context Free ////////////////////////////
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum CFSession {
-    Skip,
-    Semi {
-        first: Box<SCFSession>,
-        second: Box<SCFSession>,
-    },
-    End(SessionOp),
-    BorrowEnd(SessionOp),
-    Op(SessionOp, Box<SCFType>),
-    Choice(SessionOp, Vec<(SLabel, SCFSession)>),
-    Mu(SId, Box<SCFSession>),
-    Var(SId),
-}
-pub type SCFSession = Spanned<CFSession>;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum CFType {
-    Chan(CFSession),
-    Arr {
-        mult: SMult,
-        eff: SEff,
-        param: Box<SCFType>,
-        ret: Box<SCFType>,
-    },
-    Prod {
-        mult: SMult,
-        first: Box<SCFType>,
-        second: Box<SCFType>,
-    },
-    Variant(Vec<(SLabel, SCFType)>),
-    Unit,
-    Int,
-    Bool,
-    String,
-}
-pub type SCFType = Spanned<CFType>;
+/////////////////////////// Macros ////////////////////////////
 
 /// let s = session_type! { ... };
 #[macro_export]
@@ -638,13 +633,13 @@ macro_rules! session_type {
         session_type!(@borrow_end $crate::syntax::SessionOp::Recv)
     };
     (@atom Skip) => {
-        session_type!(@spanned $crate::syntax::CFSession::Skip)
+        session_type!(@spanned $crate::syntax::Session::Skip)
     };
     (@atom mu $var:ident . $($body:tt)+) => {
         session_type!(@mu $var, session_type!($($body)+))
     };
     (@atom $var:ident) => {
-        session_type!(@spanned $crate::syntax::CFSession::Var(session_type!(@sid $var)))
+        session_type!(@spanned $crate::syntax::Session::Var(session_type!(@sid $var)))
     };
     (@atom ( $($inner:tt)+ )) => {
         session_type!($($inner)+)
@@ -679,20 +674,20 @@ macro_rules! session_type {
     };
 
     (@type Int) => {
-        $crate::util::span::Spanned::new($crate::syntax::CFType::Int, 0..0)
+        $crate::util::span::Spanned::new($crate::syntax::Type::Int, 0..0)
     };
     (@type Bool) => {
-        $crate::util::span::Spanned::new($crate::syntax::CFType::Bool, 0..0)
+        $crate::util::span::Spanned::new($crate::syntax::Type::Bool, 0..0)
     };
     (@type String) => {
-        $crate::util::span::Spanned::new($crate::syntax::CFType::String, 0..0)
+        $crate::util::span::Spanned::new($crate::syntax::Type::String, 0..0)
     };
     (@type Unit) => {
-        $crate::util::span::Spanned::new($crate::syntax::CFType::Unit, 0..0)
+        $crate::util::span::Spanned::new($crate::syntax::Type::Unit, 0..0)
     };
     (@type Chan ( $($sess:tt)+ )) => {
         $crate::util::span::Spanned::new(
-            $crate::syntax::CFType::Chan(session_type!($($sess)+).val),
+            $crate::syntax::Type::Chan(session_type!($($sess)+).val),
             0..0,
         )
     };
@@ -707,25 +702,25 @@ macro_rules! session_type {
         $crate::util::span::Spanned::new($val, 0..0)
     };
     (@semi $first:expr, $second:expr) => {
-        session_type!(@spanned $crate::syntax::CFSession::Semi {
+        session_type!(@spanned $crate::syntax::Session::Semi {
             first: Box::new($first),
             second: Box::new($second),
         })
     };
     (@op $op:expr, $ty:expr) => {
-        session_type!(@spanned $crate::syntax::CFSession::Op($op, Box::new($ty)))
+        session_type!(@spanned $crate::syntax::Session::Op($op, Box::new($ty)))
     };
     (@choice $op:expr, $branches:expr) => {
-        session_type!(@spanned $crate::syntax::CFSession::Choice($op, $branches))
+        session_type!(@spanned $crate::syntax::Session::Choice($op, $branches))
     };
     (@end $op:expr) => {
-        session_type!(@spanned $crate::syntax::CFSession::End($op))
+        session_type!(@spanned $crate::syntax::Session::End($op))
     };
     (@borrow_end $op:expr) => {
-        session_type!(@spanned $crate::syntax::CFSession::BorrowEnd($op))
+        session_type!(@spanned $crate::syntax::Session::BorrowEnd($op))
     };
     (@mu $var:ident, $body:expr) => {
-        session_type!(@spanned $crate::syntax::CFSession::Mu(
+        session_type!(@spanned $crate::syntax::Session::Mu(
             session_type!(@sid $var),
             Box::new($body),
         ))
@@ -741,31 +736,31 @@ macro_rules! session_type {
 
 #[cfg(test)]
 mod session_type_tests {
-    use super::{CFSession, CFType, SCFSession, SessionOp};
+    use super::{SSession, Session, SessionOp, Type};
     use crate::util::span::Spanned;
 
-    fn spanned_session(session: CFSession) -> SCFSession {
+    fn spanned_session(session: Session) -> SSession {
         Spanned::new(session, 0..0)
     }
 
-    fn session_op(session_op: SessionOp, typ: CFType) -> CFSession {
-        CFSession::Op(session_op, Box::new(Spanned::new(typ, 0..0)))
+    fn session_op(session_op: SessionOp, typ: Type) -> Session {
+        Session::Op(session_op, Box::new(Spanned::new(typ, 0..0)))
     }
 
     #[test]
     fn session_type_send_recv_semi() {
         let got = session_type!(!Int; ?Bool; Close);
-        let expected = spanned_session(CFSession::Semi {
-            first: Box::new(spanned_session(CFSession::Op(
+        let expected = spanned_session(Session::Semi {
+            first: Box::new(spanned_session(Session::Op(
                 SessionOp::Send,
-                Box::new(Spanned::new(CFType::Int, 0..0)),
+                Box::new(Spanned::new(Type::Int, 0..0)),
             ))),
-            second: Box::new(spanned_session(CFSession::Semi {
-                first: Box::new(spanned_session(CFSession::Op(
+            second: Box::new(spanned_session(Session::Semi {
+                first: Box::new(spanned_session(Session::Op(
                     SessionOp::Recv,
-                    Box::new(Spanned::new(CFType::Bool, 0..0)),
+                    Box::new(Spanned::new(Type::Bool, 0..0)),
                 ))),
-                second: Box::new(spanned_session(CFSession::End(SessionOp::Send))),
+                second: Box::new(spanned_session(Session::End(SessionOp::Send))),
             })),
         });
 
@@ -775,11 +770,11 @@ mod session_type_tests {
     #[test]
     fn session_type_semi_parentheses() {
         let got = session_type!(!Int; (?Bool; !String));
-        let expected = spanned_session(CFSession::Semi {
-            first: Box::new(spanned_session(session_op(SessionOp::Send, CFType::Int))),
-            second: Box::new(spanned_session(CFSession::Semi {
-                first: Box::new(spanned_session(session_op(SessionOp::Recv, CFType::Bool))),
-                second: Box::new(spanned_session(session_op(SessionOp::Send, CFType::String))),
+        let expected = spanned_session(Session::Semi {
+            first: Box::new(spanned_session(session_op(SessionOp::Send, Type::Int))),
+            second: Box::new(spanned_session(Session::Semi {
+                first: Box::new(spanned_session(session_op(SessionOp::Recv, Type::Bool))),
+                second: Box::new(spanned_session(session_op(SessionOp::Send, Type::String))),
             })),
         });
 
@@ -789,21 +784,21 @@ mod session_type_tests {
     #[test]
     fn session_type_choice_offer_select() {
         let got = session_type!(+{ left: !Int, right: ?String });
-        let expected = spanned_session(CFSession::Choice(
+        let expected = spanned_session(Session::Choice(
             SessionOp::Send,
             vec![
                 (
                     Spanned::new("left".to_string(), 0..0),
-                    spanned_session(CFSession::Op(
+                    spanned_session(Session::Op(
                         SessionOp::Send,
-                        Box::new(Spanned::new(CFType::Int, 0..0)),
+                        Box::new(Spanned::new(Type::Int, 0..0)),
                     )),
                 ),
                 (
                     Spanned::new("right".to_string(), 0..0),
-                    spanned_session(CFSession::Op(
+                    spanned_session(Session::Op(
                         SessionOp::Recv,
-                        Box::new(Spanned::new(CFType::String, 0..0)),
+                        Box::new(Spanned::new(Type::String, 0..0)),
                     )),
                 ),
             ],
@@ -815,14 +810,14 @@ mod session_type_tests {
     #[test]
     fn session_type_recursive_and_vars() {
         let got = session_type!(mu X. ?Int; X);
-        let expected = spanned_session(CFSession::Mu(
+        let expected = spanned_session(Session::Mu(
             Spanned::new("X".to_string(), 0..0),
-            Box::new(spanned_session(CFSession::Semi {
-                first: Box::new(spanned_session(CFSession::Op(
+            Box::new(spanned_session(Session::Semi {
+                first: Box::new(spanned_session(Session::Op(
                     SessionOp::Recv,
-                    Box::new(Spanned::new(CFType::Int, 0..0)),
+                    Box::new(Spanned::new(Type::Int, 0..0)),
                 ))),
-                second: Box::new(spanned_session(CFSession::Var(Spanned::new(
+                second: Box::new(spanned_session(Session::Var(Spanned::new(
                     "X".to_string(),
                     0..0,
                 )))),
@@ -835,13 +830,13 @@ mod session_type_tests {
     #[test]
     fn session_type_borrow_and_skip() {
         let got = session_type!(Ret; Skip; Acq; Wait);
-        let expected = spanned_session(CFSession::Semi {
-            first: Box::new(spanned_session(CFSession::BorrowEnd(SessionOp::Send))),
-            second: Box::new(spanned_session(CFSession::Semi {
-                first: Box::new(spanned_session(CFSession::Skip)),
-                second: Box::new(spanned_session(CFSession::Semi {
-                    first: Box::new(spanned_session(CFSession::BorrowEnd(SessionOp::Recv))),
-                    second: Box::new(spanned_session(CFSession::End(SessionOp::Recv))),
+        let expected = spanned_session(Session::Semi {
+            first: Box::new(spanned_session(Session::BorrowEnd(SessionOp::Send))),
+            second: Box::new(spanned_session(Session::Semi {
+                first: Box::new(spanned_session(Session::Skip)),
+                second: Box::new(spanned_session(Session::Semi {
+                    first: Box::new(spanned_session(Session::BorrowEnd(SessionOp::Recv))),
+                    second: Box::new(spanned_session(Session::End(SessionOp::Recv))),
                 })),
             })),
         });
