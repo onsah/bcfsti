@@ -1399,7 +1399,7 @@ pub fn split_arrow_type(mut t: &SType) -> (Vec<(SType, SMult)>, SType, Option<SE
     }
 }
 
-pub fn infer_type(e: &mut SExpr) -> Result<(SType, Eff), TypeError> {
+pub fn infer_type(e: &SExpr) -> Result<(SType, Eff), TypeError> {
     let (t, _u, eff) = infer(&Ctx::Empty, e)?;
     if t.is_ord() {
         return Err(TypeError::MainReturnsOrd(e.clone(), t.clone()));

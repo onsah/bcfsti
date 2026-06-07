@@ -109,6 +109,9 @@ impl Ctx {
         self.map_binds(&mut |_x, t| unr = unr && t.is_unr());
         unr
     }
+    /// ```
+    /// let (leftover_ctx, ty) = ctx.lookup_ord_pure(x)
+    /// ```
     pub fn lookup_ord_pure(&self, x: &Id) -> Option<(Ctx, SType)> {
         let mut c = self.clone();
         c.lookup_ord(x).map(|t| (c, t))
