@@ -1,0 +1,9 @@
+let c1, c2 = new Close in
+let c3, c4 = new !Int. Close in
+let c5, c6 = (c1, c3) in
+send 3 &c6;
+close c6;
+close c5;
+wait c2;
+recv &c4;
+wait c4

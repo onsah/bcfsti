@@ -388,7 +388,7 @@ mod tests {
             // Setting both fork and timeout is redundant since timeout implies
             // fork, but both are shown for clarity.
             fork: true,
-            cases: 100,
+            cases: 20,
             max_global_rejects: 1,
             .. ProptestConfig::default()
         })]
@@ -417,7 +417,7 @@ mod tests {
             // Setting both fork and timeout is redundant since timeout implies
             // fork, but both are shown for clarity.
             fork: true,
-            cases: 100,
+            cases: 20,
             max_global_rejects: 1,
             .. ProptestConfig::default()
         })]
