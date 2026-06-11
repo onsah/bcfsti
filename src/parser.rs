@@ -51,6 +51,13 @@ peg::parser! {
         pub rule constant() -> Const
             = quiet!{ string() / int() / bool() / unit() } / expected!("literal")
 
+        // Mobilities
+        pub rule mob() -> Mob
+            = (tok(Unr) / [Tok(Id("m"))]) { Mob::Mobile }
+            / (tok(Lin) / [Tok(Id("s"))]) { Mob::Static }
+            / expected!("mobility")
+        pub rule smob() -> SMob = spanned(<mob()>)
+
         // Multiplicities
 
         pub rule mult() -> Mult
@@ -76,6 +83,7 @@ peg::parser! {
             = s1:ssession() tok(Semicolon) s2:ssession()
               { Session::Semi { first: Box::new(s1), second: Box::new(s2) } }
             / tok(Return) { Session::BorrowEnd(SessionOp::Send) }
+            / tok(AcqT) { Session::BorrowEnd(SessionOp::Recv) }
             / tok(Wait) { Session::End(SessionOp::Recv) }
             / tok(Close) { Session::End(SessionOp::Send) }
             / tok(Bang) t:stype_atom()
@@ -98,9 +106,9 @@ peg::parser! {
 
         #[cache_left_rec]
         pub rule type_arrow() -> Type
-            = param:stype_prod() tok(Minus) tok(BracketL) mult:smult() tok(Semicolon)? eff:seffect()
+            = param:stype_prod() tok(Minus) tok(BracketL) mob:smob() tok(Semicolon)? mult:smult() tok(Semicolon)? eff:seffect()
               tok(BracketR) tok(Arrow) ret:stype_arrow()
-              { Type::Arr{ mult, eff, param: Box::new(param), ret: Box::new(ret) } }
+              { Type::Arr{ mob, mult, eff, param: Box::new(param), ret: Box::new(ret) } }
             / t:type_prod() { t }
         pub rule stype_arrow() -> SType = spanned(<type_arrow()>)
 
@@ -213,8 +221,8 @@ peg::parser! {
         #[cache_left_rec]
         pub rule expr_app() -> Expr
             = tok(New) s:ssession() { Expr::New(s) }
-            / tok(Send) e1:sexpr_atom() e2:sexpr_atom() { Expr::Send(Box::new(e1), Box::new(e2)) }
-            / tok(Recv) e:sexpr_atom() { Expr::Recv(Box::new(e)) }
+            / tok(Send) tok(At) ty:stype() e1:sexpr_atom() e2:sexpr_atom() { Expr::Send(ty, Box::new(e1), Box::new(e2)) }
+            / tok(Recv) tok(At) ty:stype() e:sexpr_atom() { Expr::Recv(ty, Box::new(e)) }
             / tok(Drop) e:sexpr_atom() { Expr::BorrowEnd(SessionOp::Send, Box::new(e)) }
             / tok(Acquire) e:sexpr_atom() { Expr::BorrowEnd(SessionOp::Recv, Box::new(e)) }
             / tok(Close) e:sexpr_atom() { Expr::End(SessionOp::Send, Box::new(e)) }

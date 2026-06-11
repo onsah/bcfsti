@@ -1,5 +1,7 @@
 use crate::{
-    syntax::{Clause, Const, Eff, Expr, Mult, Op1, Op2, Pattern, SMult, Session, SessionOp, Type},
+    syntax::{
+        Clause, Const, Eff, Expr, Mob, Mult, Op1, Op2, Pattern, SMult, Session, SessionOp, Type,
+    },
     util::{
         pretty::{Assoc, Pretty, PrettyEnv},
         span::Spanned,
@@ -24,6 +26,7 @@ impl Pretty<UserState> for Type {
     fn pp(&self, p: &mut PrettyEnv<UserState>) {
         match self {
             Type::Arr {
+                mob,
                 mult,
                 eff,
                 param,
@@ -31,6 +34,8 @@ impl Pretty<UserState> for Type {
             } => p.infix(2, R, |p| {
                 p.pp_arg(L, param);
                 p.pp(" –[");
+                p.pp(mob);
+                p.pp("; ");
                 p.pp(mult);
                 p.pp("; ");
                 p.pp(eff);
@@ -60,7 +65,7 @@ impl Pretty<UserState> for Type {
             }),
             Type::Chan(s) => p.infix(4, N, |p| {
                 p.pp("Chan ");
-                // p.pp_arg(R, s);
+                p.pp_arg(R, s);
             }),
             Type::Variant(cs) => {
                 p.pp("<");
@@ -119,9 +124,9 @@ impl Pretty<UserState> for Session {
                 }
                 p.pp("}");
             }
-            Session::BorrowEnd(SessionOp::Send) => p.pp("return"),
-            Session::BorrowEnd(SessionOp::Recv) => p.pp("acquire"),
-            Session::Skip => p.pp("skip"), // TODO: Should it be trimmed?
+            Session::BorrowEnd(SessionOp::Send) => p.pp("Ret"),
+            Session::BorrowEnd(SessionOp::Recv) => p.pp("Acq"),
+            Session::Skip => p.pp("skip"),
             Session::Semi { first, second } => {
                 p.pp("(");
                 p.pp(first);
@@ -129,6 +134,20 @@ impl Pretty<UserState> for Session {
                 p.pp(second);
                 p.pp(")");
             }
+            Session::UVar(id) => {
+                p.pp("(uvar ");
+                p.pp(&id.to_string());
+                p.pp(")");
+            }
+        }
+    }
+}
+
+impl Pretty<UserState> for Mob {
+    fn pp(&self, p: &mut PrettyEnv<UserState>) {
+        match self {
+            Mob::Mobile => p.pp("mobile"),
+            Mob::Static => p.pp("static"),
         }
     }
 }
@@ -214,14 +233,16 @@ impl Pretty<UserState> for Expr {
                 p.pp("fork ");
                 p.pp_arg(R, e);
             }),
-            Expr::Send(e1, e2) => p.infix(10, L, |p| {
-                p.pp("send ");
+            Expr::Send(ty, e1, e2) => p.infix(10, L, |p| {
+                p.pp("send @");
+                p.pp_arg(L, ty);
                 p.pp_arg(R, e1);
                 p.pp(" ");
                 p.pp_arg(R, e2);
             }),
-            Expr::Recv(e) => p.infix(10, L, |p| {
-                p.pp("recv ");
+            Expr::Recv(ty, e) => p.infix(10, L, |p| {
+                p.pp("recv @");
+                p.pp_arg(L, ty);
                 p.pp_arg(R, e);
             }),
             Expr::End(op, e) => p.infix(10, L, |p| {

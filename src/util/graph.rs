@@ -27,8 +27,11 @@ impl<L: Clone + Eq + Hash + std::fmt::Debug> Graph<L> {
     }
     pub fn plus(&self, other: &Graph<L>) -> Self {
         let mut out = self.union(other);
+        // dbg!(&out);
         for src in self.edges.keys() {
+            // dbg!(src);
             for tgt in other.edges.keys() {
+                // dbg!(tgt);
                 out.edges.get_mut(src).unwrap().insert(tgt.clone());
             }
         }

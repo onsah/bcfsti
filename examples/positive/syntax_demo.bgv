@@ -10,15 +10,15 @@ x;
     bar x -> { x - y }
 });
 let
-    foo : Int -[ u 0 ]-> Int
+    foo : Int -[m u 0]-> Int
     foo x = x + 5
 in
 foo 10;
 let
-    server : ?Int; !Int; Wait -[ u 1 ]→ Unit
+    server : ?Int; !Int; Wait -[m u 1]→ Unit
     server c =
-        let x = recv c in
-        send (0 - x) c;
+        let x = recv @Int c in
+        send @Int (0 - x) c;
         wait c
 in
     server c

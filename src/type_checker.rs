@@ -1,14 +1,21 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Mul,
+};
 
 use crate::{
     constraint::Constraints,
     ren::Ren,
+    semantics::Chan,
     syntax::{
-        Eff, Expr, Id, Label, Mult, Op1, Op2, Pattern, SEff, SExpr, SId, SLabel, SMult, SPattern,
-        SSession, SType, Session, SessionOp, Type,
+        Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, Pattern, SEff, SExpr, SId, SLabel, SMult,
+        SPattern, SSession, SType, Session, SessionOp, Type, UVarId,
     },
     type_context::{ext, Ctx, CtxCtx, CtxS, JoinOrd},
-    util::span::fake_span,
+    util::{
+        pretty::pretty_def,
+        span::{fake_span, Spanned},
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -52,96 +59,409 @@ pub enum TypeError {
     MainReturnsOrd(SExpr, SType),
     WfSessionNotClosed(SSession, SId),
     WfSessionShadowing(SSession, SId),
-    NewWithBorrowedType(SExpr, SSession),
+    TypeNotValidForNew(SSession),
 }
 
-pub fn rename_vars(r: &Ren, xs: &HashSet<Id>) -> HashSet<Id> {
-    let mut out = HashSet::new();
-    for x in xs {
-        if let Some(y) = r.map.get(x) {
-            out.insert(y.clone());
-        } else {
-            out.insert(x.clone());
+pub fn infer_type(e: &SExpr) -> Result<(SType, Eff), TypeError> {
+    let mut checker = TypeChecker { uvar_counter: 0 };
+    let (t, cs, eff) = checker.infer(&Ctx::Empty, e)?;
+    // TODO: Constraint checking
+    for (ty1, ty2) in cs.iter() {
+        println!("Constraint: {} == {}", pretty_def(ty1), pretty_def(ty2));
+    }
+    if t.is_ord() {
+        return Err(TypeError::MainReturnsOrd(e.clone(), t.clone()));
+    }
+    Ok((t, eff))
+}
+
+struct TypeChecker {
+    uvar_counter: usize,
+}
+
+impl TypeChecker {
+    fn infer(&mut self, ctx: &Ctx, e: &SExpr) -> Result<(SType, Constraints, Eff), TypeError> {
+        // println!("Expression: {}, {:?}", pretty_def(&e), e);
+        // println!("Ctx: {}", pretty_context_notype(&ctx.simplify()));
+        match &e.val {
+            Expr::Const(c) => {
+                let ty = match c {
+                    crate::syntax::Const::Unit => Type::Unit,
+                    crate::syntax::Const::Int(_) => Type::Int,
+                    crate::syntax::Const::Bool(_) => Type::Bool,
+                    crate::syntax::Const::String(_) => Type::String,
+                };
+
+                Ok((fake_span(ty), Constraints::empty(), Eff::No))
+            }
+            Expr::Var(x) => match ctx.lookup_ord_pure(x) {
+                Some((ctx, t)) => {
+                    assert_unr_ctx(e, &ctx)?;
+                    Ok((t.clone(), Constraints::empty(), Eff::No))
+                }
+                None => Err(TypeError::UndefinedVariable(x.clone())),
+            },
+            Expr::New(sess_type) => match ctx.is_unr() {
+                false => Err(TypeError::LeftOverCtx(e.clone(), ctx.clone())),
+                true => {
+                    if !is_valid_for_new(&sess_type.val) {
+                        return Err(TypeError::TypeNotValidForNew(sess_type.clone()));
+                    }
+                    let typ = fake_span(Type::Prod {
+                        mult: fake_span(Mult::Lin),
+                        first: Box::new(Spanned::new(
+                            Type::Chan(Session::Semi {
+                                first: Box::new(fake_span(Session::BorrowEnd(SessionOp::Recv))),
+                                second: Box::new(sess_type.clone()),
+                            }),
+                            sess_type.span.clone(),
+                        )),
+                        second: Box::new(Spanned::new(
+                            Type::Chan(Session::Semi {
+                                first: Box::new(fake_span(Session::BorrowEnd(SessionOp::Recv))),
+                                second: Box::new(fake_span(sess_type.dual())),
+                            }),
+                            sess_type.span.clone(),
+                        )),
+                    });
+                    Ok((typ, Constraints::empty(), Eff::No))
+                }
+            },
+            Expr::LetPair(id1, id2, expr, body) => {
+                if ctx.vars().contains(&id1.val) {
+                    return Err(TypeError::Shadowing(e.clone(), id1.clone()));
+                }
+                if ctx.vars().contains(&id2.val) {
+                    return Err(TypeError::Shadowing(e.clone(), id2.clone()));
+                }
+
+                let expr_ctx = ctx.restrict(&expr.free_vars());
+                let body_ctx = ctx.restrict(&body.free_vars());
+
+                {
+                    let res_ctx = Ctx::Join(
+                        Box::new(expr_ctx.clone()),
+                        Box::new(body_ctx.clone()),
+                        JoinOrd::Ordered,
+                    );
+
+                    if !ctx.is_subctx_of(&res_ctx) {
+                        return Err(TypeError::CtxSplitFailed(
+                            e.clone(),
+                            res_ctx.clone(),
+                            ctx.clone(),
+                        ));
+                    }
+                }
+
+                let (expr_ty, expr_constraints, expr_eff) = self.infer(&expr_ctx, expr)?;
+
+                let Type::Prod {
+                    mult,
+                    first,
+                    second,
+                } = &expr_ty.val
+                else {
+                    return Err(TypeError::Mismatch(
+                        *expr.clone(),
+                        Err("Product".into()),
+                        expr_ty.clone(),
+                    ));
+                };
+
+                let (body_ty, body_constraints, body_eff) = {
+                    let var_ctx = ext(
+                        mult.val,
+                        Ctx::Bind(id1.clone(), *first.clone()),
+                        Ctx::Bind(id2.clone(), *second.clone()),
+                    );
+                    let body_ctx =
+                        Ctx::Join(Box::new(var_ctx), Box::new(body_ctx), JoinOrd::Ordered);
+                    self.infer(&body_ctx, body)
+                }?;
+
+                Ok((
+                    body_ty,
+                    expr_constraints.join(body_constraints),
+                    Eff::lub(expr_eff, body_eff),
+                ))
+            }
+            Expr::Seq(e1, e2) => {
+                let e1_ctx = ctx.restrict(&e1.free_vars());
+                let e2_ctx = ctx.restrict(&e2.free_vars());
+
+                {
+                    let res_ctx = Ctx::Join(
+                        Box::new(e1_ctx.clone()),
+                        Box::new(e2_ctx.clone()),
+                        JoinOrd::Ordered,
+                    );
+
+                    // dbg!(&res_ctx);
+                    // dbg!(&ctx);
+                    if !ctx.is_subctx_of(&res_ctx) {
+                        return Err(TypeError::CtxSplitFailed(
+                            e.clone(),
+                            res_ctx.clone(),
+                            ctx.clone(),
+                        ));
+                    }
+                }
+
+                let (e1_constraints, e1_eff) = self.check(&e1_ctx, e1, &fake_span(Type::Unit))?;
+                let (e2_ty, e2_constraints, e2_eff) = self.infer(&e2_ctx, e2)?;
+
+                Ok((
+                    e2_ty,
+                    e1_constraints.join(e2_constraints),
+                    Eff::lub(e1_eff, e2_eff),
+                ))
+            }
+            Expr::Send(ty, val, chan) => {
+                // TODO: check if ty is mobile
+
+                let val_ctx = ctx.restrict(&val.free_vars());
+                let (val_cs, _) = self.check(&val_ctx, val, ty)?;
+
+                let chan_ctx = ctx.restrict(&chan.free_vars());
+                let expected_chan_ty = fake_span(Type::Chan(Session::Op(
+                    SessionOp::Send,
+                    Box::new(ty.clone()),
+                )));
+                let (chan_cs, _) = self.check(&chan_ctx, chan, &expected_chan_ty)?;
+
+                // ctx must be a subcontext of unordered join of val_ctx and chan_ctx must
+                {
+                    let res_ctx = Ctx::Join(
+                        Box::new(val_ctx.clone()),
+                        Box::new(chan_ctx.clone()),
+                        JoinOrd::Unordered,
+                    );
+                    // dbg!(&res_ctx);
+                    // dbg!(&ctx);
+                    if !ctx.is_subctx_of(&res_ctx) {
+                        return Err(TypeError::CtxSplitFailed(
+                            e.clone(),
+                            ctx.clone(),
+                            res_ctx.clone(),
+                        ));
+                    }
+                }
+
+                Ok((fake_span(Type::Unit), val_cs.join(chan_cs), Eff::Yes))
+            }
+            Expr::Recv(ty, chan) => {
+                // TODO: Check if ty is mobile
+
+                let chan_ctx = ctx.restrict(&chan.free_vars());
+                let expected_chan_ty = fake_span(Type::Chan(Session::Op(
+                    SessionOp::Recv,
+                    Box::new(ty.clone()),
+                )));
+                let (chan_cs, _) = self.check(&chan_ctx, chan, &expected_chan_ty)?;
+
+                if !ctx.is_subctx_of(&chan_ctx) {
+                    return Err(TypeError::CtxSplitFailed(
+                        e.clone(),
+                        ctx.clone(),
+                        chan_ctx.clone(),
+                    ));
+                }
+
+                Ok((ty.clone(), chan_cs, Eff::Yes))
+            }
+            Expr::BorrowEnd(op, chan) => {
+                let chan_ctx = ctx.restrict(&chan.free_vars());
+                let expected_ty = fake_span(Type::Chan(Session::BorrowEnd(*op)));
+                let (chan_cs, chan_eff) = self.check(&chan_ctx, chan, &expected_ty)?;
+
+                // TODO: double check whether acquire constant is pure
+                Ok((fake_span(Type::Unit), chan_cs, chan_eff))
+            }
+            Expr::Fork(body) => {
+                let body_ctx = ctx.restrict(&body.free_vars());
+
+                if !ctx.is_subctx_of(&body_ctx) {
+                    return Err(TypeError::CtxSplitFailed(
+                        e.clone(),
+                        ctx.clone(),
+                        body_ctx.clone(),
+                    ));
+                }
+
+                let expected_body_ty = fake_span(Type::Arr {
+                    mob: fake_span(Mob::Mobile),
+                    mult: fake_span(Mult::Lin),
+                    eff: fake_span(Eff::No),
+                    param: Box::new(fake_span(Type::Unit)),
+                    ret: Box::new(fake_span(Type::Unit)),
+                });
+                let (body_ty, body_cs, body_eff) = self.infer(&body_ctx, body)?;
+
+                todo!()
+
+                // if !body_ty.is_unit() {
+                //     return Err(TypeError::Mismatch(
+                //         *body.clone(),
+                //         Ok(fake_span(Type::Unit)),
+                //         body_ty.clone(),
+                //     ));
+                // }
+
+                // Ok((fake_span(Type::Unit), body_cs, body_eff))
+            }
+            Expr::LSplit(prefix_session, chan) => {
+                let uvar = self.new_uvar();
+                let expected_chan_ty = fake_span(Type::Chan(Session::Semi {
+                    first: Box::new(prefix_session.clone()),
+                    second: Box::new(uvar.clone()),
+                }));
+                let chan_ctx = &ctx.restrict(&chan.free_vars());
+
+                if !ctx.is_subctx_of(&chan_ctx) {
+                    return Err(TypeError::CtxSplitFailed(
+                        e.clone(),
+                        ctx.clone(),
+                        chan_ctx.clone(),
+                    ));
+                }
+
+                let (chan_cs, chan_eff) = self.check(chan_ctx, chan, &expected_chan_ty)?;
+
+                let ret_ty = Type::Prod {
+                    mult: fake_span(Mult::Lin),
+                    first: Box::new(fake_span(Type::Chan(prefix_session.val.clone()))),
+                    second: Box::new(fake_span(Type::Chan(uvar.val))),
+                };
+
+                Ok((fake_span(ret_ty), chan_cs, chan_eff))
+            }
+            Expr::End(session_op, spanned) => todo!(),
+            Expr::RSplit(spanned, spanned1) => todo!(),
+            Expr::Abs(spanned, spanned1) => todo!(),
+            Expr::App(spanned, spanned1) => todo!(),
+            Expr::Pair(spanned, spanned1) => todo!(),
+            Expr::Let(spanned, spanned1, spanned2) => todo!(),
+            Expr::LetDecl(spanned, spanned1, spanned2, spanned3) => todo!(),
+            Expr::Inj(spanned, spanned1) => todo!(),
+            Expr::CaseSum(spanned, items) => todo!(),
+            Expr::Select(spanned, spanned1) => todo!(),
+            Expr::Branch(spanned) => todo!(),
+            Expr::Ann(spanned, spanned1) => todo!(),
+            Expr::Op1(op1, spanned) => todo!(),
+            Expr::Op2(op2, spanned, spanned1) => todo!(),
+            Expr::If(spanned, spanned1, spanned2) => todo!(),
         }
     }
-    out
-}
 
-pub fn intersection<T: std::hash::Hash + Eq + Clone>(
-    xss: impl IntoIterator<Item = HashSet<T>>,
-) -> HashSet<T> {
-    let xss: Vec<_> = xss.into_iter().collect();
-    if xss.len() == 0 {
-        return HashSet::new();
-    }
-    let mut it = xss.into_iter();
-    let mut out = it.next().unwrap().clone();
-    for xs in it {
-        out = out.intersection(&xs).cloned().collect();
-    }
-    out
-}
+    fn check(
+        &mut self,
+        ctx: &Ctx,
+        e: &SExpr,
+        expected_ty: &SType,
+    ) -> Result<(Constraints, Eff), TypeError> {
+        let (inferred_ty, mut cs, eff) = self.infer(ctx, e)?;
+        dbg!(pretty_def(e));
+        dbg!(pretty_def(&inferred_ty));
+        dbg!(pretty_def(expected_ty));
 
-pub fn union<T: std::hash::Hash + Eq + Clone>(
-    xss: impl IntoIterator<Item = HashSet<T>>,
-) -> HashSet<T> {
-    let mut out = HashSet::new();
-    for xs in xss {
-        out = out.union(&xs).cloned().collect();
-    }
-    out
-}
-
-pub fn check_variant_label_eq(
-    e: &SExpr,
-    t: &SType,
-    actual: &[&Label],
-    expected: &[&Label],
-) -> Result<(), TypeError> {
-    if actual.len() == 0 {
-        return Err(TypeError::VariantEmpty(e.clone()));
-    }
-    for l in actual {
-        if !expected.contains(l) {
-            return Err(TypeError::CaseExtraLabel(
-                e.clone(),
-                t.clone(),
-                (*l).clone(),
-            ));
+        if !inferred_ty.sem_eq(expected_ty) {
+            println!("adding constraint");
+            cs.add(inferred_ty.val, expected_ty.val.clone());
         }
+
+        Ok((cs, eff))
     }
-    for l in expected {
-        if !actual.contains(l) {
-            return Err(TypeError::CaseMissingLabel(
-                e.clone(),
-                t.clone(),
-                (*l).clone(),
-            ));
+
+    pub fn check_variant_label_eq(
+        e: &SExpr,
+        t: &SType,
+        actual: &[&Label],
+        expected: &[&Label],
+    ) -> Result<(), TypeError> {
+        if actual.len() == 0 {
+            return Err(TypeError::VariantEmpty(e.clone()));
         }
-    }
-    for (i, l) in actual.iter().enumerate() {
-        if i != actual.len() {
-            if (&actual[i + 1..]).contains(l) {
-                return Err(TypeError::CaseDuplicateLabel(
+        for l in actual {
+            if !expected.contains(l) {
+                return Err(TypeError::CaseExtraLabel(
                     e.clone(),
                     t.clone(),
                     (*l).clone(),
                 ));
             }
         }
-    }
-    for (i, l) in expected.iter().enumerate() {
-        if i != expected.len() {
-            if (&expected[i + 1..]).contains(l) {
-                return Err(TypeError::VariantDuplicateLabel(
+        for l in expected {
+            if !actual.contains(l) {
+                return Err(TypeError::CaseMissingLabel(
                     e.clone(),
                     t.clone(),
                     (*l).clone(),
                 ));
             }
         }
+        for (i, l) in actual.iter().enumerate() {
+            if i != actual.len() {
+                if (&actual[i + 1..]).contains(l) {
+                    return Err(TypeError::CaseDuplicateLabel(
+                        e.clone(),
+                        t.clone(),
+                        (*l).clone(),
+                    ));
+                }
+            }
+        }
+        for (i, l) in expected.iter().enumerate() {
+            if i != expected.len() {
+                if (&expected[i + 1..]).contains(l) {
+                    return Err(TypeError::VariantDuplicateLabel(
+                        e.clone(),
+                        t.clone(),
+                        (*l).clone(),
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
-    Ok(())
+
+    fn infer_recv_arg(
+        &mut self,
+        ctx: &Ctx,
+        e: &SExpr,
+    ) -> Result<(SType, Constraints, Eff), TypeError> {
+        self.infer(ctx, e)
+    }
+
+    fn infer_select_arg(
+        &mut self,
+        ctx: &Ctx,
+        e: &SExpr,
+        l: &SLabel,
+    ) -> Result<(SType, Constraints, Eff), TypeError> {
+        self.infer(ctx, e)
+    }
+
+    fn new_uvar(&mut self) -> SSession {
+        let id = self.uvar_counter;
+        self.uvar_counter += 1;
+        fake_span(Session::UVar(id))
+    }
+}
+
+fn is_valid_for_new(s: &Session) -> bool {
+    match s {
+        Session::Skip => true,
+        Session::Semi { first, second } => {
+            is_valid_for_new(&first.val) && is_valid_for_new(&second.val)
+        }
+        Session::Op(_, _) => true,
+        Session::Choice(_, items) => items.iter().all(|(_, s)| is_valid_for_new(s)),
+        Session::Mu(_, body) => is_valid_for_new(body),
+        Session::Var(_) => true,
+        Session::UVar(_) => false,
+        Session::End(_) | Session::BorrowEnd(_) => false,
+    }
 }
 
 fn check_wf_session_(s: &SSession, at_mu: bool, vars: &HashSet<Id>) -> Result<(), TypeError> {
@@ -178,6 +498,7 @@ fn check_wf_session_(s: &SSession, at_mu: bool, vars: &HashSet<Id>) -> Result<()
         Session::BorrowEnd(_op) => Ok(()),
         Session::Skip => todo!(),
         Session::Semi { first, second } => todo!(),
+        Session::UVar(_) => todo!(),
     }
 }
 
@@ -220,48 +541,6 @@ pub fn check_wf_type(t: &SType) -> Result<(), TypeError> {
     }
 }
 
-pub fn check(ctx: &Ctx, e: &SExpr, t: &SType) -> Result<(Constraints, Eff), TypeError> {
-    todo!()
-}
-
-pub fn infer_recv_arg(ctx: &Ctx, e: &SExpr) -> Result<(SType, Constraints, Eff), TypeError> {
-    infer(ctx, e)
-}
-
-pub fn infer_select_arg(
-    ctx: &Ctx,
-    e: &SExpr,
-    l: &SLabel,
-) -> Result<(SType, Constraints, Eff), TypeError> {
-    infer(ctx, e)
-}
-
-pub fn indented(n: usize, s: impl AsRef<str>) -> String {
-    let mut out = String::new();
-    for l in s.as_ref().lines() {
-        for _ in 0..n {
-            out += " ";
-        }
-        out += l;
-    }
-    out
-}
-
-pub fn infer(ctx: &Ctx, e: &SExpr) -> Result<(SType, Constraints, Eff), TypeError> {
-    // println!("\nExpression: {}", pretty_def(&e));
-    // println!("Ctx: {}", pretty_context_notype(&ctx.simplify()));
-    match &e.val {
-        Expr::Var(x) => match ctx.lookup_ord_pure(x) {
-            Some((ctx, t)) => {
-                assert_unr_ctx(e, &ctx)?;
-                Ok((t.clone(), Constraints::empty(), Eff::No))
-            }
-            None => Err(TypeError::UndefinedVariable(x.clone())),
-        },
-        _ => todo!(),
-    }
-}
-
 pub fn check_pattern(pat: &SPattern, t: &SType) -> Result<Ctx, TypeError> {
     match (&pat.val, &t.val) {
         (Pattern::Var(x), _) => Ok(Ctx::Bind(x.clone(), t.clone())),
@@ -281,17 +560,65 @@ pub fn check_pattern(pat: &SPattern, t: &SType) -> Result<Ctx, TypeError> {
     }
 }
 
-pub fn split_arrow_type(mut t: &SType) -> (Vec<(SType, SMult)>, SType, Option<SEff>) {
+fn union<T: std::hash::Hash + Eq + Clone>(xss: impl IntoIterator<Item = HashSet<T>>) -> HashSet<T> {
+    let mut out = HashSet::new();
+    for xs in xss {
+        out = out.union(&xs).cloned().collect();
+    }
+    out
+}
+
+fn intersection<T: std::hash::Hash + Eq + Clone>(
+    xss: impl IntoIterator<Item = HashSet<T>>,
+) -> HashSet<T> {
+    let xss: Vec<_> = xss.into_iter().collect();
+    if xss.len() == 0 {
+        return HashSet::new();
+    }
+    let mut it = xss.into_iter();
+    let mut out = it.next().unwrap().clone();
+    for xs in it {
+        out = out.intersection(&xs).cloned().collect();
+    }
+    out
+}
+
+fn rename_vars(r: &Ren, xs: &HashSet<Id>) -> HashSet<Id> {
+    let mut out = HashSet::new();
+    for x in xs {
+        if let Some(y) = r.map.get(x) {
+            out.insert(y.clone());
+        } else {
+            out.insert(x.clone());
+        }
+    }
+    out
+}
+
+fn indented(n: usize, s: impl AsRef<str>) -> String {
+    let mut out = String::new();
+    for l in s.as_ref().lines() {
+        for _ in 0..n {
+            out += " ";
+        }
+        out += l;
+    }
+    out
+}
+
+fn split_arrow_type(mut t: &SType) -> (Vec<(SType, SMult)>, SType, Option<SEff>) {
     let mut args = vec![];
     let mut eff = None;
     loop {
         match &t.val {
             Type::Arr {
+                mob,
                 mult: m,
                 eff: e,
                 param: t1,
                 ret: t2,
             } => {
+                todo!();
                 t = t2;
                 eff = Some(e.clone());
                 args.push((t1.as_ref().clone(), m.clone()));
@@ -301,15 +628,7 @@ pub fn split_arrow_type(mut t: &SType) -> (Vec<(SType, SMult)>, SType, Option<SE
     }
 }
 
-pub fn infer_type(e: &SExpr) -> Result<(SType, Eff), TypeError> {
-    let (t, _u, eff) = infer(&Ctx::Empty, e)?;
-    if t.is_ord() {
-        return Err(TypeError::MainReturnsOrd(e.clone(), t.clone()));
-    }
-    Ok((t, eff))
-}
-
-pub fn assert_unr_ctx(e: &SExpr, ctx: &Ctx) -> Result<(), TypeError> {
+fn assert_unr_ctx(e: &SExpr, ctx: &Ctx) -> Result<(), TypeError> {
     if ctx.is_unr() {
         Ok(())
     } else {

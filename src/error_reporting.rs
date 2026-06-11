@@ -626,14 +626,14 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     )],
                 );
             }
-            TypeError::NewWithBorrowedType(e, _s) => {
+            TypeError::TypeNotValidForNew(s) => {
                 report(
                     &src,
-                    e.span.clone(),
+                    s.span.clone(),
                     "Type Error",
                     [label(
-                        e.span,
-                        format!("This expression creates a new channel with a borrowed session type. This is not allowed.",)
+                        s.span,
+                        format!("This expression creates a new channel with a session type that contains Close, Wait, Acq or Ret. This is not allowed",)
                     )],
                 );
             }

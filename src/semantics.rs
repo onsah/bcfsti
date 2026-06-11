@@ -264,7 +264,7 @@ pub fn eval_(env: &Env, e: &SExpr) -> Result<Value, EvalError> {
                 Box::new(Value::Chan(c2)),
             ))
         }
-        Expr::Send(e1, e2) => {
+        Expr::Send(_, e1, e2) => {
             let v1 = eval_(env, e1)?;
             let v2 = eval_(env, e2)?;
             let Value::Chan(c) = v2 else {
@@ -285,7 +285,7 @@ pub fn eval_(env: &Env, e: &SExpr) -> Result<Value, EvalError> {
             }
             Ok(Value::Const(Const::Unit))
         }
-        Expr::Recv(e1) => {
+        Expr::Recv(_, e1) => {
             let v1 = eval_(env, e1)?;
             let Value::Chan(c) = v1 else {
                 return Err(EvalError::ValMismatch(

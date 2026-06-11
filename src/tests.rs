@@ -19,7 +19,41 @@ macro_rules! logln {
     };
 }
 
-#[test]
+#[cfg(test)]
+mod typechecker_tests {
+    use std::assert_matches;
+
+    use crate::{error_reporting::IErr, type_checker::TypeError, typecheck};
+
+    #[test]
+    fn session_type_new() {
+        let src = r#"
+            new &{ foo: !Int; ?Int, bar: ?Unit }
+        "#;
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::MainReturnsOrd(_, _))));
+
+        let src = r#"
+            new Close
+        "#;
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::TypeNotValidForNew(_))));
+
+        let src = r#"
+            new &{ foo: Close; ?Int, bar: ?Unit }
+        "#;
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::TypeNotValidForNew(_))));
+
+        let src = r#"
+            new &{ foo: !Int; ?Int, bar: Wait }
+        "#;
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::TypeNotValidForNew(_))));
+    }
+}
+
+// #[test]
 fn unit_tests() {
     let positives: Vec<PathBuf> = std::fs::read_dir("examples/positive")
         .unwrap()

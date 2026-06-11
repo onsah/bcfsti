@@ -73,6 +73,8 @@ pub enum Token<'a> {
     Drop,
     #[token("acquire")]
     Acquire,
+    #[token("Acq")]
+    AcqT,
     #[token("unr")]
     Unr,
     #[token("lin")]
@@ -313,6 +315,7 @@ impl<'a> Token<'a> {
             Token::Select => "select",
             Token::Branch => "branch",
             Token::Acquire => "acquire",
+            Token::AcqT => "Acq",
         }
     }
 }

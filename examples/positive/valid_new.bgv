@@ -1,0 +1,1 @@
+new &{ foo: !Int; ?Int, bar: ?Unit }

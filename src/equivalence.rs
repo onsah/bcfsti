@@ -1,18 +1,17 @@
 use crate::{
     freest::FreestType,
-    syntax::{Eff, Mult, Session, SessionOp, Type},
+    syntax::{Eff, Mob, Mult, Session, SessionOp, Type},
 };
 
 use std::{io::Write, process::Command};
 
 #[allow(dead_code)]
-enum TypecheckResult {
+pub enum TypecheckResult {
     Success,
     Error { reason: String },
 }
 
-#[allow(dead_code)]
-fn check_equivalence(type1: &Session, type2: &Session) -> TypecheckResult {
+pub fn check_equivalence(type1: &Session, type2: &Session) -> TypecheckResult {
     let mut test_file = tempfile::Builder::new().suffix(".fst").tempfile().unwrap();
 
     writeln!(test_file, "data Ret = Ret").unwrap();
@@ -79,6 +78,9 @@ impl From<&Session> for FreestType {
                 dir: *session_op,
                 ty: Box::new(FreestType::Var(FreestType::RET.into())),
             },
+            Session::UVar(_) => {
+                panic!("Unification variables must be solved before translation to FreeST!")
+            }
         }
     }
 }
@@ -105,12 +107,13 @@ impl From<&Type> for FreestType {
             Type::Bool => FreestType::Bool,
             Type::String => FreestType::String,
             Type::Arr {
+                mob,
                 mult,
                 eff,
                 param,
                 ret,
             } => {
-                let mut labels = vec![mult.to_label()];
+                let mut labels = vec![mob.to_label(), mult.to_label()];
                 if let Some(label) = eff.to_label() {
                     labels.push(label);
                 }
@@ -144,6 +147,15 @@ impl From<&Type> for FreestType {
                 }
                 .into(),
             ]),
+        }
+    }
+}
+
+impl Mob {
+    fn to_label(self) -> &'static str {
+        match self {
+            Mob::Mobile => "mobile",
+            Mob::Static => "static",
         }
     }
 }

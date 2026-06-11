@@ -16,6 +16,8 @@ supports the following features:
 
 - a function that prints to stdout.
 
+- `new S` differs from the paper that it's not a function but it's as if already applied to `Unit`. 
+
 Note that the `spawn` expression differs from the paper in that it is
 call-by-need, and hence does not require you to wrap its subexpression in a
 lambda, e.g. instead of `spawn (λ(). e)` you can directly write `spawn e`.

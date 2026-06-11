@@ -5,6 +5,13 @@ pub type Id = String;
 pub type SId = Spanned<Id>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Mob {
+    Mobile,
+    Static,
+}
+pub type SMob = Spanned<Mob>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Mult {
     Unr,
     Lin,
@@ -27,6 +34,8 @@ pub enum SessionOp {
 }
 pub type SSessionOp = Spanned<SessionOp>;
 
+pub type UVarId = usize;
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Session {
     Skip,
@@ -40,13 +49,17 @@ pub enum Session {
     Choice(SessionOp, Vec<(SLabel, SSession)>),
     Mu(SId, Box<SSession>),
     Var(SId),
+    // Unification variable introduced from splits
+    UVar(UVarId),
 }
 pub type SSession = Spanned<Session>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Chan(Session),
+    // TODO: Add mobility
     Arr {
+        mob: SMob,
         mult: SMult,
         eff: SEff,
         param: Box<SType>,
@@ -62,7 +75,6 @@ pub enum Type {
     Int,
     Bool,
     String,
-    // TODO: UVar(Label),
 }
 pub type SType = Spanned<Type>;
 
@@ -137,8 +149,8 @@ pub enum Expr {
 
     End(SessionOp, Box<SExpr>),
 
-    Send(Box<SExpr>, Box<SExpr>),
-    Recv(Box<SExpr>),
+    Send(SType, Box<SExpr>, Box<SExpr>),
+    Recv(SType, Box<SExpr>),
 
     LSplit(SSession, Box<SExpr>),
     RSplit(SSession, Box<SExpr>),
@@ -235,6 +247,7 @@ impl Session {
                 first: Box::new(fake_span(first.subst(x, s_new))),
                 second: Box::new(fake_span(second.subst(x, s_new))),
             },
+            Session::UVar(_) => todo!(),
         }
     }
     fn unfold(&self, x: &SId) -> Self {
@@ -255,7 +268,7 @@ impl Session {
             return true;
         } else {
             match (self, other) {
-                (Session::Op(op1, t1), Session::Op(op2, t2)) => todo!(), // op1 == op2 && t1.sem_eq(t2),
+                (Session::Op(op1, t1), Session::Op(op2, t2)) => op1 == op2 && t1.sem_eq(t2),
                 (Session::End(op1), Session::End(op2)) => op1 == op2,
                 (Session::BorrowEnd(end1), Session::BorrowEnd(end2)) => end1 == end2,
                 (Session::Choice(op1, cs1), Session::Choice(op2, cs2)) if op1 == op2 => {
@@ -267,8 +280,18 @@ impl Session {
                 }
                 (Session::Mu(x1, s1), _) => s1.unfold(&x1).sem_eq_(other, &seen),
                 (_, Session::Mu(x2, s2)) => self.sem_eq_(&s2.unfold(&x2), &seen),
-                (Session::Var(_x1), _) => unreachable!(),
-                (_, Session::Var(_x2)) => unreachable!(),
+                (Session::Var(x1), Session::Var(x2)) => x1.val == x2.val,
+                (
+                    Session::Semi {
+                        first: first1,
+                        second: second1,
+                    },
+                    Session::Semi {
+                        first: first2,
+                        second: second2,
+                    },
+                ) => first1.sem_eq_(first2, &seen) && second1.sem_eq_(second2, &seen),
+                (Session::UVar(x1), Session::UVar(x2)) => x1 == x2,
                 _ => false,
             }
         }
@@ -349,6 +372,7 @@ impl Session {
                 first: Box::new(fake_span(first.dual())),
                 second: Box::new(fake_span(second.dual())),
             },
+            Session::UVar(_) => todo!(),
         }
     }
 
@@ -367,6 +391,7 @@ impl Session {
             Session::Var(x) => Session::Var(x.clone()),
             Session::Skip => todo!(),
             Session::Semi { first, second } => todo!(),
+            Session::UVar(_) => todo!(),
         }
     }
 
@@ -420,8 +445,8 @@ impl Expr {
                 xs
             }
             Expr::Fork(e) => e.free_vars(),
-            Expr::Send(e1, e2) => union(e1.free_vars(), e2.free_vars()),
-            Expr::Recv(e) => e.free_vars(),
+            Expr::Send(_, e1, e2) => union(e1.free_vars(), e2.free_vars()),
+            Expr::Recv(_, e) => e.free_vars(),
             Expr::End(_l, e) => e.free_vars(),
             Expr::Op1(_op1, e) => e.free_vars(),
             Expr::Op2(_op2, e1, e2) => union(e1.free_vars(), e2.free_vars()),
@@ -465,21 +490,23 @@ impl Pattern {
 impl Type {
     pub fn sem_eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Type::Chan(s1), Type::Chan(s2)) => todo!(),
+            (Type::Chan(s1), Type::Chan(s2)) => s1.sem_eq(s2),
             (
                 Type::Arr {
+                    mob: mob1,
                     mult: m1,
                     eff: p1,
                     param: t11,
                     ret: t12,
                 },
                 Type::Arr {
+                    mob: mob2,
                     mult: m2,
                     eff: p2,
                     param: t21,
                     ret: t22,
                 },
-            ) => m1 == m2 && p1 == p2 && t11.sem_eq(t21) && t12.sem_eq(t22),
+            ) => mob1 == mob2 && m1 == m2 && p1 == p2 && t11.sem_eq(t21) && t12.sem_eq(t22),
             (
                 Type::Prod {
                     mult: m1,
@@ -511,10 +538,10 @@ impl Type {
             Type::Chan(_) => false,
             Type::Arr { mult: m, .. } => m.val == Mult::Unr,
             Type::Prod {
-                mult: m,
                 first: t1,
                 second: t2,
-            } => m.val == Mult::Unr || (t1.is_unr() && t2.is_unr()),
+                ..
+            } => t1.is_unr() && t2.is_unr(),
             Type::Variant(cs) => cs.iter().all(|(_, t)| t.is_unr()),
             Type::Unit => true,
             Type::Int => true,

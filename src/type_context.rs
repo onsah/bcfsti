@@ -60,7 +60,7 @@ pub mod CtxS {
 
 pub fn ext(m: Mult, c1: Ctx, c2: Ctx) -> Ctx {
     match m {
-        Mult::Unr => CtxS::Join(c1, c2, JoinOrd::Ordered),
+        Mult::Unr => CtxS::Join(c1, c2, JoinOrd::Unordered),
         Mult::Lin => CtxS::Join(c1, c2, JoinOrd::Unordered),
         Mult::OrdR => CtxS::Join(c1, c2, JoinOrd::Ordered),
         Mult::OrdL => CtxS::Join(c2, c1, JoinOrd::Ordered),
@@ -129,7 +129,7 @@ impl Ctx {
             }
             Ctx::Bind(_y, _t) => None,
             Ctx::Join(c1, c2, o) => c1.lookup_ord(x).or_else(|| {
-                if c1.is_unr() || *o == JoinOrd::Ordered {
+                if c1.is_unr() || *o == JoinOrd::Unordered {
                     c2.lookup_ord(x)
                 } else {
                     None

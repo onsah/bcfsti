@@ -101,13 +101,13 @@ pub fn typecheck(src: &str, verbose: bool) -> Result<(SExpr, Type, Eff), IErr> {
         println!();
     }
 
-    // println!("===== TYPECHECKER =====");
-    // let (t, p) = type_checker::infer_type(&e).map_err(IErr::Typing)?;
-    // println!("Type:    {}", pretty_def(&t));
-    // println!("Effect:  {}", pretty_def(&p));
-    // println!();
+    println!("===== TYPECHECKER =====");
+    let (t, p) = type_checker::infer_type(&e).map_err(IErr::Typing)?;
+    println!("Type:    {}", pretty_def(&t));
+    println!("Effect:  {}", pretty_def(&p));
+    println!();
 
-    // Ok((e, t.val, p))
+    Ok((e, t.val, p))
     //
-    Ok((e, Type::Unit, Eff::No))
+    // Ok((e, Type::Unit, Eff::No))
 }
