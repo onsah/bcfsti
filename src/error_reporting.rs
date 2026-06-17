@@ -310,6 +310,20 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     )],
                 );
             }
+            TypeError::AbsNotMobile(e, ty) => {
+                report(
+                    &src,
+                    e.span.clone(),
+                    "Type Error",
+                    [label(
+                        e.span,
+                        format!(
+                            "This unrestricted lambda abstraction is not mobile {}",
+                            pretty_def(&ty)
+                        ),
+                    )],
+                );
+            }
             TypeError::SeqDropsOrd(e, t) => {
                 report(
                     &src,

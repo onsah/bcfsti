@@ -23,7 +23,12 @@ macro_rules! logln {
 mod typechecker_tests {
     use std::assert_matches;
 
-    use crate::{error_reporting::IErr, type_checker::TypeError, typecheck};
+    use crate::{
+        error_reporting::IErr,
+        syntax::{Eff, Type},
+        type_checker::TypeError,
+        typecheck,
+    };
 
     #[test]
     fn session_type_new() {
@@ -50,6 +55,24 @@ mod typechecker_tests {
         "#;
         let res = typecheck(src, false);
         assert_matches!(res, Err(IErr::Typing(TypeError::TypeNotValidForNew(_))));
+    }
+
+    #[test]
+    fn fork() {
+        let src = r#"
+            let cs, cr = new !Int in
+            fork (\ x.
+                let cs1, cs2 = lsplit Acq cs in
+                acquire cs1;
+                send @Int 5 cs2
+            );
+            let cr1, cr2 = lsplit Acq cr in
+            acquire cr1;
+            recv @Int cr2
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Int, Eff::Yes)));
     }
 }
 

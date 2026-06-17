@@ -27,6 +27,23 @@ pub enum Eff {
 }
 pub type SEff = Spanned<Eff>;
 
+impl PartialOrd for Eff {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Eff {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (Eff::No, Eff::No) => std::cmp::Ordering::Equal,
+            (Eff::No, Eff::Yes) => std::cmp::Ordering::Less,
+            (Eff::Yes, Eff::No) => std::cmp::Ordering::Greater,
+            (Eff::Yes, Eff::Yes) => std::cmp::Ordering::Equal,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SessionOp {
     Send,

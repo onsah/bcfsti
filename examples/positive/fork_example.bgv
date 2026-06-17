@@ -1,0 +1,9 @@
+let cs, cr = new !Int in
+fork (\x.
+    let cs1, cs2 = lsplit Acq cs in
+    acquire cs1;
+    send @Int 5 cs2
+);
+let cr1, cr2 = lsplit Acq cr in
+acquire cr1;
+recv @Int cr2

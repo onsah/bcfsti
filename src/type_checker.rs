@@ -37,6 +37,7 @@ pub enum TypeError {
     CtxCtxSplitFailed(SExpr, Ctx, HashSet<Id>),
     Shadowing(SExpr, SId),
     CtxNotUnr(SExpr, Ctx),
+    AbsNotMobile(SExpr, SType),
     SeqDropsOrd(SExpr, SType),
     LeftOverVar(SExpr, SId, SSession, Option<Session>),
     LeftOverCtx(SExpr, Ctx),
@@ -62,6 +63,7 @@ pub enum TypeError {
     TypeNotValidForNew(SSession),
 }
 
+// TODO: return generated constraints
 pub fn infer_type(e: &SExpr) -> Result<(SType, Eff), TypeError> {
     let mut checker = TypeChecker { uvar_counter: 0 };
     let (t, cs, eff) = checker.infer(&Ctx::Empty, e)?;
@@ -278,8 +280,8 @@ impl TypeChecker {
                 // TODO: double check whether acquire constant is pure
                 Ok((fake_span(Type::Unit), chan_cs, chan_eff))
             }
-            Expr::Fork(body) => {
-                let body_ctx = ctx.restrict(&body.free_vars());
+            Expr::Fork(func) => {
+                let body_ctx = ctx.restrict(&func.free_vars());
 
                 if !ctx.is_subctx_of(&body_ctx) {
                     return Err(TypeError::CtxSplitFailed(
@@ -292,23 +294,13 @@ impl TypeChecker {
                 let expected_body_ty = fake_span(Type::Arr {
                     mob: fake_span(Mob::Mobile),
                     mult: fake_span(Mult::Lin),
-                    eff: fake_span(Eff::No),
+                    eff: fake_span(Eff::Yes),
                     param: Box::new(fake_span(Type::Unit)),
                     ret: Box::new(fake_span(Type::Unit)),
                 });
-                let (body_ty, body_cs, body_eff) = self.infer(&body_ctx, body)?;
+                let (body_cs, body_eff) = self.check(&body_ctx, func, &expected_body_ty)?;
 
-                todo!()
-
-                // if !body_ty.is_unit() {
-                //     return Err(TypeError::Mismatch(
-                //         *body.clone(),
-                //         Ok(fake_span(Type::Unit)),
-                //         body_ty.clone(),
-                //     ));
-                // }
-
-                // Ok((fake_span(Type::Unit), body_cs, body_eff))
+                Ok((fake_span(Type::Unit), body_cs, body_eff))
             }
             Expr::LSplit(prefix_session, chan) => {
                 let uvar = self.new_uvar();
@@ -338,7 +330,6 @@ impl TypeChecker {
             }
             Expr::End(session_op, spanned) => todo!(),
             Expr::RSplit(spanned, spanned1) => todo!(),
-            Expr::Abs(spanned, spanned1) => todo!(),
             Expr::App(spanned, spanned1) => todo!(),
             Expr::Pair(spanned, spanned1) => todo!(),
             Expr::Let(spanned, spanned1, spanned2) => todo!(),
@@ -351,6 +342,7 @@ impl TypeChecker {
             Expr::Op1(op1, spanned) => todo!(),
             Expr::Op2(op2, spanned, spanned1) => todo!(),
             Expr::If(spanned, spanned1, spanned2) => todo!(),
+            Expr::Abs(_, _) => Err(TypeError::TypeAnnotationMissing(e.clone())),
         }
     }
 
@@ -360,17 +352,66 @@ impl TypeChecker {
         e: &SExpr,
         expected_ty: &SType,
     ) -> Result<(Constraints, Eff), TypeError> {
-        let (inferred_ty, mut cs, eff) = self.infer(ctx, e)?;
-        dbg!(pretty_def(e));
-        dbg!(pretty_def(&inferred_ty));
-        dbg!(pretty_def(expected_ty));
+        match &e.val {
+            Expr::Abs(id, body) => {
+                let Type::Arr {
+                    mob,
+                    mult,
+                    eff,
+                    param,
+                    ret,
+                } = &expected_ty.val
+                else {
+                    return Err(TypeError::Mismatch(
+                        e.clone(),
+                        Err(format!("function type")),
+                        expected_ty.clone(),
+                    ));
+                };
+                // TODO: Check context mobility
 
-        if !inferred_ty.sem_eq(expected_ty) {
-            println!("adding constraint");
-            cs.add(inferred_ty.val, expected_ty.val.clone());
+                // For unrestricted lambdas: ensure that context is unrestricted.
+                if mult.val == Mult::Unr {
+                    if !ctx.is_unr() {
+                        return Err(TypeError::CtxNotUnr(e.clone(), ctx.clone()));
+                    }
+                    if mob.val != Mob::Mobile {
+                        return Err(TypeError::AbsNotMobile(e.clone(), expected_ty.clone()));
+                    }
+                }
+
+                // Assert that `x` is not in the context.
+                if ctx.vars().contains(&id.val) {
+                    Err(TypeError::Shadowing(e.clone(), id.clone()))?
+                }
+
+                let ctx = ext(**mult, Ctx::Bind(id.clone(), *param.clone()), ctx.clone());
+                let (body_cs, body_eff) = self.check(&ctx, body, ret)?;
+
+                if body_eff > eff.val {
+                    return Err(TypeError::MismatchEffSub(
+                        *body.clone(),
+                        fake_span(body_eff),
+                        eff.clone(),
+                    ));
+                }
+
+                Ok((body_cs, Eff::No))
+            }
+            _ => {
+                let (inferred_ty, mut cs, eff) = self.infer(ctx, e)?;
+                dbg!(pretty_def(e));
+                dbg!(pretty_def(&inferred_ty));
+                dbg!(pretty_def(expected_ty));
+
+                if !inferred_ty.sem_eq(expected_ty) {
+                    println!("adding constraint");
+                    cs.add(inferred_ty.val, expected_ty.val.clone());
+                }
+
+                Ok((cs, eff))
+            }
         }
-
-        Ok((cs, eff))
     }
 
     pub fn check_variant_label_eq(
