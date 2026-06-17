@@ -95,7 +95,7 @@ mod typechecker_tests {
             acquire cs1;
             let cs3, cs4 = lsplit !Int cs2 in
             send @Int 5 cs3;
-            drop cs4;
+            wait cs4;
             let cr1, cr2 = lsplit Acq cr in
             acquire cr1;
             let cr3, cr4 = lsplit ?Int cr2 in

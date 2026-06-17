@@ -290,6 +290,38 @@ impl TypeChecker {
 
                 Ok((fake_span(Type::Unit), body_cs, body_eff))
             }
+            Expr::BorrowEnd(op, chan) => {
+                let chan_ctx = ctx.restrict(&chan.free_vars());
+                if !ctx.is_subctx_of(&chan_ctx) {
+                    return Err(TypeError::CtxSplitFailed(
+                        e.clone(),
+                        ctx.clone(),
+                        chan_ctx.clone(),
+                    ));
+                }
+
+                let expected_ty = fake_span(Type::Chan(Session::BorrowEnd(*op)));
+                let (chan_cs, chan_eff) = self.check(&chan_ctx, chan, &expected_ty)?;
+
+                // TODO: double check whether acquire constant is pure
+                Ok((fake_span(Type::Unit), chan_cs, chan_eff))
+            }
+            Expr::End(op, chan) => {
+                let chan_ctx = ctx.restrict(&chan.free_vars());
+                if !ctx.is_subctx_of(&chan_ctx) {
+                    return Err(TypeError::CtxSplitFailed(
+                        e.clone(),
+                        ctx.clone(),
+                        chan_ctx.clone(),
+                    ));
+                }
+
+                let expected_ty = fake_span(Type::Chan(Session::End(*op)));
+                let (chan_cs, chan_eff) = self.check(&chan_ctx, chan, &expected_ty)?;
+
+                // TODO: double check whether acquire constant is pure
+                Ok((fake_span(Type::Unit), chan_cs, chan_eff))
+            }
             Expr::LSplit(prefix_session, chan) => {
                 if prefix_session.is_only_skips() {
                     return Err(TypeError::SessionTypeOnlySkips(prefix_session.clone()));
@@ -320,39 +352,7 @@ impl TypeChecker {
 
                 Ok((fake_span(ret_ty), chan_cs, chan_eff))
             }
-            Expr::BorrowEnd(op, expr) => {
-                let chan_ctx = ctx.restrict(&expr.free_vars());
-                if !ctx.is_subctx_of(&chan_ctx) {
-                    return Err(TypeError::CtxSplitFailed(
-                        e.clone(),
-                        ctx.clone(),
-                        chan_ctx.clone(),
-                    ));
-                }
-
-                let expected_ty = fake_span(Type::Chan(Session::BorrowEnd(*op)));
-                let (chan_cs, chan_eff) = self.check(&chan_ctx, expr, &expected_ty)?;
-
-                // TODO: double check whether acquire constant is pure
-                Ok((fake_span(Type::Unit), chan_cs, chan_eff))
-            }
-            Expr::End(op, expr) => {
-                let chan_ctx = ctx.restrict(&expr.free_vars());
-                if !ctx.is_subctx_of(&chan_ctx) {
-                    return Err(TypeError::CtxSplitFailed(
-                        e.clone(),
-                        ctx.clone(),
-                        chan_ctx.clone(),
-                    ));
-                }
-
-                let expected_ty = fake_span(Type::Chan(Session::End(*op)));
-                let (chan_cs, chan_eff) = self.check(&chan_ctx, expr, &expected_ty)?;
-
-                // TODO: double check whether acquire constant is pure
-                Ok((fake_span(Type::Unit), chan_cs, chan_eff))
-            }
-            Expr::RSplit(spanned, spanned1) => todo!(),
+            Expr::RSplit(prefix_session, chan) => todo!(),
             Expr::App(spanned, spanned1) => todo!(),
             Expr::Pair(spanned, spanned1) => todo!(),
             Expr::Let(spanned, spanned1, spanned2) => todo!(),

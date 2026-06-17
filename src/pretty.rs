@@ -98,8 +98,8 @@ impl Pretty<UserState> for Session {
                 p.pp_prec(10, t);
             }
             Session::End(op) => match op {
-                SessionOp::Send => p.pp("close"),
-                SessionOp::Recv => p.pp("wait"),
+                SessionOp::Send => p.pp("Close"),
+                SessionOp::Recv => p.pp("Wait"),
             },
             Session::Var(x) => p.pp(&x.val),
             Session::Mu(x, s) => p.infix(0, R, |p| {
@@ -126,7 +126,7 @@ impl Pretty<UserState> for Session {
             }
             Session::BorrowEnd(SessionOp::Send) => p.pp("Ret"),
             Session::BorrowEnd(SessionOp::Recv) => p.pp("Acq"),
-            Session::Skip => p.pp("skip"),
+            Session::Skip => p.pp("Skip"),
             Session::Semi { first, second } => {
                 p.pp("(");
                 p.pp(first);
