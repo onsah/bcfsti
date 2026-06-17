@@ -97,6 +97,8 @@ pub enum Token<'a> {
     Wait,
     #[regex("close|Close")]
     Close,
+    #[regex("Skip")]
+    Skip,
     #[token("Chan")]
     Chan,
     #[token("|>")]
@@ -316,6 +318,7 @@ impl<'a> Token<'a> {
             Token::Branch => "branch",
             Token::Acquire => "acquire",
             Token::AcqT => "Acq",
+            Token::Skip => "Skip",
         }
     }
 }

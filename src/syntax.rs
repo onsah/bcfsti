@@ -71,6 +71,17 @@ pub enum Session {
 }
 pub type SSession = Spanned<Session>;
 
+impl Session {
+    pub fn is_only_skips(&self) -> bool {
+        match self {
+            Session::Skip => true,
+            Session::Semi { first, second } => first.is_only_skips() && second.is_only_skips(),
+            Session::Mu(_, body) => body.is_only_skips(),
+            _ => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Chan(Session),
@@ -309,6 +320,7 @@ impl Session {
                     },
                 ) => first1.sem_eq_(first2, &seen) && second1.sem_eq_(second2, &seen),
                 (Session::UVar(x1), Session::UVar(x2)) => x1 == x2,
+                (Session::Skip, Session::Skip) => true,
                 _ => false,
             }
         }
@@ -384,7 +396,7 @@ impl Session {
             Session::BorrowEnd(op) => Session::BorrowEnd(op.dual()),
             Session::Mu(x, s) => Session::Mu(x.clone(), Box::new(fake_span(s.dual()))),
             Session::Var(x) => Session::Var(x.clone()),
-            Session::Skip => todo!(),
+            Session::Skip => Session::Skip,
             Session::Semi { first, second } => Session::Semi {
                 first: Box::new(fake_span(first.dual())),
                 second: Box::new(fake_span(second.dual())),

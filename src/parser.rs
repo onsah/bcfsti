@@ -86,6 +86,7 @@ peg::parser! {
             / tok(AcqT) { Session::BorrowEnd(SessionOp::Recv) }
             / tok(Wait) { Session::End(SessionOp::Recv) }
             / tok(Close) { Session::End(SessionOp::Send) }
+            / tok(Skip) { Session::Skip }
             / tok(Bang) t:stype_atom()
               { Session::Op(SessionOp::Send, Box::new(t)) }
             / tok(QuestionMark) t:stype_atom()

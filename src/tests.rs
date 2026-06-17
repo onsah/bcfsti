@@ -74,6 +74,18 @@ mod typechecker_tests {
         let res = typecheck(src, false);
         assert_matches!(res, Ok((_, Type::Int, Eff::Yes)));
     }
+
+    #[test]
+    fn lsplit_only_skips() {
+        let src = r#"
+            let c1, c2 = new Skip in
+            lsplit (Skip; Skip) c1;
+            acquire c2
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::SessionTypeOnlySkips(_))));
+    }
 }
 
 // #[test]
