@@ -86,6 +86,26 @@ mod typechecker_tests {
         let res = typecheck(src, false);
         assert_matches!(res, Err(IErr::Typing(TypeError::SessionTypeOnlySkips(_))));
     }
+
+    #[test]
+    fn new_and_close() {
+        let src = r#"
+            let cs, cr = new !Int in
+            let cs1, cs2 = lsplit Acq cs in
+            acquire cs1;
+            let cs3, cs4 = lsplit !Int cs2 in
+            send @Int 5 cs3;
+            drop cs4;
+            let cr1, cr2 = lsplit Acq cr in
+            acquire cr1;
+            let cr3, cr4 = lsplit ?Int cr2 in
+            recv @Int cr3;
+            drop cr4
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Unit, Eff::Yes)));
+    }
 }
 
 // #[test]

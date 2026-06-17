@@ -7,6 +7,7 @@ use crate::{
     constraint::Constraints,
     ren::Ren,
     semantics::Chan,
+    session_type,
     syntax::{
         Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, Pattern, SEff, SExpr, SId, SLabel, SMult,
         SPattern, SSession, SType, Session, SessionOp, Type, UVarId,
@@ -113,17 +114,11 @@ impl TypeChecker {
                     let typ = fake_span(Type::Prod {
                         mult: fake_span(Mult::Lin),
                         first: Box::new(Spanned::new(
-                            Type::Chan(Session::Semi {
-                                first: Box::new(fake_span(Session::BorrowEnd(SessionOp::Recv))),
-                                second: Box::new(sess_type.clone()),
-                            }),
+                            Type::Chan(session_type! { Acq; (sess_type.clone(); Wait) }.val),
                             sess_type.span.clone(),
                         )),
                         second: Box::new(Spanned::new(
-                            Type::Chan(Session::Semi {
-                                first: Box::new(fake_span(Session::BorrowEnd(SessionOp::Recv))),
-                                second: Box::new(fake_span(sess_type.dual())),
-                            }),
+                            Type::Chan(session_type! { Acq; (sess_type.clone(); Close) }.val),
                             sess_type.span.clone(),
                         )),
                     });
@@ -325,9 +320,8 @@ impl TypeChecker {
 
                 Ok((fake_span(ret_ty), chan_cs, chan_eff))
             }
-            Expr::BorrowEnd(op, chan) => {
-                // TODO: Ensure no leftover ctx
-                let chan_ctx = ctx.restrict(&chan.free_vars());
+            Expr::BorrowEnd(op, expr) => {
+                let chan_ctx = ctx.restrict(&expr.free_vars());
                 if !ctx.is_subctx_of(&chan_ctx) {
                     return Err(TypeError::CtxSplitFailed(
                         e.clone(),
@@ -337,12 +331,27 @@ impl TypeChecker {
                 }
 
                 let expected_ty = fake_span(Type::Chan(Session::BorrowEnd(*op)));
-                let (chan_cs, chan_eff) = self.check(&chan_ctx, chan, &expected_ty)?;
+                let (chan_cs, chan_eff) = self.check(&chan_ctx, expr, &expected_ty)?;
 
                 // TODO: double check whether acquire constant is pure
                 Ok((fake_span(Type::Unit), chan_cs, chan_eff))
             }
-            Expr::End(op, expr) => todo!(),
+            Expr::End(op, expr) => {
+                let chan_ctx = ctx.restrict(&expr.free_vars());
+                if !ctx.is_subctx_of(&chan_ctx) {
+                    return Err(TypeError::CtxSplitFailed(
+                        e.clone(),
+                        ctx.clone(),
+                        chan_ctx.clone(),
+                    ));
+                }
+
+                let expected_ty = fake_span(Type::Chan(Session::End(*op)));
+                let (chan_cs, chan_eff) = self.check(&chan_ctx, expr, &expected_ty)?;
+
+                // TODO: double check whether acquire constant is pure
+                Ok((fake_span(Type::Unit), chan_cs, chan_eff))
+            }
             Expr::RSplit(spanned, spanned1) => todo!(),
             Expr::App(spanned, spanned1) => todo!(),
             Expr::Pair(spanned, spanned1) => todo!(),

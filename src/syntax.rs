@@ -700,6 +700,9 @@ macro_rules! session_type {
     (@atom ( $($inner:tt)+ )) => {
         session_type!($($inner)+)
     };
+    (@atom $e:expr) => {
+        $e
+    };
 
     (@branches [$($acc:expr),*]) => {
         vec![$($acc),*]
@@ -894,6 +897,25 @@ mod session_type_tests {
                     first: Box::new(spanned_session(Session::BorrowEnd(SessionOp::Recv))),
                     second: Box::new(spanned_session(Session::End(SessionOp::Recv))),
                 })),
+            })),
+        });
+
+        assert_eq!(got, expected);
+    }
+
+    #[test]
+    fn session_type_verbatim_unknown_tokens() {
+        let sess_type = spanned_session(Session::Op(
+            SessionOp::Send,
+            Box::new(Spanned::new(Type::Int, 0..0)),
+        ));
+
+        let got = session_type! { Acq; (sess_type.clone(); Wait) };
+        let expected = spanned_session(Session::Semi {
+            first: Box::new(spanned_session(Session::BorrowEnd(SessionOp::Recv))),
+            second: Box::new(spanned_session(Session::Semi {
+                first: Box::new(sess_type.clone()),
+                second: Box::new(spanned_session(Session::End(SessionOp::Recv))),
             })),
         });
 
