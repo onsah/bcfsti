@@ -281,6 +281,23 @@ mod typechecker_tests {
         let res = typecheck(src, false);
         assert_matches!(res, Err(IErr::Typing(TypeError::TypeAnnotationMissing(_))));
     }
+
+    #[test]
+    fn inj() {
+        let src = r#"
+            inj foo 5
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::TypeAnnotationMissing(_))));
+
+        let src = r#"
+            (inj foo 5) : < foo: Int, bar: String >
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Variant { .. }, _, _)));
+    }
 }
 
 // #[test]

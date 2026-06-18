@@ -477,15 +477,19 @@ impl TypeChecker {
                     Eff::lub(clause_eff, body_eff),
                 ))
             }
-            Expr::Inj(spanned, spanned1) => todo!(),
             Expr::CaseSum(spanned, items) => todo!(),
             Expr::Select(spanned, spanned1) => todo!(),
             Expr::Branch(spanned) => todo!(),
-            Expr::Ann(spanned, spanned1) => todo!(),
+            Expr::Ann(expr, ty) => {
+                let (expr_cs, expr_eff) = self.check(&ctx.restrict(&expr.free_vars()), expr, ty)?;
+
+                Ok((ty.clone(), expr_cs, expr_eff))
+            }
             Expr::Op1(op1, spanned) => todo!(),
             Expr::Op2(op2, spanned, spanned1) => todo!(),
             Expr::If(spanned, spanned1, spanned2) => todo!(),
-            Expr::Pair(first, second) => Err(TypeError::TypeAnnotationMissing(e.clone())),
+            Expr::Inj(_, _) => Err(TypeError::TypeAnnotationMissing(e.clone())),
+            Expr::Pair(_, _) => Err(TypeError::TypeAnnotationMissing(e.clone())),
             Expr::Abs(_, _) => Err(TypeError::TypeAnnotationMissing(e.clone())),
         }
     }
@@ -590,6 +594,29 @@ impl TypeChecker {
                 }
 
                 Ok((first_cs.join(second_cs), Eff::lub(first_eff, second_eff)))
+            }
+            Expr::Inj(label, expr) => {
+                let Type::Variant(variants) = &expected_ty.val else {
+                    return Err(TypeError::Mismatch(
+                        e.clone(),
+                        Err(format!("variant type")),
+                        expected_ty.clone(),
+                    ));
+                };
+
+                let Some((_, actual_ty)) = variants.iter().find(|(l2, _)| label.val == l2.val)
+                else {
+                    return Err(TypeError::MismatchLabel(
+                        e.clone(),
+                        label.val.clone(),
+                        expected_ty.clone(),
+                    ));
+                };
+
+                let (expr_cs, expr_eff) =
+                    self.check(&ctx.restrict(&expr.free_vars()), expr, actual_ty)?;
+
+                Ok((expr_cs, expr_eff))
             }
             _ => {
                 let (inferred_ty, mut cs, eff) = self.infer(ctx, e)?;
