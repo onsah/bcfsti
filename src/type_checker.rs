@@ -66,7 +66,7 @@ pub enum TypeError {
 }
 
 // TODO: return generated constraints
-pub fn infer_type(e: &SExpr) -> Result<(SType, Eff), TypeError> {
+pub fn infer_type(e: &SExpr) -> Result<(SType, Constraints, Eff), TypeError> {
     let mut checker = TypeChecker { uvar_counter: 0 };
     let (t, cs, eff) = checker.infer(&Ctx::Empty, e)?;
     // TODO: Constraint checking
@@ -76,7 +76,7 @@ pub fn infer_type(e: &SExpr) -> Result<(SType, Eff), TypeError> {
     if t.is_ord() {
         return Err(TypeError::MainReturnsOrd(e.clone(), t.clone()));
     }
-    Ok((t, eff))
+    Ok((t, cs, eff))
 }
 
 struct TypeChecker {
@@ -327,13 +327,7 @@ impl TypeChecker {
                     return Err(TypeError::SessionTypeOnlySkips(prefix_session.clone()));
                 }
 
-                let uvar = self.new_uvar();
-                let expected_chan_ty = fake_span(Type::Chan(Session::Semi {
-                    first: Box::new(prefix_session.clone()),
-                    second: Box::new(uvar.clone()),
-                }));
                 let chan_ctx = &ctx.restrict(&chan.free_vars());
-
                 if !ctx.is_subctx_of(&chan_ctx) {
                     return Err(TypeError::CtxSplitFailed(
                         e.clone(),
@@ -342,6 +336,10 @@ impl TypeChecker {
                     ));
                 }
 
+                let uvar = self.new_uvar();
+                let expected_chan_ty = fake_span(Type::Chan(
+                    session_type! { prefix_session.clone(); uvar.clone() }.val,
+                ));
                 let (chan_cs, chan_eff) = self.check(chan_ctx, chan, &expected_chan_ty)?;
 
                 let ret_ty = Type::Prod {
@@ -352,11 +350,78 @@ impl TypeChecker {
 
                 Ok((fake_span(ret_ty), chan_cs, chan_eff))
             }
-            Expr::RSplit(prefix_session, chan) => todo!(),
+            Expr::RSplit(prefix_session, chan) => {
+                let chan_ctx = &ctx.restrict(&chan.free_vars());
+                if !ctx.is_subctx_of(&chan_ctx) {
+                    return Err(TypeError::CtxSplitFailed(
+                        e.clone(),
+                        ctx.clone(),
+                        chan_ctx.clone(),
+                    ));
+                }
+
+                let uvar = self.new_uvar();
+                let expected_chan_ty = fake_span(Type::Chan(
+                    session_type! { prefix_session.clone(); uvar.clone() }.val,
+                ));
+                let (chan_cs, chan_eff) = self.check(chan_ctx, chan, &expected_chan_ty)?;
+
+                let ret_ty = Type::Prod {
+                    mult: fake_span(Mult::Lin),
+                    first: Box::new(fake_span(Type::Chan(
+                        session_type! { prefix_session.clone(); Ret }.val,
+                    ))),
+                    second: Box::new(fake_span(Type::Chan(
+                        session_type! { Acq; uvar.clone() }.val,
+                    ))),
+                };
+
+                Ok((fake_span(ret_ty), chan_cs, chan_eff))
+            }
             Expr::App(spanned, spanned1) => todo!(),
             Expr::Pair(spanned, spanned1) => todo!(),
             Expr::Let(spanned, spanned1, spanned2) => todo!(),
-            Expr::LetDecl(spanned, spanned1, spanned2, spanned3) => todo!(),
+            Expr::LetDecl(id, expected_ty, clause, body) => {
+                let decl_ctx = ctx.restrict(&clause.free_vars());
+                let body_ctx = ctx.restrict(&body.free_vars());
+
+                {
+                    let res_ctx = Ctx::Join(
+                        Box::new(decl_ctx.clone()),
+                        Box::new(body_ctx.clone()),
+                        JoinOrd::Ordered,
+                    );
+
+                    if !ctx.is_subctx_of(&res_ctx) {
+                        return Err(TypeError::CtxSplitFailed(
+                            e.clone(),
+                            ctx.clone(),
+                            res_ctx.clone(),
+                        ));
+                    }
+                }
+
+                let (clause_cs, clause_eff) = {
+                    let clause_expr = fake_span(Expr::Abs(
+                        clause.var_id.clone(),
+                        Box::new(clause.body.clone()),
+                    ));
+                    self.check(&decl_ctx, &clause_expr, expected_ty)?
+                };
+
+                let (body_ty, body_cs, body_eff) = {
+                    let var_ctx = Ctx::Bind(id.clone(), expected_ty.clone());
+                    let body_ctx =
+                        Ctx::Join(Box::new(var_ctx), Box::new(body_ctx), JoinOrd::Ordered);
+                    self.infer(&body_ctx, body)?
+                };
+
+                Ok((
+                    body_ty,
+                    clause_cs.join(body_cs),
+                    Eff::lub(clause_eff, body_eff),
+                ))
+            }
             Expr::Inj(spanned, spanned1) => todo!(),
             Expr::CaseSum(spanned, items) => todo!(),
             Expr::Select(spanned, spanned1) => todo!(),

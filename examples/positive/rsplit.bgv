@@ -1,0 +1,10 @@
+let
+    foo : !Int; ?Int -[m u 1]-> Acq; ?Int
+    foo c =
+        let cp, cs = rsplit !Int c in
+        let cp1, cp2 = lsplit !Int cp in
+        send @Int 5 cp1;
+        drop cp2;
+        cs
+in
+unit

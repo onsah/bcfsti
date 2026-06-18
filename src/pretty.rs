@@ -369,23 +369,15 @@ impl Pretty<UserState> for Expr {
                 p.pp_arg(L, prefix);
                 p.pp_arg(R, expr);
             }
-            Expr::LetDecl(x, t, cs, e) => {
+            Expr::LetDecl(x, t, c, e) => {
                 p.pp("let");
-                if let Some(c) = cs {
-                    p.block(|p| {
-                        p.pp(x);
-                        p.pp(" : ");
-                        p.pp(t);
-                        p.pp("\n");
-                        p.pp(c);
-                    });
-                } else {
-                    p.block(|p| {
-                        p.pp(x);
-                        p.pp(" : ");
-                        p.pp(t);
-                    });
-                }
+                p.block(|p| {
+                    p.pp(x);
+                    p.pp(" : ");
+                    p.pp(t);
+                    p.pp("\n");
+                    p.pp(c);
+                });
                 p.pp("\nin\n");
                 p.pp(e)
             }
@@ -397,10 +389,12 @@ impl Pretty<UserState> for Clause {
     fn pp(&self, p: &mut PrettyEnv<UserState>) {
         p.pp(&self.id);
         p.pp(" ");
-        for pat in &self.pats {
-            p.pp(pat);
-            p.pp(" ");
-        }
+        p.pp(&self.var_id);
+        p.pp(" ");
+        // for pat in &self.pats {
+        //     p.pp(pat);
+        //     p.pp(" ");
+        // }
         p.pp("= ");
         p.block(|p| {
             p.pp(&self.body);

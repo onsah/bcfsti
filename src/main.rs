@@ -27,6 +27,7 @@ use syntax::SExpr;
 
 use crate::{
     args::Args,
+    constraint::Constraints,
     error_reporting::{report_error, IErr},
     lexer::Token,
     semantics::eval,
@@ -54,7 +55,7 @@ fn run(args: &Args) -> Result<(), IErr> {
         println!("{src}");
         println!();
     }
-    let (_e, _t, _p) = typecheck(&src, args.verbose)?;
+    let (_e, _t, _cs, _p) = typecheck(&src, args.verbose)?;
 
     // println!("===== EVALUATION =====");
     // println!("Program stdout:");
@@ -66,7 +67,7 @@ fn run(args: &Args) -> Result<(), IErr> {
     Ok(())
 }
 
-pub fn typecheck(src: &str, verbose: bool) -> Result<(SExpr, Type, Eff), IErr> {
+pub fn typecheck(src: &str, verbose: bool) -> Result<(SExpr, Type, Constraints, Eff), IErr> {
     // println!("===== TOKENS =====");
     let toks = lexer::lex(&src).map_err(IErr::Lexer)?;
     // for (i, t) in toks.toks.iter().enumerate() {
@@ -102,12 +103,11 @@ pub fn typecheck(src: &str, verbose: bool) -> Result<(SExpr, Type, Eff), IErr> {
     }
 
     println!("===== TYPECHECKER =====");
-    let (t, p) = type_checker::infer_type(&e).map_err(IErr::Typing)?;
+    // TODO: Constraint checking
+    let (t, cs, p) = type_checker::infer_type(&e).map_err(IErr::Typing)?;
     println!("Type:    {}", pretty_def(&t));
     println!("Effect:  {}", pretty_def(&p));
     println!();
 
-    Ok((e, t.val, p))
-    //
-    // Ok((e, Type::Unit, Eff::No))
+    Ok((e, t.val, cs, p))
 }

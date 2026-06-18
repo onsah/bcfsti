@@ -120,7 +120,8 @@ pub type SPattern = Spanned<Pattern>;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Clause {
     pub id: SId,
-    pub pats: Vec<SPattern>,
+    pub var_id: SId,
+    // pub pats: Vec<SPattern>,
     pub body: SExpr,
 }
 pub type SClause = Spanned<Clause>;
@@ -192,7 +193,7 @@ pub enum Expr {
     Pair(Box<SExpr>, Box<SExpr>),
 
     Let(SId, Box<SExpr>, Box<SExpr>),
-    LetDecl(SId, SType, Option<Box<SClause>>, Box<SExpr>),
+    LetDecl(SId, SType, Box<SClause>, Box<SExpr>),
     LetPair(SId, SId, Box<SExpr>, Box<SExpr>),
 
     Inj(SLabel, Box<SExpr>),
@@ -492,9 +493,10 @@ impl Expr {
 impl Clause {
     pub fn free_vars(&self) -> HashSet<Id> {
         let mut vars = self.body.free_vars();
-        for p in &self.pats {
-            vars = vars.difference(&p.bound_vars()).cloned().collect();
-        }
+        vars.remove(self.var_id.as_str());
+        // for p in &self.pats {
+        //     vars = vars.difference(&p.bound_vars()).cloned().collect();
+        // }
         vars
     }
 }

@@ -1,12 +1,13 @@
 use std::{io::Write, path::PathBuf};
 
 use crate::{
+    constraint::Constraints,
     error_reporting::{report_error, IErr},
     syntax::{Eff, SExpr, Type},
     typecheck,
 };
 
-pub fn typecheck_(src: &str, src_path: &str) -> Result<(SExpr, Type, Eff), IErr> {
+pub fn typecheck_(src: &str, src_path: &str) -> Result<(SExpr, Type, Constraints, Eff), IErr> {
     typecheck(src, false).map_err(|e| {
         report_error(src_path, &src, e.clone());
         e
@@ -21,13 +22,16 @@ macro_rules! logln {
 
 #[cfg(test)]
 mod typechecker_tests {
-    use std::assert_matches;
+    use std::{assert_matches, collections::HashSet};
 
     use crate::{
+        constraint::Constraints,
         error_reporting::IErr,
-        syntax::{Eff, Type},
+        session_type,
+        syntax::{Eff, Session, Type},
         type_checker::TypeError,
         typecheck,
+        util::span::fake_span,
     };
 
     #[test]
@@ -72,7 +76,7 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Int, Eff::Yes)));
+        assert_matches!(res, Ok((_, Type::Int, _, Eff::Yes)));
     }
 
     #[test]
@@ -104,7 +108,50 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Unit, Eff::Yes)));
+        assert_matches!(res, Ok((_, Type::Unit, _, Eff::Yes)));
+    }
+
+    #[test]
+    fn rsplit() {
+        let src = r#"
+            let
+                foo : !Int; ?Int -[m u 1]-> Acq; ?Int
+                foo c =
+                    let cp, cs = rsplit !Int c in
+                    let cp1, cp2 = lsplit !Int cp in
+                    send @Int 5 cp1;
+                    drop cp2;
+                    cs
+            in
+            unit
+        "#;
+
+        let res = typecheck(src, false);
+        let expected_constraints = {
+            let mut cs = Constraints::empty();
+            cs.add(
+                Type::Chan(session_type! { Session::UVar(1) }),
+                Type::Chan(session_type! { Ret }.val),
+            );
+            cs.add(
+                Type::Chan(session_type! { !Int; Ret }.val),
+                Type::Chan(session_type! { !Int; fake_span(Session::UVar(1)) }.val),
+            );
+            cs.add(
+                Type::Chan(session_type! { !Int; ?Int }.val),
+                Type::Chan(session_type! { !Int; fake_span(Session::UVar(0)) }.val),
+            );
+            cs.add(
+                Type::Chan(session_type! { Acq; fake_span(Session::UVar(0)) }.val),
+                Type::Chan(session_type! { Acq; ?Int }.val),
+            );
+            cs
+        };
+        assert_matches!(res, Ok((_, Type::Unit, _, Eff::No)));
+        let Ok((_, _, constraints, _)) = res else {
+            unreachable!()
+        };
+        assert_eq!(constraints, expected_constraints);
     }
 }
 

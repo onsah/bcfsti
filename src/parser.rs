@@ -156,8 +156,8 @@ peg::parser! {
               { Expr::LetPair(x, y, Box::new(e1), Box::new(e2)) }
             / tok(Let) x:sid() tok(Equals) e1:sexpr_ann() tok(In) e2:sexpr_lam()
               { Expr::Let(x, Box::new(e1), Box::new(e2)) }
-            / tok(Let) x:sid() tok(Colon) t:stype() c:sclause()? tok(In) e:sexpr_lam()
-              { Expr::LetDecl(x, t, c.map(Box::new), Box::new(e)) }
+            / tok(Let) x:sid() tok(Colon) t:stype() c:sclause() tok(In) e:sexpr_lam()
+              { Expr::LetDecl(x, t, Box::new(c), Box::new(e)) }
             / tok(If) e:sexpr_lam() tok(Then) e1:sexpr_lam() tok(Else) e2:sexpr_lam()
               { Expr::If(Box::new(e), Box::new(e1), Box::new(e2)) }
             / e1:sexpr_or() tok(Semicolon) e2:sexpr_lam()
@@ -235,6 +235,7 @@ peg::parser! {
             / tok(ToStr) e:sexpr_atom() { Expr::Op1(Op1::ToStr, Box::new(e)) }
             / tok(Print) e:sexpr_atom() { Expr::Op1(Op1::Print, Box::new(e)) }
             / tok(LSplit) s:ssession() e:sexpr_atom() { Expr::LSplit(s, Box::new(e)) }
+            / tok(RSplit) s:ssession() e:sexpr_atom() { Expr::RSplit(s, Box::new(e)) }
             / e1:sexpr_app() e2:sexpr_atom() { Expr::App(Box::new(e1), Box::new(e2)) }
             / e:expr_atom() { e }
         pub rule sexpr_app() -> SExpr = spanned(<expr_app()>)
@@ -256,7 +257,7 @@ peg::parser! {
         pub rule spattern() -> SPattern = spanned(<pattern()>)
 
         pub rule clause() -> Clause
-            = [Braced::Item]? y:sid() ps:spattern()* tok(Equals) e:sexpr() { Clause { id: y, pats: ps, body: e } }
+            = [Braced::Item]? y:sid() var_id:sid() tok(Equals) e:sexpr() { Clause { id: y, var_id, body: e } }
         pub rule sclause() -> SClause = spanned(<clause()>)
 
         // Whole Programs

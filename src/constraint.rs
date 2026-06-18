@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use crate::syntax::Type;
 
+#[derive(Debug, PartialEq, Eq)]
 pub struct Constraints(HashSet<(Type, Type)>);
 
 impl Constraints {
