@@ -153,6 +153,45 @@ mod typechecker_tests {
         };
         assert_eq!(constraints, expected_constraints);
     }
+
+    #[test]
+    fn app() {
+        let src = r#"
+            let
+                foo: !Int; ?Int -[m u 1]-> ?Int
+                foo c =
+                    let c1, c2 = lsplit !Int c in
+                    send @Int 5 c1;
+                    c2
+            in
+            let
+                bar : !Int; ?Int -[m u 1]-> ?Int
+                bar c = foo c
+            in
+            unit
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Unit, _, Eff::No)));
+
+        let src = r#"
+            let
+                foo: !Int; ?Int -[m u 1]-> ?Int
+                foo c =
+                    let c1, c2 = lsplit !Int c in
+                    send @Int 5 c1;
+                    c2
+            in
+            let
+                bar : !Int; ?Int -[m u 0]-> ?Int
+                bar c = foo c
+            in
+            unit
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::MismatchEffSub(_, _, _))));
+    }
 }
 
 // #[test]

@@ -1,0 +1,12 @@
+let
+    foo: !Int; ?Int -[m u 1]-> ?Int
+    foo c =
+        let c1, c2 = lsplit !Int c in
+        send @Int 5 c1;
+        c2
+in
+let
+    bar : !Int; ?Int -[m u 1]-> ?Int
+    bar c = foo c
+in
+unit

@@ -378,7 +378,63 @@ impl TypeChecker {
 
                 Ok((fake_span(ret_ty), chan_cs, chan_eff))
             }
-            Expr::App(spanned, spanned1) => todo!(),
+            Expr::App(abs, arg) => {
+                let abs_ctx = ctx.restrict(&abs.free_vars());
+                let arg_ctx = ctx.restrict(&arg.free_vars());
+
+                let (abs_ty, abs_cs, abs_eff) = self.infer(&abs_ctx, abs)?;
+
+                let Type::Arr {
+                    mult,
+                    eff,
+                    param,
+                    ret,
+                    ..
+                } = abs_ty.val
+                else {
+                    return Err(TypeError::Mismatch(
+                        *abs.clone(),
+                        Err("Function".into()),
+                        abs_ty.clone(),
+                    ));
+                };
+
+                {
+                    let res_ctx = ext(mult.val, abs_ctx.clone(), arg_ctx.clone());
+
+                    if !ctx.is_subctx_of(&res_ctx) {
+                        return Err(TypeError::CtxSplitFailed(
+                            e.clone(),
+                            ctx.clone(),
+                            res_ctx.clone(),
+                        ));
+                    }
+                }
+
+                if mult.val == Mult::OrdL && abs_eff == Eff::Yes {
+                    return Err(TypeError::MismatchEff(
+                        e.clone(),
+                        fake_span(abs_eff),
+                        fake_span(Eff::No),
+                    ));
+                }
+
+                let (arg_cs, arg_eff) = self.check(&arg_ctx, arg, &param)?;
+
+                if mult.val == Mult::OrdR && arg_eff == Eff::Yes {
+                    return Err(TypeError::MismatchEff(
+                        e.clone(),
+                        fake_span(arg_eff),
+                        fake_span(Eff::No),
+                    ));
+                }
+
+                Ok((
+                    *ret,
+                    abs_cs.join(arg_cs),
+                    Eff::lub(*eff, Eff::lub(abs_eff, arg_eff)),
+                ))
+            }
             Expr::Pair(spanned, spanned1) => todo!(),
             Expr::Let(spanned, spanned1, spanned2) => todo!(),
             Expr::LetDecl(id, expected_ty, clause, body) => {

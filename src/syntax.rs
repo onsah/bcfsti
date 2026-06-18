@@ -485,7 +485,7 @@ impl Expr {
             Expr::Branch(e) => e.free_vars(),
             Expr::LSplit(_, e) => e.free_vars(),
             Expr::RSplit(_, e) => e.free_vars(),
-            Expr::LetDecl(spanned, spanned1, spanned2, spanned3) => todo!(),
+            Expr::LetDecl(id, _, _, body) => without(body.free_vars(), &id.val),
         }
     }
 }
