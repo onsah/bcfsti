@@ -435,7 +435,6 @@ impl TypeChecker {
                     Eff::lub(*eff, Eff::lub(abs_eff, arg_eff)),
                 ))
             }
-            Expr::Pair(spanned, spanned1) => todo!(),
             Expr::Let(spanned, spanned1, spanned2) => todo!(),
             Expr::LetDecl(id, expected_ty, clause, body) => {
                 let decl_ctx = ctx.restrict(&clause.free_vars());
@@ -486,6 +485,7 @@ impl TypeChecker {
             Expr::Op1(op1, spanned) => todo!(),
             Expr::Op2(op2, spanned, spanned1) => todo!(),
             Expr::If(spanned, spanned1, spanned2) => todo!(),
+            Expr::Pair(first, second) => Err(TypeError::TypeAnnotationMissing(e.clone())),
             Expr::Abs(_, _) => Err(TypeError::TypeAnnotationMissing(e.clone())),
         }
     }
@@ -541,6 +541,55 @@ impl TypeChecker {
                 }
 
                 Ok((body_cs, Eff::No))
+            }
+            Expr::Pair(first, second) => {
+                let first_ctx = ctx.restrict(&first.free_vars());
+                let second_ctx = ctx.restrict(&second.free_vars());
+
+                let Type::Prod {
+                    mult,
+                    first: expected_first,
+                    second: expected_second,
+                } = &expected_ty.val
+                else {
+                    return Err(TypeError::Mismatch(
+                        e.clone(),
+                        Err(format!("product type")),
+                        expected_ty.clone(),
+                    ));
+                };
+
+                let (first_cs, first_eff) = self.check(&first_ctx, first, &expected_first)?;
+                let (second_cs, second_eff) = self.check(&second_ctx, second, &expected_second)?;
+
+                if mult.val == Mult::OrdL && second_eff == Eff::Yes {
+                    return Err(TypeError::MismatchEff(
+                        *second.clone(),
+                        fake_span(second_eff),
+                        fake_span(Eff::No),
+                    ));
+                }
+                if mult.val == Mult::OrdR && first_eff == Eff::Yes {
+                    return Err(TypeError::MismatchEff(
+                        *first.clone(),
+                        fake_span(first_eff),
+                        fake_span(Eff::No),
+                    ));
+                }
+
+                {
+                    let res_ctx = ext(mult.val, first_ctx, second_ctx);
+
+                    if !ctx.is_subctx_of(&res_ctx) {
+                        return Err(TypeError::CtxSplitFailed(
+                            e.clone(),
+                            ctx.clone(),
+                            res_ctx.clone(),
+                        ));
+                    }
+                }
+
+                Ok((first_cs.join(second_cs), Eff::lub(first_eff, second_eff)))
             }
             _ => {
                 let (inferred_ty, mut cs, eff) = self.infer(ctx, e)?;

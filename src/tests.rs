@@ -28,7 +28,7 @@ mod typechecker_tests {
         constraint::Constraints,
         error_reporting::IErr,
         session_type,
-        syntax::{Eff, Session, Type},
+        syntax::{Eff, Expr, Mult, Session, Type},
         type_checker::TypeError,
         typecheck,
         util::span::fake_span,
@@ -191,6 +191,95 @@ mod typechecker_tests {
 
         let res = typecheck(src, false);
         assert_matches!(res, Err(IErr::Typing(TypeError::MismatchEffSub(_, _, _))));
+    }
+
+    #[test]
+    fn pair() {
+        let src = r#"
+        let
+            foo : Unit -[m u 0]-> Int *[u] Unit
+            foo c =
+                (7, unit)
+        in
+        foo unit
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Prod { .. }, _, Eff::No)));
+        let Ok((
+            _,
+            Type::Prod {
+                mult,
+                first,
+                second,
+            },
+            _,
+            _,
+        )) = res
+        else {
+            unreachable!()
+        };
+        assert_eq!(*mult, Mult::Unr);
+        assert_eq!(**first, Type::Int);
+        assert_eq!(**second, Type::Unit);
+
+        let src = r#"
+        let
+            foo : ?Int -[m u 1]-> Int *[r] Unit
+            foo c =
+                (recv @Int c, unit)
+        in
+        unit
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::MismatchEff(_, _, _))));
+        let Err(IErr::Typing(TypeError::MismatchEff(expr, _, eff))) = res else {
+            unreachable!()
+        };
+        assert_eq!(*eff, Eff::No);
+        let Expr::Recv(ty, chan) = &expr.val else {
+            unreachable!("{:?}", &expr.val)
+        };
+        assert_eq!(ty.val, Type::Int);
+        assert_matches!(chan.val, Expr::Var(_));
+        let Expr::Var(chan_name) = &chan.val else {
+            unreachable!()
+        };
+        assert_eq!(chan_name.val, "c");
+
+        let src = r#"
+        let
+            foo : ?Int -[m u 1]-> Int *[l] Unit
+            foo c =
+                (7, recv @Int c)
+        in
+        unit
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::MismatchEff(_, _, _))));
+        let Err(IErr::Typing(TypeError::MismatchEff(expr, _, eff))) = res else {
+            unreachable!()
+        };
+        assert_eq!(*eff, Eff::No);
+        // The mismatched expression should be the recv on the right
+        let Expr::Recv(ty_r, chan_r) = &expr.val else {
+            unreachable!("{:?}", &expr.val)
+        };
+        assert_eq!(ty_r.val, Type::Int);
+        assert_matches!(chan_r.val, Expr::Var(_));
+        let Expr::Var(chan_name_r) = &chan_r.val else {
+            unreachable!()
+        };
+        assert_eq!(chan_name_r.val, "c");
+
+        let src = r#"
+            (7, recv @Int c)
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::TypeAnnotationMissing(_))));
     }
 }
 
