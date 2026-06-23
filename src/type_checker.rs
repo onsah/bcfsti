@@ -655,7 +655,30 @@ impl TypeChecker {
 
                 Ok((ty.clone(), expr_cs, expr_eff))
             }
-            Expr::Op1(op1, spanned) => todo!(),
+            Expr::Op1(op1, expr) => {
+                let (expr_ty, expr_cs, expr_eff) = self.infer(ctx, expr)?;
+                let ty = match (op1, &expr_ty.val) {
+                    (Op1::Neg, Type::Int) => Type::Int,
+                    (Op1::Neg, _) => {
+                        return Err(TypeError::Mismatch(
+                            e.clone(),
+                            Err(format!("Int")),
+                            expr_ty.clone(),
+                        ))
+                    }
+                    (Op1::Not, Type::Bool) => Type::Bool,
+                    (Op1::Not, _) => {
+                        return Err(TypeError::Mismatch(
+                            e.clone(),
+                            Err(format!("Bool")),
+                            expr_ty.clone(),
+                        ))
+                    }
+                    (Op1::ToStr, _) => Type::String,
+                    (Op1::Print, _) => Type::Unit,
+                };
+                Ok((fake_span(ty), expr_cs, expr_eff))
+            }
             Expr::Op2(op2, spanned, spanned1) => todo!(),
             Expr::If(spanned, spanned1, spanned2) => todo!(),
             Expr::Inj(_, _) => Err(TypeError::TypeAnnotationMissing(e.clone())),

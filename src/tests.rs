@@ -462,6 +462,81 @@ mod typechecker_tests {
         };
         assert_eq!(&label, "bar");
     }
+
+    #[test]
+    fn op1() {
+        let src = r#"
+            let x = 5 in
+            -x
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Int, _, Eff::No)));
+
+        let src = r#"
+            let x = true in
+            -x
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::Mismatch(_, _, _))));
+        let Err(IErr::Typing(TypeError::Mismatch(_, expected_ty, _))) = res else {
+            unreachable!()
+        };
+        assert_eq!(expected_ty, Err("Int".to_owned()));
+
+        let src = r#"
+            let x = true in
+            !x
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Bool, _, Eff::No)));
+
+        let src = r#"
+            let x = 5 in
+            !x
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::Mismatch(_, _, _))));
+        let Err(IErr::Typing(TypeError::Mismatch(_, expected_ty, _))) = res else {
+            unreachable!()
+        };
+        assert_eq!(expected_ty, Err("Bool".to_owned()));
+
+        let src = r#"
+            let x = true in
+            str x
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::String, _, Eff::No)));
+
+        let src = r#"
+            let x = 5 in
+            str x
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::String, _, Eff::No)));
+
+        let src = r#"
+            let x = true in
+            print x
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Unit, _, Eff::No)));
+
+        let src = r#"
+            let x = 5 in
+            print x
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Unit, _, Eff::No)));
+    }
 }
 
 // #[test]
