@@ -298,6 +298,70 @@ mod typechecker_tests {
         let res = typecheck(src, false);
         assert_matches!(res, Ok((_, Type::Variant { .. }, _, _)));
     }
+
+    #[test]
+    fn case() {
+        let src = r#"
+          case (inj foo 5 : < foo: Int, bar: String >) {
+            foo i -> { i }
+            bar s -> { 42 }
+          }
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Int, _, _)));
+
+        let src = r#"
+          case (inj foo 5 : < foo: Int, bar: String >) {
+            foo i -> { i }
+          }
+        "#;
+
+        let res = typecheck(src, false);
+        let Err(IErr::Typing(TypeError::CaseMissingLabel(_, _, label))) = res else {
+            panic!("Expected MismatchLabel, got {:?}", res);
+        };
+        assert_eq!(&label, "bar");
+
+        let src = r#"
+          case (inj foo 5 : < foo: Int >) {
+            foo i -> { i }
+            bar s -> { 42 }
+          }
+        "#;
+
+        let res = typecheck(src, false);
+        let Err(IErr::Typing(TypeError::CaseExtraLabel(_, _, label))) = res else {
+            panic!("Expected MismatchLabel, got {:?}", res);
+        };
+        assert_eq!(&label, "bar");
+
+        let src = r#"
+          case (inj foo 5 : < foo: Int, bar: String >) {
+            foo i -> { i }
+            foo j -> { j }
+            bar s -> { 42 }
+          }
+        "#;
+
+        let res = typecheck(src, false);
+        let Err(IErr::Typing(TypeError::CaseDuplicateLabel(_, _, label))) = res else {
+            panic!("Expected CaseDuplicateLabel, got {:?}", res);
+        };
+        assert_eq!(&label, "foo");
+
+        let src = r#"
+          case (inj foo 5 : < foo: Int, foo: String >) {
+            foo i -> { i }
+          }
+        "#;
+
+        let res = typecheck(src, false);
+        let Err(IErr::Typing(TypeError::VariantDuplicateLabel(_, _, label))) = res else {
+            panic!("Expected VariantDuplicateLabel, got {:?}", res);
+        };
+        assert_eq!(&label, "foo");
+    }
 }
 
 // #[test]

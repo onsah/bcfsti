@@ -477,7 +477,70 @@ impl TypeChecker {
                     Eff::lub(clause_eff, body_eff),
                 ))
             }
-            Expr::CaseSum(spanned, items) => todo!(),
+            Expr::CaseSum(expr, cases) => {
+                let expr_ctx = ctx.restrict(&expr.free_vars());
+                let (expr_ty, expr_cs, expr_eff) = self.infer(&expr_ctx, expr)?;
+
+                let Type::Variant(variants) = &expr_ty.val else {
+                    return Err(TypeError::Mismatch(
+                        *expr.clone(),
+                        Err("Variant".into()),
+                        expr_ty.clone(),
+                    ));
+                };
+
+                // Ensure variants and cases labels are equivalent
+                {
+                    let case_labels: Vec<_> =
+                        cases.iter().map(|(label, _, _)| &label.val).collect();
+                    let variant_labels: Vec<_> =
+                        variants.iter().map(|(label, _)| &label.val).collect();
+                    Self::check_variant_label_eq(e, &expr_ty, &case_labels, &variant_labels)?
+                };
+
+                let case_inferences: Vec<(Spanned<Type>, Constraints, Eff)> = cases
+                    .iter()
+                    .map(|(label, var_name, case_expr)| {
+                        let case_ctx = ctx.restrict(&case_expr.free_vars());
+
+                        let res_ctx = Ctx::Join(
+                            Box::new(expr_ctx.clone()),
+                            Box::new(case_ctx.clone()),
+                            JoinOrd::Ordered,
+                        );
+                        if !ctx.is_subctx_of(&res_ctx) {
+                            return Err(TypeError::CtxSplitFailed(
+                                e.clone(),
+                                ctx.clone(),
+                                res_ctx.clone(),
+                            ));
+                        }
+
+                        if expr_ctx.vars().contains(&var_name.val) {
+                            return Err(TypeError::Shadowing(e.clone(), var_name.clone()));
+                        }
+
+                        let case_ty = variants.iter().find_map(|(var_label, var_ty)| if var_label.val == label.val {
+                            Some(var_ty.clone())
+                        } else {
+                            None
+                        }).expect("Bug: set of labels in the variant type must be equal to the set of labels in cases");
+
+                        let case_ctx = Ctx::Join(Box::new(Ctx::Bind(var_name.clone(), case_ty)), Box::new(case_ctx), JoinOrd::Ordered);
+                        self.infer(&case_ctx, case_expr)
+                    })
+                    .collect::<Result<_, _>>()?;
+
+                let expr_ty = case_inferences.first().unwrap().0.clone();
+                let expr_cs = case_inferences
+                    .iter()
+                    .fold(expr_cs, |acc, (_, cs, _)| acc.join(cs.clone()));
+                let expr_eff = case_inferences
+                    .iter()
+                    .fold(expr_eff, |acc, (_, _, eff)| Eff::lub(acc, *eff));
+
+                Ok((expr_ty, expr_cs, expr_eff))
+            }
             Expr::Select(spanned, spanned1) => todo!(),
             Expr::Branch(spanned) => todo!(),
             Expr::Ann(expr, ty) => {
