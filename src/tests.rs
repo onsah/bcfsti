@@ -25,7 +25,7 @@ mod typechecker_tests {
     use std::{assert_matches, collections::HashSet};
 
     use crate::{
-        constraint::Constraints,
+        constraint::{self, Constraints},
         error_reporting::IErr,
         session_type,
         syntax::{Eff, Expr, Mult, Session, Type},
@@ -302,14 +302,26 @@ mod typechecker_tests {
     #[test]
     fn case() {
         let src = r#"
-          case (inj foo 5 : < foo: Int, bar: String >) {
+          case (inj foo 5 : < foo: Int, bar: String, baz: Bool >) {
             foo i -> { i }
-            bar s -> { 42 }
+            bar s -> { s }
+            baz b -> { b }
           }
         "#;
 
         let res = typecheck(src, false);
         assert_matches!(res, Ok((_, Type::Int, _, _)));
+        let Ok((_, Type::Int, cs, _)) = res else {
+            unreachable!()
+        };
+        let expected_constraints = {
+            let mut cs = Constraints::empty();
+            cs.add(Type::Int, Type::String);
+            cs.add(Type::Int, Type::Bool);
+            cs.add(Type::String, Type::Bool);
+            cs
+        };
+        assert_eq!(cs, expected_constraints);
 
         let src = r#"
           case (inj foo 5 : < foo: Int, bar: String >) {

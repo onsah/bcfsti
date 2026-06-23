@@ -530,7 +530,7 @@ impl TypeChecker {
                     Self::check_variant_label_eq(e, &expr_ty, &case_labels, &variant_labels)?
                 };
 
-                let case_inferences: Vec<(Spanned<Type>, Constraints, Eff)> = cases
+                let case_inferences: Vec<(String, (Spanned<Type>, Constraints, Eff))> = cases
                     .iter()
                     .map(|(label, var_name, case_expr)| {
                         let case_ctx = ctx.restrict(&case_expr.free_vars());
@@ -559,20 +559,31 @@ impl TypeChecker {
                         }).expect("Bug: set of labels in the variant type must be equal to the set of labels in cases");
 
                         let case_ctx = Ctx::Join(Box::new(Ctx::Bind(var_name.clone(), case_ty)), Box::new(case_ctx), JoinOrd::Ordered);
-                        self.infer(&case_ctx, case_expr)
+                        let infer_res = self.infer(&case_ctx, case_expr)?;
+                        Ok((label.val.clone(), infer_res))
                     })
                     .collect::<Result<_, _>>()?;
 
-                let expr_ty = case_inferences.first().unwrap().0.clone();
+                println!("Case inferences: {:?}", case_inferences);
+
+                let expr_ty = case_inferences.first().unwrap().1 .0.clone();
                 let expr_cs = case_inferences
                     .iter()
+                    .map(|(_, infer_res)| infer_res)
                     .fold(expr_cs, |acc, (_, cs, _)| acc.join(cs.clone()));
                 let expr_eff = case_inferences
                     .iter()
+                    .map(|(_, infer_res)| infer_res)
                     .fold(expr_eff, |acc, (_, _, eff)| Eff::lub(acc, *eff));
 
+                let mut cs = expr_cs;
+                for (i, (_, (ty1, _, _))) in case_inferences.iter().enumerate() {
+                    for (_, (ty2, _, _)) in case_inferences[i + 1..].iter() {
+                        cs.add(ty1.val.clone(), ty2.val.clone());
+                    }
+                }
                 // TODO: Add constraints that return type of every branch is equivalent
-                Ok((expr_ty, expr_cs, expr_eff))
+                Ok((expr_ty, cs, expr_eff))
             }
             Expr::Select(label, chan_expr) => {
                 let chan_ctx = ctx.restrict(&chan_expr.free_vars());
