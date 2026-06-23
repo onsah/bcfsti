@@ -537,6 +537,62 @@ mod typechecker_tests {
         let res = typecheck(src, false);
         assert_matches!(res, Ok((_, Type::Unit, _, Eff::No)));
     }
+
+    #[test]
+    fn op2() {
+        let src = r#"
+            let x = 5 in
+            let y = 10 in
+            x + y
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Int, _, Eff::No)));
+
+        let src = r#"
+            let x = "foo" in
+            let y = "bar" in
+            x + y
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::String, _, Eff::No)));
+
+        let src = r#"
+            let x = 5 in
+            let y = true in
+            x + y
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::Op2Mismatch(_, _, _, _))));
+        let Err(IErr::Typing(TypeError::Op2Mismatch(_, expected_ty, _, _))) = res else {
+            unreachable!()
+        };
+        assert_eq!(expected_ty, Err("String or Int".to_owned()));
+
+        let src = r#"
+            let x = true in
+            let y = false in
+            x && y
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Bool, _, Eff::No)));
+
+        let src = r#"
+            let x = true in
+            let y = 5 in
+            x || y
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::Op2Mismatch(_, _, _, _))));
+        let Err(IErr::Typing(TypeError::Op2Mismatch(_, expected_ty, _, _))) = res else {
+            unreachable!()
+        };
+        assert_eq!(expected_ty, Err("Bool".to_owned()));
+    }
 }
 
 // #[test]

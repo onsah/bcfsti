@@ -679,7 +679,79 @@ impl TypeChecker {
                 };
                 Ok((fake_span(ty), expr_cs, expr_eff))
             }
-            Expr::Op2(op2, spanned, spanned1) => todo!(),
+            Expr::Op2(op2, expr1, expr2) => {
+                let expr1_ctx = ctx.restrict(&expr1.free_vars());
+                let (expr1_ty, expr1_cs, expr1_eff) = self.infer(&expr1_ctx, expr1)?;
+
+                let expr2_ctx = ctx.restrict(&expr2.free_vars());
+                let (expr2_ty, expr2_cs, expr2_eff) = self.infer(&expr2_ctx, expr2)?;
+
+                {
+                    let res_ctx = Ctx::Join(
+                        Box::new(expr1_ctx.clone()),
+                        Box::new(expr2_ctx.clone()),
+                        JoinOrd::Unordered,
+                    );
+
+                    if !ctx.is_subctx_of(&res_ctx) {
+                        return Err(TypeError::CtxSplitFailed(
+                            e.clone(),
+                            ctx.clone(),
+                            res_ctx.clone(),
+                        ));
+                    }
+                }
+
+                let ty = match (op2, &expr1_ty.val, &expr2_ty.val) {
+                    (Op2::Add, Type::Int, Type::Int) => Type::Int,
+                    (Op2::Add, Type::String, Type::String) => Type::String,
+                    (Op2::Add, _, _) => {
+                        return Err(TypeError::Op2Mismatch(
+                            e.clone(),
+                            Err(format!("String or Int")),
+                            expr1_ty.clone(),
+                            expr2_ty.clone(),
+                        ))
+                    }
+                    (Op2::Sub | Op2::Mul | Op2::Div, Type::Int, Type::Int) => Type::Int,
+                    (Op2::Sub | Op2::Mul | Op2::Div, _, _) => {
+                        return Err(TypeError::Op2Mismatch(
+                            e.clone(),
+                            Err(format!("Int")),
+                            expr1_ty.clone(),
+                            expr2_ty.clone(),
+                        ))
+                    }
+                    (
+                        Op2::Eq | Op2::Neq | Op2::Lt | Op2::Le | Op2::Gt | Op2::Ge,
+                        t1 @ (Type::Int | Type::Bool | Type::String | Type::Unit),
+                        t2,
+                    ) if t1.sem_eq(t2) => Type::Bool,
+                    (Op2::Eq | Op2::Neq | Op2::Lt | Op2::Le | Op2::Gt | Op2::Ge, _, _) => {
+                        return Err(TypeError::Op2Mismatch(
+                            e.clone(),
+                            Err(format!("Int or Bool or String or Unit")),
+                            expr1_ty.clone(),
+                            expr2_ty.clone(),
+                        ))
+                    }
+                    (Op2::And | Op2::Or, Type::Bool, Type::Bool) => Type::Bool,
+                    (Op2::And | Op2::Or, _, _) => {
+                        return Err(TypeError::Op2Mismatch(
+                            e.clone(),
+                            Err(format!("Bool")),
+                            expr1_ty.clone(),
+                            expr2_ty.clone(),
+                        ))
+                    }
+                };
+
+                Ok((
+                    fake_span(ty),
+                    expr1_cs.join(expr2_cs),
+                    Eff::lub(expr1_eff, expr2_eff),
+                ))
+            }
             Expr::If(spanned, spanned1, spanned2) => todo!(),
             Expr::Inj(_, _) => Err(TypeError::TypeAnnotationMissing(e.clone())),
             Expr::Pair(_, _) => Err(TypeError::TypeAnnotationMissing(e.clone())),
