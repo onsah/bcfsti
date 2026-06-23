@@ -564,8 +564,6 @@ impl TypeChecker {
                     })
                     .collect::<Result<_, _>>()?;
 
-                println!("Case inferences: {:?}", case_inferences);
-
                 let expr_ty = case_inferences.first().unwrap().1 .0.clone();
                 let expr_cs = case_inferences
                     .iter()
