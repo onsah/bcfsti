@@ -1,6 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     ops::Mul,
+    task::Context,
 };
 
 use crate::{
@@ -65,11 +66,9 @@ pub enum TypeError {
     SessionTypeOnlySkips(SSession),
 }
 
-// TODO: return generated constraints
 pub fn infer_type(e: &SExpr) -> Result<(SType, Constraints, Eff), TypeError> {
     let mut checker = TypeChecker { uvar_counter: 0 };
     let (t, cs, eff) = checker.infer(&Ctx::Empty, e)?;
-    // TODO: Constraint checking
     for (ty1, ty2) in cs.iter() {
         println!("Constraint: {} == {}", pretty_def(ty1), pretty_def(ty2));
     }
@@ -435,7 +434,40 @@ impl TypeChecker {
                     Eff::lub(*eff, Eff::lub(abs_eff, arg_eff)),
                 ))
             }
-            Expr::Let(spanned, spanned1, spanned2) => todo!(),
+            Expr::Let(var_id, var_expr, body_expr) => {
+                if ctx.vars().contains(&var_id.val) {
+                    return Err(TypeError::Shadowing(e.clone(), var_id.clone()));
+                }
+
+                let var_ctx = ctx.restrict(&var_expr.free_vars());
+                let body_ctx = ctx.restrict(&body_expr.free_vars());
+
+                {
+                    let res_ctx = Ctx::Join(
+                        Box::new(var_ctx.clone()),
+                        Box::new(body_ctx.clone()),
+                        JoinOrd::Ordered,
+                    );
+
+                    if !ctx.is_subctx_of(&res_ctx) {
+                        return Err(TypeError::CtxSplitFailed(
+                            e.clone(),
+                            ctx.clone(),
+                            res_ctx.clone(),
+                        ));
+                    }
+                }
+
+                let (var_ty, var_cs, var_eff) = self.infer(&var_ctx, var_expr)?;
+
+                let body_ctx = {
+                    let binding = Ctx::Bind(var_id.clone(), var_ty);
+                    Ctx::Join(Box::new(binding), Box::new(body_ctx), JoinOrd::Ordered)
+                };
+                let (body_ty, body_cs, body_eff) = self.infer(&body_ctx, body_expr)?;
+
+                Ok((body_ty, var_cs.join(body_cs), Eff::lub(var_eff, body_eff)))
+            }
             Expr::LetDecl(id, expected_ty, clause, body) => {
                 let decl_ctx = ctx.restrict(&clause.free_vars());
                 let body_ctx = ctx.restrict(&body.free_vars());
@@ -541,8 +573,83 @@ impl TypeChecker {
 
                 Ok((expr_ty, expr_cs, expr_eff))
             }
-            Expr::Select(spanned, spanned1) => todo!(),
-            Expr::Branch(spanned) => todo!(),
+            Expr::Select(label, chan_expr) => {
+                let chan_ctx = ctx.restrict(&chan_expr.free_vars());
+
+                if !ctx.is_subctx_of(&chan_ctx) {
+                    return Err(TypeError::CtxSplitFailed(
+                        e.clone(),
+                        ctx.clone(),
+                        chan_ctx.clone(),
+                    ));
+                }
+
+                let (chan_ty, chan_cs, _chan_eff) = self.infer(&chan_ctx, chan_expr)?;
+
+                if let Type::Chan(Session::UVar(_)) = &chan_ty.val {
+                    return Err(TypeError::TypeAnnotationMissing(*chan_expr.clone()));
+                }
+
+                let Type::Chan(Session::Choice(SessionOp::Send, branches)) = &chan_ty.val else {
+                    return Err(TypeError::Mismatch(
+                        *chan_expr.clone(),
+                        Err("Chan<Choice<Send>>".into()),
+                        chan_ty.clone(),
+                    ));
+                };
+
+                let label_ty = branches
+                    .iter()
+                    .find_map(|(branch_label, branch_ty)| {
+                        if branch_label.val == label.val {
+                            Some(branch_ty.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .ok_or(TypeError::MismatchLabel(
+                        e.clone(),
+                        label.val.clone(),
+                        chan_ty.clone(),
+                    ))?;
+
+                Ok((fake_span(Type::Chan(label_ty.val)), chan_cs, Eff::Yes))
+            }
+            Expr::Branch(chan_expr) => {
+                let chan_ctx = ctx.restrict(&chan_expr.free_vars());
+
+                if !ctx.is_subctx_of(&chan_ctx) {
+                    return Err(TypeError::CtxSplitFailed(
+                        e.clone(),
+                        ctx.clone(),
+                        chan_ctx.clone(),
+                    ));
+                }
+
+                let (chan_ty, chan_cs, _chan_eff) = self.infer(&chan_ctx, chan_expr)?;
+
+                if let Type::Chan(Session::UVar(_)) = &chan_ty.val {
+                    return Err(TypeError::TypeAnnotationMissing(*chan_expr.clone()));
+                }
+
+                let Type::Chan(Session::Choice(SessionOp::Recv, branches)) = chan_ty.val else {
+                    return Err(TypeError::Mismatch(
+                        *chan_expr.clone(),
+                        Err("Chan<Choice<Recv>>".into()),
+                        chan_ty.clone(),
+                    ));
+                };
+
+                let ty = Type::Variant(
+                    branches
+                        .into_iter()
+                        .map(|(label, Spanned { val, span })| {
+                            (label, Spanned::new(Type::Chan(val), span))
+                        })
+                        .collect(),
+                );
+                Ok((fake_span(ty), chan_cs, Eff::Yes))
+            }
             Expr::Ann(expr, ty) => {
                 let (expr_cs, expr_eff) = self.check(&ctx.restrict(&expr.free_vars()), expr, ty)?;
 
@@ -591,7 +698,7 @@ impl TypeChecker {
                     }
                 }
 
-                // Assert that `x` is not in the context.
+                // Assert that `x` is not] in the context.
                 if ctx.vars().contains(&id.val) {
                     Err(TypeError::Shadowing(e.clone(), id.clone()))?
                 }

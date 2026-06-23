@@ -362,6 +362,106 @@ mod typechecker_tests {
         };
         assert_eq!(&label, "foo");
     }
+
+    #[test]
+    fn let_() {
+        let src = r#"
+            (\f.
+            let x = 5 in
+            f x) : (Int -[m u 0]-> !Int; ?String) -[m u 1]-> ?String
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Arr { .. }, _, _)));
+        let Ok((_, Type::Arr { ret, .. }, _, _)) = res else {
+            unreachable!()
+        };
+        assert_eq!(ret.val, Type::Chan(session_type! { ?String }.val));
+
+        let src = r#"
+            let x = 5 in
+            let x = 3 in
+            x
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::Shadowing(_, _))));
+    }
+
+    #[test]
+    fn select() {
+        let src = r#"
+            (\c.
+            let c1 = select bar c in
+            send @Int 42 c1) : +{ foo: ?Int; ?String, bar: !Int } -[m u 1]-> ?String
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Arr { .. }, _, Eff::No)));
+
+        let src = r#"
+            (\c.
+            let c1, c2 = lsplit !Int c in
+            send @Int 42 c1;
+            let c3 = select bar c2 in
+            send @Int 42 c3) : !Int;+{ foo: ?Int; ?String, bar: !Int } -[m u 1]-> ?String
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::TypeAnnotationMissing(_))));
+
+        let src = r#"
+            let c = select foo 5 in
+            c
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::Mismatch(_, _, _))));
+    }
+
+    #[test]
+    fn branch() {
+        let src = r#"
+            (\c.
+            case branch c {
+                foo c1 -> { recv @Int c1 }
+                bar c2 -> { send @Int 42 c2; 42 }
+            }) : &{ foo: ?Int, bar: !Int } -[m u 1]-> Int
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Arr { .. }, _, Eff::No)));
+
+        let src = r#"
+            (\c.
+            case branch c {
+                foo c1 -> { recv @Int c1 }
+            }) : &{ foo: ?Int, bar: !Int } -[m u 1]-> Int
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::CaseMissingLabel(_, _, _))));
+        let Err(IErr::Typing(TypeError::CaseMissingLabel(_, _, label))) = res else {
+            unreachable!()
+        };
+        assert_eq!(&label, "bar");
+
+        let src = r#"
+            (\c.
+            case branch c {
+                foo c1 -> { recv @Int c1 }
+
+                bar c2 -> { send @Int 42 c2; 42 }
+            }) : &{ foo: ?Int } -[m u 1]-> Int
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::CaseExtraLabel(_, _, _))));
+        let Err(IErr::Typing(TypeError::CaseExtraLabel(_, _, label))) = res else {
+            unreachable!()
+        };
+        assert_eq!(&label, "bar");
+    }
 }
 
 // #[test]
