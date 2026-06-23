@@ -571,6 +571,7 @@ impl TypeChecker {
                     .iter()
                     .fold(expr_eff, |acc, (_, _, eff)| Eff::lub(acc, *eff));
 
+                // TODO: Add constraints that return type of every branch is equivalent
                 Ok((expr_ty, expr_cs, expr_eff))
             }
             Expr::Select(label, chan_expr) => {
@@ -752,7 +753,58 @@ impl TypeChecker {
                     Eff::lub(expr1_eff, expr2_eff),
                 ))
             }
-            Expr::If(spanned, spanned1, spanned2) => todo!(),
+            Expr::If(cond_expr, then_expr, else_expr) => {
+                let cond_ctx = ctx.restrict(&cond_expr.free_vars());
+                let (cond_cs, cond_eff) =
+                    self.check(&cond_ctx, cond_expr, &fake_span(Type::Bool))?;
+
+                let then_ctx = ctx.restrict(&then_expr.free_vars());
+                let else_ctx = ctx.restrict(&else_expr.free_vars());
+
+                {
+                    let res_ctx = Ctx::Join(
+                        Box::new(cond_ctx.clone()),
+                        Box::new(then_ctx.clone()),
+                        JoinOrd::Unordered,
+                    );
+
+                    if !ctx.is_subctx_of(&res_ctx) {
+                        return Err(TypeError::CtxSplitFailed(
+                            e.clone(),
+                            ctx.clone(),
+                            res_ctx.clone(),
+                        ));
+                    }
+                }
+
+                {
+                    let res_ctx = Ctx::Join(
+                        Box::new(cond_ctx.clone()),
+                        Box::new(else_ctx.clone()),
+                        JoinOrd::Unordered,
+                    );
+
+                    if !ctx.is_subctx_of(&res_ctx) {
+                        return Err(TypeError::CtxSplitFailed(
+                            e.clone(),
+                            ctx.clone(),
+                            res_ctx.clone(),
+                        ));
+                    }
+                }
+
+                let (then_ty, then_cs, then_eff) = self.infer(&then_ctx, then_expr)?;
+                let (else_ty, else_cs, else_eff) = self.infer(&else_ctx, else_expr)?;
+
+                let mut cs = cond_cs.join(then_cs).join(else_cs);
+                cs.add(then_ty.val.clone(), else_ty.val);
+
+                Ok((
+                    then_ty,
+                    cs,
+                    Eff::lub(cond_eff, Eff::lub(then_eff, else_eff)),
+                ))
+            }
             Expr::Inj(_, _) => Err(TypeError::TypeAnnotationMissing(e.clone())),
             Expr::Pair(_, _) => Err(TypeError::TypeAnnotationMissing(e.clone())),
             Expr::Abs(_, _) => Err(TypeError::TypeAnnotationMissing(e.clone())),

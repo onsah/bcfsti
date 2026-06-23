@@ -593,6 +593,31 @@ mod typechecker_tests {
         };
         assert_eq!(expected_ty, Err("Bool".to_owned()));
     }
+
+    #[test]
+    fn if_() {
+        let src = r#"
+            if true then 5 else 10
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Int, _, Eff::No)));
+
+        let src = r#"
+            if true then 5 else "foo"
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Int, _, Eff::No)));
+        let Ok((_, _, cs, _)) = res else {
+            unreachable!()
+        };
+
+        assert!(cs
+            .into_iter()
+            .any(|(ty1, ty2)| (ty1 == Type::Int && ty2 == Type::String)
+                || (ty1 == Type::String && ty2 == Type::Int)));
+    }
 }
 
 // #[test]
