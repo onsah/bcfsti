@@ -80,6 +80,41 @@ impl Session {
             _ => false,
         }
     }
+
+    /// Closed session means it has no unification variables.
+    pub fn is_closed(&self) -> bool {
+        match self {
+            Session::Skip => true,
+            Session::Semi { first, second } => first.is_closed() && second.is_closed(),
+            Session::End(_) => true,
+            Session::BorrowEnd(_) => true,
+            Session::Op(_, t) => t.is_closed(),
+            Session::Choice(_, cs) => cs.iter().all(|(_, s)| s.is_closed()),
+            Session::Mu(_, body) => body.is_closed(),
+            Session::Var(_) => true,
+            Session::UVar(_) => false,
+        }
+    }
+
+    pub fn unification_variables(&self) -> HashSet<UVarId> {
+        match self {
+            Session::Skip => HashSet::new(),
+            Session::Semi { first, second } => union(
+                first.unification_variables(),
+                second.unification_variables(),
+            ),
+            Session::End(_) => HashSet::new(),
+            Session::BorrowEnd(_) => HashSet::new(),
+            Session::Op(_, t) => t.unification_variables(),
+            Session::Choice(_, cs) => cs
+                .iter()
+                .flat_map(|(_, s)| s.unification_variables())
+                .collect(),
+            Session::Mu(_, body) => body.unification_variables(),
+            Session::Var(_) => HashSet::new(),
+            Session::UVar(x) => HashSet::from([*x]),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -105,6 +140,38 @@ pub enum Type {
     String,
 }
 pub type SType = Spanned<Type>;
+
+impl Type {
+    /// Closed type means it has no unification variables.
+    pub fn is_closed(&self) -> bool {
+        match self {
+            Type::Chan(s) => s.is_closed(),
+            Type::Arr { param, ret, .. } => param.is_closed() && ret.is_closed(),
+            Type::Prod { first, second, .. } => first.is_closed() && second.is_closed(),
+            Type::Variant(cs) => cs.iter().all(|(_, t)| t.is_closed()),
+            Type::Unit | Type::Int | Type::Bool | Type::String => true,
+        }
+    }
+
+    /// Unification variables appear inside the type
+    pub fn unification_variables(&self) -> HashSet<UVarId> {
+        match self {
+            Type::Chan(s) => s.unification_variables(),
+            Type::Arr { param, ret, .. } => {
+                union(param.unification_variables(), ret.unification_variables())
+            }
+            Type::Prod { first, second, .. } => union(
+                first.unification_variables(),
+                second.unification_variables(),
+            ),
+            Type::Variant(cs) => cs
+                .iter()
+                .flat_map(|(_, t)| t.unification_variables())
+                .collect(),
+            Type::Unit | Type::Int | Type::Bool | Type::String => HashSet::new(),
+        }
+    }
+}
 
 pub type Label = String;
 pub type SLabel = Spanned<Label>;
