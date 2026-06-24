@@ -1,0 +1,7 @@
+let
+    sendTree : (mu x. +{ leaf: Skip, node: !Int; x; x }) -[m u 1]-> Unit
+    sendTree c =
+        let c1 = select node c in
+        unit
+in
+unit
