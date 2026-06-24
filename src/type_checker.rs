@@ -8,10 +8,10 @@ use crate::{
         Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, Pattern, SEff, SExpr, SId, SLabel, SMult,
         SPattern, SSession, SType, Session, SessionOp, Type,
     },
-    type_context::{ext, Ctx, JoinOrd},
+    type_context::{Ctx, JoinOrd, ext},
     util::{
         pretty::pretty_def,
-        span::{fake_span, Spanned},
+        span::{Spanned, fake_span},
     },
 };
 
@@ -83,6 +83,7 @@ impl TypeChecker {
         // println!("Ctx: {}", pretty_context_notype(&ctx.simplify()));
         match &e.val {
             Expr::Const(c) => {
+                assert_unr_ctx(e, ctx)?;
                 let ty = match c {
                     crate::syntax::Const::Unit => Type::Unit,
                     crate::syntax::Const::Int(_) => Type::Int,
@@ -488,6 +489,11 @@ impl TypeChecker {
                         clause.var_id.clone(),
                         Box::new(clause.body.clone()),
                     ));
+                    let decl_ctx = ext(
+                        Mult::Unr,
+                        decl_ctx,
+                        Ctx::Bind(id.clone(), expected_ty.clone()),
+                    );
                     self.check(&decl_ctx, &clause_expr, expected_ty)?
                 };
 
@@ -559,7 +565,7 @@ impl TypeChecker {
                     })
                     .collect::<Result<_, _>>()?;
 
-                let expr_ty = case_inferences.first().unwrap().1 .0.clone();
+                let expr_ty = case_inferences.first().unwrap().1.0.clone();
                 let expr_cs = case_inferences
                     .iter()
                     .map(|(_, infer_res)| infer_res)
@@ -595,11 +601,19 @@ impl TypeChecker {
                     return Err(TypeError::TypeAnnotationMissing(*chan_expr.clone()));
                 }
 
-                let Type::Chan(Session::Choice(SessionOp::Send, branches)) = &chan_ty.val else {
+                let Type::Chan(s) = &chan_ty.val else {
                     return Err(TypeError::Mismatch(
                         *chan_expr.clone(),
-                        Err("Chan<Choice<Send>>".into()),
+                        Err("Chan".into()),
                         chan_ty.clone(),
+                    ));
+                };
+
+                let Session::Choice(SessionOp::Send, branches) = s.unfold_if_mu() else {
+                    return Err(TypeError::Mismatch(
+                        *chan_expr.clone(),
+                        Err("Choice<Send>".into()),
+                        fake_span(Type::Chan(s.unfold_if_mu())),
                     ));
                 };
 
@@ -669,7 +683,7 @@ impl TypeChecker {
                             e.clone(),
                             Err(format!("Int")),
                             expr_ty.clone(),
-                        ))
+                        ));
                     }
                     (Op1::Not, Type::Bool) => Type::Bool,
                     (Op1::Not, _) => {
@@ -677,7 +691,7 @@ impl TypeChecker {
                             e.clone(),
                             Err(format!("Bool")),
                             expr_ty.clone(),
-                        ))
+                        ));
                     }
                     (Op1::ToStr, _) => Type::String,
                     (Op1::Print, _) => Type::Unit,
@@ -716,7 +730,7 @@ impl TypeChecker {
                             Err(format!("String or Int")),
                             expr1_ty.clone(),
                             expr2_ty.clone(),
-                        ))
+                        ));
                     }
                     (Op2::Sub | Op2::Mul | Op2::Div, Type::Int, Type::Int) => Type::Int,
                     (Op2::Sub | Op2::Mul | Op2::Div, _, _) => {
@@ -725,7 +739,7 @@ impl TypeChecker {
                             Err(format!("Int")),
                             expr1_ty.clone(),
                             expr2_ty.clone(),
-                        ))
+                        ));
                     }
                     (
                         Op2::Eq | Op2::Neq | Op2::Lt | Op2::Le | Op2::Gt | Op2::Ge,
@@ -738,7 +752,7 @@ impl TypeChecker {
                             Err(format!("Int or Bool or String or Unit")),
                             expr1_ty.clone(),
                             expr2_ty.clone(),
-                        ))
+                        ));
                     }
                     (Op2::And | Op2::Or, Type::Bool, Type::Bool) => Type::Bool,
                     (Op2::And | Op2::Or, _, _) => {
@@ -747,7 +761,7 @@ impl TypeChecker {
                             Err(format!("Bool")),
                             expr1_ty.clone(),
                             expr2_ty.clone(),
-                        ))
+                        ));
                     }
                 };
 

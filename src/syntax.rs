@@ -1,4 +1,4 @@
-use crate::util::span::{fake_span, Spanned};
+use crate::util::span::{Spanned, fake_span};
 use std::{collections::HashSet, hash::Hash};
 
 pub type Id = String;
@@ -328,7 +328,7 @@ impl Session {
             Session::Var(y) if *x == **y => s_new.clone(),
             Session::Var(y) => Session::Var(y.clone()),
             Session::Mu(y, e) => Session::Mu(y.clone(), Box::new(fake_span(e.subst(x, s_new)))),
-            Session::Op(_, _) => self.clone(),
+            Session::Op(op, t) => Session::Op(op.clone(), t.clone()),
             Session::Choice(op, cs) => {
                 let cs2 = cs
                     .iter()
@@ -338,12 +338,12 @@ impl Session {
             }
             Session::End(op) => Session::End(op.clone()),
             Session::BorrowEnd(_) => self.clone(),
-            Session::Skip => todo!(),
+            Session::Skip => Session::Skip,
             Session::Semi { first, second } => Self::Semi {
                 first: Box::new(fake_span(first.subst(x, s_new))),
                 second: Box::new(fake_span(second.subst(x, s_new))),
             },
-            Session::UVar(_) => todo!(),
+            Session::UVar(var) => Session::UVar(*var),
         }
     }
     fn unfold(&self, x: &SId) -> Self {
@@ -633,7 +633,7 @@ impl Type {
     }
     pub fn is_unr(&self) -> bool {
         match self {
-            Type::Chan(_) => false,
+            Type::Chan(s) => s.is_only_skips(),
             Type::Arr { mult: m, .. } => m.val == Mult::Unr,
             Type::Prod {
                 first: t1,

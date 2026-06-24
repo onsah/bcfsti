@@ -638,7 +638,7 @@ mod typechecker_tests {
     }
 }
 
-// #[test]
+#[test]
 fn unit_tests() {
     let positives: Vec<PathBuf> = std::fs::read_dir("examples/positive")
         .unwrap()

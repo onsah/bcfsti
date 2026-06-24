@@ -7,8 +7,8 @@ use crate::util::peg_logos::SpannedToks;
 use crate::util::span::fake_span;
 use crate::util::span::{Span, Spanned};
 
-use peg::error::ParseError;
 use Braced::Token as Tok;
+use peg::error::ParseError;
 
 pub type Toks<'a> = SpannedToks<'a, Braced<Token<'a>>>;
 
@@ -100,6 +100,7 @@ peg::parser! {
             / x:sid()
               { Session::Var(x) }
             / tok(ParenL) s:session() tok(ParenR) { s }
+            / tok(BracketL) s:session() tok(BracketR) { s }
         pub rule ssession() -> SSession = spanned(<session()>)
 
         pub rule type_() -> Type = t:type_arrow() { t }
@@ -324,7 +325,9 @@ mod tests {
                 failures_pos.push(name.clone())
             }
 
-            logln!("\n================================================================================\n");
+            logln!(
+                "\n================================================================================\n"
+            );
             if failures_pos.len() == 0 {
                 logln!("ALL {} TESTS PASSED!", positives.len());
             } else {
