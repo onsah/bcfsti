@@ -3,6 +3,7 @@ use std::{collections::HashSet, ops::Range};
 use crate::{
     lexer::LexerError,
     semantics::EvalError,
+    syntax::SType,
     type_checker::TypeError,
     util::{pretty::pretty_def, span::Span},
 };
@@ -15,6 +16,11 @@ pub enum IErr {
     Parser(ParseError<usize>),
     Typing(TypeError),
     Eval(EvalError),
+    Constraint {
+        ty1: SType,
+        ty2: SType,
+        reason: String,
+    },
 }
 
 pub struct CSource {
@@ -190,9 +196,9 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                         e.span,
                         format!(
                             "This expression has type {} with multiplicity {}, but should have multiplicity {}.",
-                                pretty_def(&t.val),
-                                pretty_def(&m_actual.val),
-                                expected,
+                            pretty_def(&t.val),
+                            pretty_def(&m_actual.val),
+                            expected,
                         ),
                     )],
                 );
@@ -255,16 +261,14 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     &src,
                     e.span.clone(),
                     "Type Error",
-                    [
-                        label(
-                            e.span,
-                            format!(
-                                "In this expression, splitting the context \n    {}\n and rejoining it resulted in a non-subtype context \n    {}",
-                                pretty_def(&ctx.simplify()),
-                                pretty_def(&ctx2.simplify())
-                            )
+                    [label(
+                        e.span,
+                        format!(
+                            "In this expression, splitting the context \n    {}\n and rejoining it resulted in a non-subtype context \n    {}",
+                            pretty_def(&ctx.simplify()),
+                            pretty_def(&ctx2.simplify())
                         ),
-                    ],
+                    )],
                 );
             }
             TypeError::CtxCtxSplitFailed(e, ctx, xs) => {
@@ -478,7 +482,11 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     "Type Error",
                     [label(
                         e.span,
-                        format!("The label '{}' does not occur in type '{}'. You may want to delete the corresponding clause.", l,  pretty_def(t)),
+                        format!(
+                            "The label '{}' does not occur in type '{}'. You may want to delete the corresponding clause.",
+                            l,
+                            pretty_def(t)
+                        ),
                     )],
                 );
             }
@@ -563,8 +571,7 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                         e.span,
                         format!(
                             "This expression uses variable '{}' recursively, but '{}' does not have an unrestricted function type.",
-                            x.val,
-                            x.val,
+                            x.val, x.val,
                         ),
                     )],
                 );
@@ -612,7 +619,10 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     "Type Error",
                     [label(
                         e.span,
-                        format!("Main expression needs to have an unrestricted type, but instead has type '{}'.", pretty_def(t)),
+                        format!(
+                            "Main expression needs to have an unrestricted type, but instead has type '{}'.",
+                            pretty_def(t)
+                        ),
                     )],
                 );
             }
@@ -623,8 +633,10 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     "Type Error",
                     [label(
                         s.span,
-                        format!("Variable '{}' is not bound by a µ-binder. Session types need to be closed.",
-                            pretty_def(x)),
+                        format!(
+                            "Variable '{}' is not bound by a µ-binder. Session types need to be closed.",
+                            pretty_def(x)
+                        ),
                     )],
                 );
             }
@@ -635,8 +647,10 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     "Type Error",
                     [label(
                         s.span,
-                        format!("Variable '{}' was already bound further outside. Shadowing is not allowed in session types.",
-                            pretty_def(x)),
+                        format!(
+                            "Variable '{}' was already bound further outside. Shadowing is not allowed in session types.",
+                            pretty_def(x)
+                        ),
                     )],
                 );
             }
@@ -647,7 +661,9 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     "Type Error",
                     [label(
                         s.span,
-                        format!("This expression creates a new channel with a session type that contains Close, Wait, Acq or Ret. This is not allowed",)
+                        format!(
+                            "This expression creates a new channel with a session type that contains Close, Wait, Acq or Ret. This is not allowed",
+                        ),
                     )],
                 );
             }
@@ -688,5 +704,21 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                 );
             }
         },
+        IErr::Constraint { ty1, ty2, reason } => {
+            report(
+                &src,
+                ty1.span.clone(),
+                "Constraint Solution Error",
+                [label(
+                    ty1.span.clone(),
+                    format!(
+                        "Type {} is not equivalent to type {}. Reason: {}",
+                        pretty_def(&ty1.val),
+                        pretty_def(&ty2.val),
+                        reason
+                    ),
+                )],
+            );
+        }
     }
 }

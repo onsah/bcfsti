@@ -2,7 +2,7 @@ use std::{io::Write, path::PathBuf};
 
 use crate::{
     constraint::Constraints,
-    error_reporting::{report_error, IErr},
+    error_reporting::{IErr, report_error},
     syntax::{Eff, SExpr, Type},
     typecheck,
 };
@@ -22,10 +22,10 @@ macro_rules! logln {
 
 #[cfg(test)]
 mod typechecker_tests {
-    use std::{assert_matches, collections::HashSet};
+    use std::assert_matches;
 
     use crate::{
-        constraint::{self, Constraints},
+        constraint::Constraints,
         error_reporting::IErr,
         session_type,
         syntax::{Eff, Expr, Mult, Session, Type},
@@ -130,20 +130,26 @@ mod typechecker_tests {
         let expected_constraints = {
             let mut cs = Constraints::empty();
             cs.add(
-                Type::Chan(session_type! { Session::UVar(1) }),
-                Type::Chan(session_type! { Ret }.val),
+                fake_span(Type::Chan(session_type! { Session::UVar(1) })),
+                fake_span(Type::Chan(session_type! { Ret }.val)),
             );
             cs.add(
-                Type::Chan(session_type! { !Int; Ret }.val),
-                Type::Chan(session_type! { !Int; fake_span(Session::UVar(1)) }.val),
+                fake_span(Type::Chan(session_type! { !Int; Ret }.val)),
+                fake_span(Type::Chan(
+                    session_type! { !Int; fake_span(Session::UVar(1)) }.val,
+                )),
             );
             cs.add(
-                Type::Chan(session_type! { !Int; ?Int }.val),
-                Type::Chan(session_type! { !Int; fake_span(Session::UVar(0)) }.val),
+                fake_span(Type::Chan(session_type! { !Int; ?Int }.val)),
+                fake_span(Type::Chan(
+                    session_type! { !Int; fake_span(Session::UVar(0)) }.val,
+                )),
             );
             cs.add(
-                Type::Chan(session_type! { Acq; fake_span(Session::UVar(0)) }.val),
-                Type::Chan(session_type! { Acq; ?Int }.val),
+                fake_span(Type::Chan(
+                    session_type! { Acq; fake_span(Session::UVar(0)) }.val,
+                )),
+                fake_span(Type::Chan(session_type! { Acq; ?Int }.val)),
             );
             cs
         };
@@ -316,9 +322,9 @@ mod typechecker_tests {
         };
         let expected_constraints = {
             let mut cs = Constraints::empty();
-            cs.add(Type::Int, Type::String);
-            cs.add(Type::Int, Type::Bool);
-            cs.add(Type::String, Type::Bool);
+            cs.add(fake_span(Type::Int), fake_span(Type::String));
+            cs.add(fake_span(Type::Int), fake_span(Type::Bool));
+            cs.add(fake_span(Type::String), fake_span(Type::Bool));
             cs
         };
         assert_eq!(cs, expected_constraints);
@@ -625,10 +631,10 @@ mod typechecker_tests {
             unreachable!()
         };
 
-        assert!(cs
-            .into_iter()
-            .any(|(ty1, ty2)| (ty1 == Type::Int && ty2 == Type::String)
-                || (ty1 == Type::String && ty2 == Type::Int)));
+        assert!(cs.into_iter().any(
+            |(ty1, ty2)| (ty1.val == Type::Int && ty2.val == Type::String)
+                || (ty1.val == Type::String && ty2.val == Type::Int)
+        ));
     }
 }
 

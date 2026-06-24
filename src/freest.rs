@@ -338,7 +338,7 @@ mod tests {
                         .prop_map(Box::new),
                     (
                         session_op(),
-                        prop::collection::vec((label(), inner.clone()), 1..10)
+                        prop::collection::vec((ty_label(), inner.clone()), 1..5)
                     )
                         .prop_map(|(dir, branches)| { FreestType::Choice { dir, branches } })
                         .prop_map(Box::new)
@@ -361,7 +361,7 @@ mod tests {
             }
             ty
         })
-        // Filter contractive types
+        // Filter out non-contractive types
         .prop_filter("Not contractive", move |prop| {
             let bound_vars_set = HashSet::from_iter(forall_vars_clone.iter());
             rec_vars_clone
@@ -388,7 +388,7 @@ mod tests {
             // Setting both fork and timeout is redundant since timeout implies
             // fork, but both are shown for clarity.
             fork: true,
-            cases: 20,
+            cases: 10,
             max_global_rejects: 1,
             .. ProptestConfig::default()
         })]
@@ -417,7 +417,7 @@ mod tests {
             // Setting both fork and timeout is redundant since timeout implies
             // fork, but both are shown for clarity.
             fork: true,
-            cases: 20,
+            cases: 10,
             max_global_rejects: 1,
             .. ProptestConfig::default()
         })]

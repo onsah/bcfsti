@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
 use crate::ren::Ren;
-use crate::syntax::{Id, Mult, SId, SType, Session, SessionOp, Type, TypeSemEq};
+use crate::syntax::{Id, Mult, SId, SType, Session, Type, TypeSemEq};
 use crate::util::boxed::Boxed;
 use crate::util::graph::Graph;
 use crate::util::pretty::{Pretty, PrettyEnv};

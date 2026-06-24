@@ -1,19 +1,14 @@
-use std::{
-    collections::{HashMap, HashSet},
-    ops::Mul,
-    task::Context,
-};
+use std::collections::HashSet;
 
 use crate::{
     constraint::Constraints,
     ren::Ren,
-    semantics::Chan,
     session_type,
     syntax::{
         Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, Pattern, SEff, SExpr, SId, SLabel, SMult,
-        SPattern, SSession, SType, Session, SessionOp, Type, UVarId,
+        SPattern, SSession, SType, Session, SessionOp, Type,
     },
-    type_context::{ext, Ctx, CtxCtx, CtxS, JoinOrd},
+    type_context::{ext, Ctx, JoinOrd},
     util::{
         pretty::pretty_def,
         span::{fake_span, Spanned},
@@ -577,7 +572,7 @@ impl TypeChecker {
                 let mut cs = expr_cs;
                 for (i, (_, (ty1, _, _))) in case_inferences.iter().enumerate() {
                     for (_, (ty2, _, _)) in case_inferences[i + 1..].iter() {
-                        cs.add(ty1.val.clone(), ty2.val.clone());
+                        cs.add(ty1.clone(), ty2.clone());
                     }
                 }
                 // TODO: Add constraints that return type of every branch is equivalent
@@ -806,7 +801,7 @@ impl TypeChecker {
                 let (else_ty, else_cs, else_eff) = self.infer(&else_ctx, else_expr)?;
 
                 let mut cs = cond_cs.join(then_cs).join(else_cs);
-                cs.add(then_ty.val.clone(), else_ty.val);
+                cs.add(then_ty.clone(), else_ty.clone());
 
                 Ok((
                     then_ty,
@@ -952,7 +947,7 @@ impl TypeChecker {
 
                 if !inferred_ty.sem_eq(expected_ty) {
                     println!("adding constraint");
-                    cs.add(inferred_ty.val, expected_ty.val.clone());
+                    cs.add(inferred_ty.clone(), expected_ty.clone());
                 }
 
                 Ok((cs, eff))

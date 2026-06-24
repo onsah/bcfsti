@@ -28,7 +28,8 @@ use syntax::SExpr;
 use crate::{
     args::Args,
     constraint::Constraints,
-    error_reporting::{report_error, IErr},
+    equivalence::{EquivalenceResult, check_equivalence},
+    error_reporting::{IErr, report_error},
     lexer::Token,
     semantics::eval,
     syntax::{Eff, Type},
@@ -55,7 +56,11 @@ fn run(args: &Args) -> Result<(), IErr> {
         println!("{src}");
         println!();
     }
-    let (_e, _t, _cs, _p) = typecheck(&src, args.verbose)?;
+    let (_e, _t, cs, _p) = typecheck(&src, args.verbose)?;
+
+    println!("===== CONSTRAINTS CHECKING =====");
+
+    constraints_check(cs)?;
 
     // println!("===== EVALUATION =====");
     // println!("Program stdout:");
@@ -103,11 +108,26 @@ pub fn typecheck(src: &str, verbose: bool) -> Result<(SExpr, Type, Constraints, 
     }
 
     println!("===== TYPECHECKER =====");
-    // TODO: Constraint checking
     let (t, cs, p) = type_checker::infer_type(&e).map_err(IErr::Typing)?;
     println!("Type:    {}", pretty_def(&t));
     println!("Effect:  {}", pretty_def(&p));
     println!();
 
     Ok((e, t.val, cs, p))
+}
+
+fn constraints_check(cs: Constraints) -> Result<(), IErr> {
+    let cs = cs.solve();
+
+    for (ty1, ty2) in cs.iter() {
+        match check_equivalence(&ty1.val, &ty2.val) {
+            EquivalenceResult::Success => (),
+            EquivalenceResult::Error { reason } => Err(IErr::Constraint {
+                ty1: ty1.clone(),
+                ty2: ty2.clone(),
+                reason,
+            })?,
+        }
+    }
+    Ok(())
 }
