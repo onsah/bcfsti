@@ -6,12 +6,12 @@ use crate::{
 use std::{io::Write, process::Command};
 
 #[allow(dead_code)]
-pub enum TypecheckResult {
+pub enum EquivalenceResult {
     Success,
     Error { reason: String },
 }
 
-pub fn check_equivalence(type1: &Session, type2: &Session) -> TypecheckResult {
+pub fn check_equivalence(type1: &Type, type2: &Type) -> EquivalenceResult {
     let mut test_file = tempfile::Builder::new().suffix(".fst").tempfile().unwrap();
 
     writeln!(test_file, "data Ret = Ret").unwrap();
@@ -34,10 +34,40 @@ pub fn check_equivalence(type1: &Session, type2: &Session) -> TypecheckResult {
         .unwrap();
 
     if freest_cmd.status.success() {
-        TypecheckResult::Success
+        EquivalenceResult::Success
     } else {
         let reason = String::from_utf8_lossy(&freest_cmd.stderr).to_string();
-        TypecheckResult::Error { reason }
+        EquivalenceResult::Error { reason }
+    }
+}
+
+pub fn check_equivalence_sessions(type1: &Session, type2: &Session) -> EquivalenceResult {
+    let mut test_file = tempfile::Builder::new().suffix(".fst").tempfile().unwrap();
+
+    writeln!(test_file, "data Ret = Ret").unwrap();
+    // Convert CFSession -> FreestType and then wrap in freest::Type for display
+    let freest_type1 = FreestType::from(type1);
+    writeln!(test_file, "type T1 = {}", freest_type1).unwrap();
+    let freest_type2 = FreestType::from(type2);
+    writeln!(test_file, "type T2 = {}", freest_type2).unwrap();
+
+    writeln!(test_file, "left : T1 -> T2").unwrap();
+    writeln!(test_file, "left x = x").unwrap();
+
+    writeln!(test_file, "right : T2 -> T1").unwrap();
+    writeln!(test_file, "right x = x").unwrap();
+
+    let freest_cmd = Command::new("freest")
+        .arg("--subtyping")
+        .arg(test_file.path())
+        .output()
+        .unwrap();
+
+    if freest_cmd.status.success() {
+        EquivalenceResult::Success
+    } else {
+        let reason = String::from_utf8_lossy(&freest_cmd.stderr).to_string();
+        EquivalenceResult::Error { reason }
     }
 }
 
@@ -183,15 +213,15 @@ impl Mult {
 #[cfg(test)]
 mod tests {
     use crate::{
-        equivalence::{check_equivalence, TypecheckResult},
+        equivalence::{EquivalenceResult, check_equivalence_sessions},
         session_type,
     };
 
     #[inline(always)]
-    fn assert_success(result: TypecheckResult) {
+    fn assert_success(result: EquivalenceResult) {
         match result {
-            TypecheckResult::Success => (),
-            TypecheckResult::Error { reason } => {
+            EquivalenceResult::Success => (),
+            EquivalenceResult::Error { reason } => {
                 panic!("Expected success but got error: {}", reason);
             }
         }
@@ -203,9 +233,9 @@ mod tests {
         let type2 = session_type! { Skip; !Int };
         let type3 = session_type! { !Int };
 
-        assert_success(check_equivalence(&type1, &type2));
-        assert_success(check_equivalence(&type2, &type3));
-        assert_success(check_equivalence(&type1, &type3));
+        assert_success(check_equivalence_sessions(&type1, &type2));
+        assert_success(check_equivalence_sessions(&type2, &type3));
+        assert_success(check_equivalence_sessions(&type1, &type3));
     }
 
     #[test]
@@ -213,7 +243,7 @@ mod tests {
         let type1 = session_type! { !Int; (!Bool; !String) };
         let type2 = session_type! { (!Int; !Bool); !String };
 
-        assert_success(check_equivalence(&type1, &type2));
+        assert_success(check_equivalence_sessions(&type1, &type2));
     }
 
     #[test]
@@ -221,7 +251,7 @@ mod tests {
         let type1 = session_type! { &{ l1: !Int, l2: !Bool }; ?Int };
         let type2 = session_type! { &{ l1: !Int; ?Int, l2: !Bool; ?Int } };
 
-        assert_success(check_equivalence(&type1, &type2));
+        assert_success(check_equivalence_sessions(&type1, &type2));
     }
 
     #[test]
@@ -229,7 +259,7 @@ mod tests {
         let type1 = session_type! { mu x. !Int; ?Int };
         let type2 = session_type! { !Int; ?Int };
 
-        assert_success(check_equivalence(&type1, &type2));
+        assert_success(check_equivalence_sessions(&type1, &type2));
     }
 
     #[test]
@@ -237,7 +267,7 @@ mod tests {
         let type1 = session_type! { mu x. !Int; x };
         let type2 = session_type! { !Int; (mu x. !Int; x) };
 
-        assert_success(check_equivalence(&type1, &type2));
+        assert_success(check_equivalence_sessions(&type1, &type2));
     }
 
     #[test]
@@ -245,7 +275,7 @@ mod tests {
         let type1 = session_type! { mu x. !Int; x; x };
         let type2 = session_type! { !Int; (mu x. !Int; x; x); (mu x. !Int; x; x) };
 
-        assert_success(check_equivalence(&type1, &type2));
+        assert_success(check_equivalence_sessions(&type1, &type2));
     }
 
     #[test]
@@ -253,6 +283,6 @@ mod tests {
         let type1 = session_type! { Ret };
         let type2 = session_type! { Ret };
 
-        assert_success(check_equivalence(&type1, &type2));
+        assert_success(check_equivalence_sessions(&type1, &type2));
     }
 }
