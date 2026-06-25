@@ -97,8 +97,8 @@ impl fmt::Display for FreestType {
                 }
                 write!(f, "}}")
             }
-            FreestType::Forall { var, body } => write!(f, "forall {}. {}", var, body),
-            FreestType::Rec { var, body } => write!(f, "rec {}. {}", var, body),
+            FreestType::Forall { var, body } => write!(f, "(forall {}. {})", var, body),
+            FreestType::Rec { var, body } => write!(f, "(rec {}. {})", var, body),
             FreestType::Var(label) => write!(f, "{}", label),
         }
     }
