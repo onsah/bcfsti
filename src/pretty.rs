@@ -381,6 +381,14 @@ impl Pretty<UserState> for Expr {
                 p.pp("\nin\n");
                 p.pp(e)
             }
+            Expr::TypeDef(x, t, e) => {
+                p.pp("type ");
+                p.pp(x);
+                p.pp(" = ");
+                p.pp(t);
+                p.pp(" in\n");
+                p.pp(e)
+            }
         }
     }
 }

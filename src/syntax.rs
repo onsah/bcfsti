@@ -263,6 +263,8 @@ pub enum Expr {
     LetDecl(SId, SType, Box<SClause>, Box<SExpr>),
     LetPair(SId, SId, Box<SExpr>, Box<SExpr>),
 
+    TypeDef(SId, SType, Box<SExpr>),
+
     Inj(SLabel, Box<SExpr>),
     CaseSum(Box<SExpr>, Vec<(SLabel, SId, SExpr)>),
 
@@ -553,6 +555,7 @@ impl Expr {
             Expr::LSplit(_, e) => e.free_vars(),
             Expr::RSplit(_, e) => e.free_vars(),
             Expr::LetDecl(id, _, _, body) => without(body.free_vars(), &id.val),
+            Expr::TypeDef(_, _, body) => body.free_vars(),
         }
     }
 }

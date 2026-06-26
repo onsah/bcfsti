@@ -4,6 +4,7 @@ use crate::{
     lexer::LexerError,
     semantics::EvalError,
     syntax::SType,
+    type_alias::AliasError,
     type_checker::TypeError,
     util::{pretty::pretty_def, span::Span},
 };
@@ -14,6 +15,7 @@ use peg::error::ParseError;
 pub enum IErr {
     Lexer(LexerError),
     Parser(ParseError<usize>),
+    Alias(AliasError),
     Typing(TypeError),
     Eval(EvalError),
     Constraint {
@@ -116,6 +118,30 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
     };
 
     match e {
+        IErr::Alias(e) => match e {
+            AliasError::NonSessionAliasUsedAsSession(s, t) => {
+                report(
+                    &src,
+                    s.span.clone(),
+                    "Type Error",
+                    [label(
+                        s.span,
+                        format!(
+                            "Type alias used as a session, but its definition is not a channel type: {}",
+                            pretty_def(&t),
+                        ),
+                    )],
+                );
+            }
+            AliasError::CyclicAlias(x) => {
+                report(
+                    &src,
+                    0..0,
+                    "Type Error",
+                    [label(0..0, format!("Cyclic type alias '{}'.", x))],
+                );
+            }
+        },
         IErr::Lexer(e) => {
             report(
                 &src,

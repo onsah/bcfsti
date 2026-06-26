@@ -37,6 +37,8 @@ pub enum Token<'a> {
     False,
     #[token("let")]
     Let,
+    #[token("type")]
+    TypeKw,
     #[token("in")]
     In,
     #[token("if")]
@@ -238,6 +240,7 @@ impl<'a> Token<'a> {
             Token::True => "true",
             Token::False => "false",
             Token::Let => "let",
+            Token::TypeKw => "type",
             Token::In => "in",
             Token::If => "if",
             Token::Then => "then",

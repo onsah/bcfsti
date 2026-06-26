@@ -10,6 +10,7 @@ pub mod pretty;
 pub mod ren;
 pub mod semantics;
 pub mod syntax;
+pub mod type_alias;
 pub mod type_checker;
 pub mod type_context;
 pub mod util;
@@ -95,6 +96,7 @@ pub fn typecheck(src: &str, verbose: bool) -> Result<(SExpr, Type, Constraints, 
     }
 
     let e = parser::parse(&toks).map_err(IErr::Parser)?;
+    let e = type_alias::expand_aliases(&e).map_err(IErr::Alias)?;
     if verbose {
         println!("===== AST =====");
         println!("{e:#?}");

@@ -1,8 +1,8 @@
 use std::{
     collections::HashMap,
     sync::{
-        mpsc::{channel, Receiver, Sender},
         Arc, Mutex,
+        mpsc::{Receiver, Sender, channel},
     },
 };
 
@@ -10,7 +10,7 @@ use crate::{
     fresh_var::fresh_var,
     syntax::{Const, Expr, Id, Label, Op1, Op2, Pattern, SExpr, SId, SPattern, SessionOp},
     util::{
-        pretty::{pretty_def, Assoc, Pretty},
+        pretty::{Assoc, Pretty, pretty_def},
         span::fake_span,
     },
 };
@@ -486,6 +486,12 @@ pub fn eval_(env: &Env, e: &SExpr) -> Result<Value, EvalError> {
         Expr::LSplit(spanned, spanned1) => todo!(),
         Expr::RSplit(spanned, spanned1) => todo!(),
         Expr::LetDecl(spanned, spanned1, spanned2, spanned3) => todo!(),
+        Expr::TypeDef(_, _, body) => {
+            unreachable!(
+                "TypeDef should be removed by type alias expansion: {}",
+                pretty_def(body)
+            )
+        }
     }
 }
 
