@@ -90,30 +90,166 @@ impl Constraints {
         let mut assignments: Assignments = HashMap::new();
         let mut other_cs = Constraints::empty();
         for (ty1, ty2) in self.into_iter() {
-            if let Type::Chan(Session::UVar(var)) = &ty1.val {
-                if let Type::Chan(session) = &ty2.val
-                    && session.is_closed()
-                    && !assignments.contains_key(var)
-                {
-                    assignments.insert(*var, session.clone());
-                } else {
-                    other_cs.add(ty1, ty2)
+            match Self::extract_bare_assignment(&ty1.val, &ty2.val)
+                .or(Self::extract_bare_assignment(&ty2.val, &ty1.val))
+            {
+                Some((uvar_id, session)) => {
+                    if !assignments.contains_key(&uvar_id) {
+                        assignments.insert(uvar_id, session);
+                    } else {
+                        other_cs.add(ty1, ty2);
+                    }
                 }
-            } else if let Type::Chan(Session::UVar(var)) = &ty2.val {
-                if let Type::Chan(session) = &ty1.val
-                    && session.is_closed()
-                    && !assignments.contains_key(var)
-                {
-                    assignments.insert(*var, session.clone());
-                } else {
-                    other_cs.add(ty1, ty2)
+                None => {
+                    match Self::extract_nested_assignments(&ty1.val, &ty2.val)
+                        .or(Self::extract_nested_assignments(&ty2.val, &ty1.val))
+                    {
+                        Some(extracted) => {
+                            for (var, session) in extracted {
+                                assignments.entry(var).or_insert(session);
+                            }
+                        }
+                        None => {
+                            other_cs.add(ty1, ty2);
+                        }
+                    }
                 }
-            } else {
-                other_cs.add(ty1, ty2)
             }
         }
 
         (assignments, other_cs)
+    }
+
+    /// If `lhs` is a channel carrying a bare unification variable and `rhs` is a channel
+    /// carrying a closed session, return the variable and the type pair
+    fn extract_bare_assignment(lhs: &Type, rhs: &Type) -> Option<(UVarId, Session)> {
+        if let Type::Chan(Session::UVar(var)) = lhs
+            && let Type::Chan(session) = rhs
+            && session.is_closed()
+        {
+            Some((*var, session.clone()))
+        } else {
+            None
+        }
+    }
+
+    /// Attempt to structurally match `ty_uvars` (which contains unification variables) against
+    /// `ty_closed` (which is closed). When the structures match, every unification variable in
+    /// `ty_uvars` is assigned the corresponding sub-part of `ty_closed`. Returns `None` if the
+    /// structures do not match.
+    fn extract_nested_assignments(ty_uvars: &Type, ty_closed: &Type) -> Option<Assignments> {
+        if !(ty_closed.is_closed() && !ty_uvars.is_closed()) {
+            return None;
+        }
+
+        let mut assignments = Assignments::new();
+        if Self::match_types(ty_uvars, ty_closed, &mut assignments) {
+            Some(assignments)
+        } else {
+            None
+        }
+    }
+
+    fn match_types(ty_uvars: &Type, ty_closed: &Type, assignments: &mut Assignments) -> bool {
+        match (ty_uvars, ty_closed) {
+            (Type::Chan(s1), Type::Chan(s2)) => Self::match_sessions(s1, s2, assignments),
+            (
+                Type::Prod {
+                    mult: m1,
+                    first: f1,
+                    second: s1,
+                },
+                Type::Prod {
+                    mult: m2,
+                    first: f2,
+                    second: s2,
+                },
+            ) => {
+                m1 == m2
+                    && Self::match_types(&f1.val, &f2.val, assignments)
+                    && Self::match_types(&s1.val, &s2.val, assignments)
+            }
+            (
+                Type::Arr {
+                    mob: mob1,
+                    mult: mult1,
+                    eff: eff1,
+                    param: p1,
+                    ret: r1,
+                },
+                Type::Arr {
+                    mob: mob2,
+                    mult: mult2,
+                    eff: eff2,
+                    param: p2,
+                    ret: r2,
+                },
+            ) => {
+                mob1 == mob2
+                    && mult1 == mult2
+                    && eff1 == eff2
+                    && Self::match_types(&p1.val, &p2.val, assignments)
+                    && Self::match_types(&r1.val, &r2.val, assignments)
+            }
+            (Type::Variant(cs1), Type::Variant(cs2)) => {
+                cs1.len() == cs2.len()
+                    && cs1.iter().zip(cs2.iter()).all(|((l1, t1), (l2, t2))| {
+                        l1 == l2 && Self::match_types(&t1.val, &t2.val, assignments)
+                    })
+            }
+            (Type::Int, Type::Int)
+            | (Type::Bool, Type::Bool)
+            | (Type::String, Type::String)
+            | (Type::Unit, Type::Unit) => true,
+            _ => false,
+        }
+    }
+
+    fn match_sessions(
+        s_uvars: &Session,
+        s_closed: &Session,
+        assignments: &mut Assignments,
+    ) -> bool {
+        match (s_uvars, s_closed) {
+            (Session::UVar(var), s) => match assignments.get(var) {
+                Some(existing) => existing == s,
+                None => {
+                    assignments.insert(*var, s.clone());
+                    true
+                }
+            },
+            (Session::Skip, Session::Skip) => true,
+            (
+                Session::Semi {
+                    first: f1,
+                    second: s1,
+                },
+                Session::Semi {
+                    first: f2,
+                    second: s2,
+                },
+            ) => {
+                Self::match_sessions(&f1.val, &f2.val, assignments)
+                    && Self::match_sessions(&s1.val, &s2.val, assignments)
+            }
+            (Session::End(a), Session::End(b)) => a == b,
+            (Session::BorrowEnd(a), Session::BorrowEnd(b)) => a == b,
+            (Session::Op(op1, t1), Session::Op(op2, t2)) => {
+                op1 == op2 && Self::match_types(&t1.val, &t2.val, assignments)
+            }
+            (Session::Choice(op1, cs1), Session::Choice(op2, cs2)) => {
+                op1 == op2
+                    && cs1.len() == cs2.len()
+                    && cs1.iter().zip(cs2.iter()).all(|((l1, c1), (l2, c2))| {
+                        l1 == l2 && Self::match_sessions(&c1.val, &c2.val, assignments)
+                    })
+            }
+            (Session::Mu(id1, b1), Session::Mu(id2, b2)) => {
+                id1 == id2 && Self::match_sessions(&b1.val, &b2.val, assignments)
+            }
+            (Session::Var(id1), Session::Var(id2)) => id1 == id2,
+            _ => false,
+        }
     }
 
     fn subst(ty: SType, assignments: &Assignments) -> SType {
@@ -266,36 +402,6 @@ mod tests {
     fn test_unsolvable_constraints() {
         let uvar1 = Session::UVar(1);
         let uvar2 = Session::UVar(2);
-
-        let mut constraints = Constraints::empty();
-        constraints.add(
-            fake_span(Type::Chan(
-                session_type! { !Int; fake_span(uvar1.clone()) }.val,
-            )),
-            fake_span(Type::Chan(session_type! { !Int; ?String }.val)),
-        );
-        constraints.add(
-            fake_span(Type::Chan(
-                session_type! { !Int; fake_span(uvar2.clone()) }.val,
-            )),
-            fake_span(Type::Chan(session_type! { !Int; ?Bool }.val)),
-        );
-
-        let solved = constraints.solve();
-
-        assert_eq!(
-            solved,
-            Constraints(HashSet::from([
-                (
-                    fake_span(Type::Chan(session_type! { !Int; Skip }.val)),
-                    fake_span(Type::Chan(session_type! { !Int; ?String }.val))
-                ),
-                (
-                    fake_span(Type::Chan(session_type! { !Int; Skip }.val)),
-                    fake_span(Type::Chan(session_type! { !Int; ?Bool }.val))
-                )
-            ]))
-        );
 
         let mut constraints = Constraints::empty();
         constraints.add(
@@ -614,23 +720,9 @@ mod tests {
                 session_type! { +{ left: !Int, right: ?String } }.val,
             )),
         );
-        constraints.add(
-            fake_span(Type::Chan(uvar1.clone())),
-            fake_span(Type::Chan(session_type! { ?String }.val)),
-        );
 
         let solved = constraints.solve();
-        assert_eq!(
-            solved,
-            Constraints(HashSet::from([(
-                fake_span(Type::Chan(
-                    session_type! { +{ left: !Int, right: ?String } }.val
-                )),
-                fake_span(Type::Chan(
-                    session_type! { +{ left: !Int, right: ?String } }.val
-                )),
-            )]))
-        );
+        assert_eq!(solved, Constraints::empty());
     }
 
     #[test]
@@ -644,19 +736,9 @@ mod tests {
             )),
             fake_span(Type::Chan(session_type! { mu X. !Int; X }.val)),
         );
-        constraints.add(
-            fake_span(Type::Chan(uvar1.clone())),
-            fake_span(Type::Chan(session_type! { X }.val)), // Note: X is a Var("X") here
-        );
 
         let solved = constraints.solve();
-        assert_eq!(
-            solved,
-            Constraints(HashSet::from([(
-                fake_span(Type::Chan(session_type! { mu X. !Int; X }.val)),
-                fake_span(Type::Chan(session_type! { mu X. !Int; X }.val)),
-            )]))
-        );
+        assert_eq!(solved, Constraints::empty());
     }
 
     #[test]
@@ -694,6 +776,41 @@ mod tests {
                 fake_span(Type::Chan(
                     session_type! { mu X. +{ a: !Int; X, b: !Bool; ?String; Wait } }.val
                 )),
+            )]))
+        );
+    }
+
+    #[test]
+    fn test_uvar_inside() {
+        let uvar1 = Session::UVar(1);
+        let uvar2 = Session::UVar(2);
+
+        let mut constraints = Constraints::empty();
+        constraints.add(
+            fake_span(Type::Chan(
+                session_type! { !Int; fake_span(uvar1.clone()) }.val,
+            )),
+            fake_span(Type::Chan(session_type! { !Int; ?String }.val)),
+        );
+        constraints.add(
+            fake_span(Type::Chan(
+                session_type! { !Int; fake_span(uvar2.clone()) }.val,
+            )),
+            fake_span(Type::Chan(
+                session_type! { !Int; fake_span(uvar1.clone()) }.val,
+            )),
+        );
+        constraints.add(
+            fake_span(Type::Chan(uvar2.clone())),
+            fake_span(Type::Chan(session_type! { ?String }.val)),
+        );
+
+        let solved = constraints.solve();
+        assert_eq!(
+            solved,
+            Constraints(HashSet::from([(
+                fake_span(Type::Chan(session_type! { !Int; ?String }.val,)),
+                fake_span(Type::Chan(session_type! { !Int; ?String }.val,)),
             )]))
         );
     }
