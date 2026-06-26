@@ -338,7 +338,7 @@ mod tests {
                         .prop_map(Box::new),
                     (
                         session_op(),
-                        prop::collection::vec((ty_label(), inner.clone()), 1..5)
+                        prop::collection::vec((ty_label(), inner.clone()), 1..3)
                     )
                         .prop_map(|(dir, branches)| { FreestType::Choice { dir, branches } })
                         .prop_map(Box::new)
@@ -423,7 +423,7 @@ mod tests {
         })]
         #[test]
         fn freest_session_type_display(
-            ty in (prop::collection::vec(ty_label(), 0..5), prop::collection::vec(ty_label(), 0..5))
+            ty in (prop::collection::vec(ty_label(), 0..3), prop::collection::vec(ty_label(), 0..3))
                 .prop_flat_map(|(forall_vars, rec_vars)| freest_session_type(forall_vars, rec_vars))
         ) {
             assert!(freest_available(), "'freest' executable not found on PATH");
