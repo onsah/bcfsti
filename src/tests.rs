@@ -2,15 +2,20 @@ use std::{io::Write, path::PathBuf};
 
 use crate::{
     constraint::Constraints,
+    constraints_check,
     error_reporting::{IErr, report_error},
     syntax::{Eff, SExpr, Type},
     typecheck,
 };
 
-pub fn typecheck_(src: &str, src_path: &str) -> Result<(SExpr, Type, Constraints, Eff), IErr> {
-    typecheck(src, false).map_err(|e| {
+pub fn typecheck_(src: &str, src_path: &str) -> Result<(), ()> {
+    let (_, _, cs, _) = typecheck(src, false).map_err(|e| {
         report_error(src_path, &src, e.clone());
-        e
+        ()
+    })?;
+    constraints_check(cs).map_err(|e| {
+        report_error(src_path, &src, e.clone());
+        ()
     })
 }
 
