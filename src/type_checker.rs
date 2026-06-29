@@ -609,7 +609,7 @@ impl TypeChecker {
                     ));
                 };
 
-                let Session::Choice(SessionOp::Send, branches) = s.unfold_if_mu() else {
+                let Session::Choice(SessionOp::Send, branches) = normalise_session(s) else {
                     return Err(TypeError::Mismatch(
                         *chan_expr.clone(),
                         Err("Choice<Send>".into()),
@@ -1232,5 +1232,55 @@ fn assert_unr_ctx(e: &SExpr, ctx: &Ctx) -> Result<(), TypeError> {
         Ok(())
     } else {
         Err(TypeError::LeftOverCtx(e.clone(), ctx.clone()))
+    }
+}
+
+/////////////////// Type Normalisation ///////////////////
+
+fn concatenate_sessions(s1: &Session, s2: &Session) -> Session {
+    match (s1, s2) {
+        (_, Session::Skip) => s1.clone(),
+        (Session::Semi { first, second }, s2) => Session::Semi {
+            first: first.clone(),
+            second: Box::new(fake_span(concatenate_sessions(&second.val, s2))),
+        },
+        (s1, s2) => Session::Semi {
+            first: Box::new(fake_span(s1.clone())),
+            second: Box::new(fake_span(s2.clone())),
+        },
+    }
+}
+
+fn normalise_session(s: &Session) -> Session {
+    match s {
+        Session::Semi { first, second } => {
+            if first.is_only_skips() {
+                normalise_session(&second.val)
+            } else {
+                let normalised_first = normalise_session(&first.val);
+                concatenate_sessions(&normalised_first, &second.val)
+            }
+        }
+        Session::Mu(var, body) => {
+            let normalised_body = normalise_session(&body.val);
+            let recursive_type =
+                Session::Mu(var.clone(), Box::new(fake_span(normalised_body.clone())));
+            normalised_body.subst(&var.val, &recursive_type)
+        }
+        Session::Choice(op, branches) => Session::Choice(
+            op.clone(),
+            branches
+                .iter()
+                .map(|(label, branch)| (label.clone(), fake_span(branch.val.clone())))
+                .collect(),
+        ),
+        _ => s.clone(),
+    }
+}
+
+fn normalise_type(ty: &Type) -> Type {
+    match &ty {
+        Type::Chan(session) => Type::Chan(normalise_session(session)),
+        _ => ty.clone(),
     }
 }
