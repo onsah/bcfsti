@@ -171,6 +171,13 @@ impl Type {
             Type::Unit | Type::Int | Type::Bool | Type::String => HashSet::new(),
         }
     }
+
+    pub fn normalise(&self) -> Type {
+        match self {
+            Type::Chan(session) => Type::Chan(session.normalise()),
+            _ => self.clone(),
+        }
+    }
 }
 
 pub type Label = String;
@@ -475,31 +482,55 @@ impl Session {
         }
     }
 
-    pub fn join(&self, s: &Session) -> Session {
-        match self {
-            Session::Op(o, t) => Session::Op(o.clone(), t.clone()),
-            Session::Choice(op, cs) => {
-                let cs2: Vec<(SLabel, SSession)> = cs
-                    .iter()
-                    .map(|(l, s1)| (l.clone(), fake_span(s1.join(s))))
-                    .collect();
-                Session::Choice(*op, cs2)
-            }
-            Session::BorrowEnd(_) | Session::End(_) => s.clone(),
-            Session::Mu(x, s1) => Session::Mu(x.clone(), Box::new(fake_span(s1.join(s)))),
-            Session::Var(x) => Session::Var(x.clone()),
-            Session::Skip => todo!(),
-            Session::Semi { first, second } => todo!(),
-            Session::UVar(_) => todo!(),
+    fn concatenate(&self, other: &Session) -> Session {
+        match (self, other) {
+            (_, Session::Skip) => self.clone(),
+            (Session::Semi { first, second }, s2) => Session::Semi {
+                first: first.clone(),
+                second: Box::new(fake_span(second.val.concatenate(other))),
+            },
+            (s1, s2) => Session::Semi {
+                first: Box::new(fake_span(s1.clone())),
+                second: Box::new(fake_span(s2.clone())),
+            },
         }
     }
 
-    pub fn is_owned(&self) -> bool {
-        todo!("Delete this function")
-    }
-
-    pub fn is_borrowed(&self) -> bool {
-        todo!("Delete this function")
+    pub fn normalise(&self) -> Session {
+        match self {
+            Session::Semi { first, second } => {
+                if first.is_only_skips() {
+                    second.val.normalise()
+                } else {
+                    let normalised_first = first.val.normalise();
+                    match normalised_first {
+                        Session::Choice(op, branches) => Session::Choice(
+                            op.clone(),
+                            branches
+                                .iter()
+                                .map(|(label, branch)| {
+                                    (
+                                        label.clone(),
+                                        fake_span(Session::Semi {
+                                            first: Box::new(branch.clone()),
+                                            second: second.clone(),
+                                        }),
+                                    )
+                                })
+                                .collect(),
+                        ),
+                        _ => normalised_first.concatenate(&second.val),
+                    }
+                }
+            }
+            Session::Mu(var, body) => {
+                let normalised_body = body.val.normalise();
+                let recursive_type =
+                    Session::Mu(var.clone(), Box::new(fake_span(normalised_body.clone())));
+                normalised_body.subst(&var.val, &recursive_type)
+            }
+            _ => self.clone(),
+        }
     }
 }
 
