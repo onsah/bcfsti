@@ -149,8 +149,10 @@ peg::parser! {
         pub rule expr_lam() -> Expr
             = tok(Lambda) x:sid() tok(Period) e:sexpr_lam()
               { Expr::Abs(x, Box::new(e)) }
+            / tok(Rec) tok(TypeKw) x:sid() tok(Equals) t:stype() tok(In) e:sexpr_lam()
+              { Expr::TypeDef(x, t, Box::new(e), true) }
             / tok(TypeKw) x:sid() tok(Equals) t:stype() tok(In) e:sexpr_lam()
-              { Expr::TypeDef(x, t, Box::new(e)) }
+              { Expr::TypeDef(x, t, Box::new(e), false) }
             / tok(Case) e:sexpr() tok(BraceL)
               cs:((tok(Inj)? l:sid() x:sid() tok(Arrow) tok(BraceL) e:sexpr() tok(BraceR) { (l, x, e) }) ** (tok(Semicolon)?))
               tok(Semicolon)? tok(BraceR)

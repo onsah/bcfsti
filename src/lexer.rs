@@ -39,6 +39,8 @@ pub enum Token<'a> {
     Let,
     #[token("type")]
     TypeKw,
+    #[token("rec")]
+    Rec,
     #[token("in")]
     In,
     #[token("if")]
@@ -241,6 +243,7 @@ impl<'a> Token<'a> {
             Token::False => "false",
             Token::Let => "let",
             Token::TypeKw => "type",
+            Token::Rec => "rec",
             Token::In => "in",
             Token::If => "if",
             Token::Then => "then",

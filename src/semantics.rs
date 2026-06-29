@@ -486,7 +486,7 @@ pub fn eval_(env: &Env, e: &SExpr) -> Result<Value, EvalError> {
         Expr::LSplit(spanned, spanned1) => todo!(),
         Expr::RSplit(spanned, spanned1) => todo!(),
         Expr::LetDecl(spanned, spanned1, spanned2, spanned3) => todo!(),
-        Expr::TypeDef(_, _, body) => {
+        Expr::TypeDef(_, _, body, _) => {
             unreachable!(
                 "TypeDef should be removed by type alias expansion: {}",
                 pretty_def(body)

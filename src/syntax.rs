@@ -263,7 +263,7 @@ pub enum Expr {
     LetDecl(SId, SType, Box<SClause>, Box<SExpr>),
     LetPair(SId, SId, Box<SExpr>, Box<SExpr>),
 
-    TypeDef(SId, SType, Box<SExpr>),
+    TypeDef(SId, SType, Box<SExpr>, bool),
 
     Inj(SLabel, Box<SExpr>),
     CaseSum(Box<SExpr>, Vec<(SLabel, SId, SExpr)>),
@@ -325,7 +325,7 @@ fn merge_clauses<T: Clone>(
 }
 
 impl Session {
-    fn subst(&self, x: &Id, s_new: &Self) -> Self {
+    pub fn subst(&self, x: &Id, s_new: &Self) -> Self {
         match self {
             Session::Var(y) if *x == **y => s_new.clone(),
             Session::Var(y) => Session::Var(y.clone()),
@@ -555,7 +555,7 @@ impl Expr {
             Expr::LSplit(_, e) => e.free_vars(),
             Expr::RSplit(_, e) => e.free_vars(),
             Expr::LetDecl(id, _, _, body) => without(body.free_vars(), &id.val),
-            Expr::TypeDef(_, _, body) => body.free_vars(),
+            Expr::TypeDef(_, _, body, _) => body.free_vars(),
         }
     }
 }

@@ -826,7 +826,7 @@ impl TypeChecker {
             Expr::Inj(_, _) => Err(TypeError::TypeAnnotationMissing(e.clone())),
             Expr::Pair(_, _) => Err(TypeError::TypeAnnotationMissing(e.clone())),
             Expr::Abs(_, _) => Err(TypeError::TypeAnnotationMissing(e.clone())),
-            Expr::TypeDef(_, _, _) => {
+            Expr::TypeDef(_, _, _, _) => {
                 unreachable!("type abbreviations are expanded before type checking")
             }
         }

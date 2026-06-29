@@ -381,7 +381,10 @@ impl Pretty<UserState> for Expr {
                 p.pp("\nin\n");
                 p.pp(e)
             }
-            Expr::TypeDef(x, t, e) => {
+            Expr::TypeDef(x, t, e, is_rec) => {
+                if *is_rec {
+                    p.pp("rec ");
+                }
                 p.pp("type ");
                 p.pp(x);
                 p.pp(" = ");

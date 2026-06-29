@@ -100,10 +100,10 @@ impl From<&Session> for FreestType {
                     .collect(),
             },
             Session::Mu(var, body) => FreestType::Rec {
-                var: var.val.clone(),
+                var: var.val.to_lowercase(),
                 body: Box::new((&body.val).into()),
             },
-            Session::Var(var) => FreestType::Var(var.val.clone()),
+            Session::Var(var) => FreestType::Var(var.val.to_lowercase()),
             Session::BorrowEnd(session_op) => FreestType::Message {
                 dir: *session_op,
                 ty: Box::new(FreestType::Var(FreestType::RET.into())),

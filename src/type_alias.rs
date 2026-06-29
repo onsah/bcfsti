@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::syntax::{Clause, Expr, Id, SClause, SExpr, SSession, SType, Session, Type};
+use crate::syntax::{Clause, Expr, Id, SClause, SExpr, SId, SSession, SType, Session, Type};
 use crate::util::span::Spanned;
 
 type AliasEnv = HashMap<Id, SType>;
@@ -18,10 +18,19 @@ pub fn expand_aliases(e: &SExpr) -> Result<SExpr, AliasError> {
 fn expand_expr(e: &SExpr, env: &AliasEnv, visiting: &HashSet<Id>) -> Result<SExpr, AliasError> {
     let span = e.span.clone();
     let e2 = match &e.val {
-        Expr::TypeDef(name, t, body) => {
-            let t_expanded = expand_type(t, env, visiting)?;
+        Expr::TypeDef(name, t, body, is_rec) => {
+            let env_def = if *is_rec {
+                env.iter()
+                    .filter(|(k, _)| **k != name.val)
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect()
+            } else {
+                env.clone()
+            };
+            let t_expanded = expand_type(t, &env_def, visiting)?;
+            let t_final = if *is_rec { wrap_mu(name, t_expanded) } else { t_expanded };
             let mut env2 = env.clone();
-            env2.insert(name.val.clone(), t_expanded);
+            env2.insert(name.val.clone(), t_final);
             return expand_expr(body, &env2, visiting);
         }
         Expr::Ann(inner, t) => Expr::Ann(
@@ -237,4 +246,13 @@ fn expand_session(
         Session::UVar(id) => Session::UVar(*id),
     };
     Ok(Spanned::new(s2, span))
+}
+
+fn wrap_mu(name: &SId, t: SType) -> SType {
+    let span = t.span.clone();
+    let t2 = match t.val {
+        Type::Chan(s) => Type::Chan(Session::Mu(name.clone(), Box::new(Spanned::new(s, t.span.clone())))),
+        other => other,
+    };
+    Spanned::new(t2, span)
 }
