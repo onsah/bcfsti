@@ -12,7 +12,8 @@ let
         let c1 = select child c in
         let html, children = lsplit HtmlChannel c1 in
         renderMsgArea html;
-        close (select done (children : ChildrenChannel; Close))
+        let c2 = select done (children : ChildrenChannel; Close) in
+        close c2
 in
 let
     renderUserProfile : HtmlChannel; Return -[m u 1]-> Unit
