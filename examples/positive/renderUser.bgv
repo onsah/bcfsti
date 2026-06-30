@@ -23,7 +23,7 @@ let
         drop c3
 in
 let
-    renderUser : HtmlChannel; Close -[m u 1]-> (Acq; ChildrenChannel; Close)
+    renderUser : HtmlChannel; Close -[m u 1]-> Unit
     renderUser c =
         let c1 = select elem c in
         let c2, c3 = lsplit !String c1 in #(c3 : ChildrenChannel)
@@ -31,6 +31,8 @@ let
         let c4 = select child (c3 : ChildrenChannel; Close) in #(c4 : HtmlChannel; ChildrenChannel; Close)
         let c5, c6 = rsplit HtmlChannel c4 in
         fork (\x. renderUserProfile c5);
-        c6
+        let c7, c8 = lsplit Acq c6 in
+        acquire c7;
+        renderUserRest c8
 in
 unit
