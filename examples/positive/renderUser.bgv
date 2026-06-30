@@ -1,0 +1,36 @@
+rec type HtmlChannel = +{ text: !String, elem: !String; ChildrenChannel } in
+rec type ChildrenChannel = +{ done: Skip, child: HtmlChannel; ChildrenChannel } in
+let
+    renderMsgArea : HtmlChannel -[m u 1]-> Unit
+    renderMsgArea c =
+        let c1 = select text c in
+        send @String "Message Area" c1
+in
+let
+    renderUserRest : ChildrenChannel; Close -[m u 1]-> Unit
+    renderUserRest c =
+        let c1 = select child c in
+        let html, children = lsplit HtmlChannel c1 in
+        renderMsgArea html;
+        close (select done (children : ChildrenChannel; Close))
+in
+let
+    renderUserProfile : HtmlChannel; Return -[m u 1]-> Unit
+    renderUserProfile c =
+        let c1 = select text c in
+        let c2, c3 = lsplit !String c1 in
+        send @String "User Profile" c2;
+        drop c3
+in
+let
+    renderUser : HtmlChannel; Close -[m u 1]-> (Acq; ChildrenChannel; Close)
+    renderUser c =
+        let c1 = select elem c in
+        let c2, c3 = lsplit !String c1 in #(c3 : ChildrenChannel)
+        send @String "div" c2;
+        let c4 = select child (c3 : ChildrenChannel; Close) in #(c4 : HtmlChannel; ChildrenChannel; Close)
+        let c5, c6 = rsplit HtmlChannel c4 in
+        fork (\x. renderUserProfile c5);
+        c6
+in
+unit
