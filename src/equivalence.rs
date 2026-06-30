@@ -28,27 +28,11 @@ pub fn check_equivalence(type1: &Type, type2: &Type) -> EquivalenceResult {
     let type2_converted = convert_type_impl(type2, &mut defs);
 
     for def in defs.iter() {
-        let kind = if def.1.is_session_type() { "1S" } else { "1T" }.to_owned();
-        writeln!(test_file, "type {} : {}", def.0, kind).unwrap();
-        writeln!(test_file, "type {} = {}", def.0, def.1).unwrap();
+        write_freest_type(&def.0, &def.1, &mut test_file);
     }
 
-    let kind = if type1_converted.is_session_type() {
-        "1S"
-    } else {
-        "1T"
-    }
-    .to_owned();
-    writeln!(test_file, "type T1 : {}", kind).unwrap();
-    writeln!(test_file, "type T1 = {}", type1_converted).unwrap();
-    let kind = if type2_converted.is_session_type() {
-        "1S"
-    } else {
-        "1T"
-    }
-    .to_owned();
-    writeln!(test_file, "type T2 : {}", kind).unwrap();
-    writeln!(test_file, "type T2 = {}", type2_converted).unwrap();
+    write_freest_type("T1", &type1_converted, &mut test_file);
+    write_freest_type("T2", &type2_converted, &mut test_file);
 
     writeln!(test_file, "left : T1 -> T2").unwrap();
     writeln!(test_file, "left x = x").unwrap();
@@ -67,6 +51,12 @@ pub fn check_equivalence(type1: &Type, type2: &Type) -> EquivalenceResult {
         let reason = String::from_utf8_lossy(&freest_cmd.stderr).to_string();
         EquivalenceResult::Error { reason }
     }
+}
+
+fn write_freest_type(name: &str, ty: &FreestType, test_file: &mut impl Write) {
+    let kind = if ty.is_session_type() { "1S" } else { "1T" }.to_owned();
+    writeln!(test_file, "type {} : {}", name, kind).unwrap();
+    writeln!(test_file, "type {} = {}", name, ty).unwrap();
 }
 
 pub fn check_equivalence_sessions(type1: &Session, type2: &Session) -> EquivalenceResult {
