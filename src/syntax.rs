@@ -585,7 +585,9 @@ impl Expr {
             Expr::Branch(e) => e.free_vars(),
             Expr::LSplit(_, e) => e.free_vars(),
             Expr::RSplit(_, e) => e.free_vars(),
-            Expr::LetDecl(id, _, _, body) => without(body.free_vars(), &id.val),
+            Expr::LetDecl(id, _, clause, body) => {
+                union(clause.body.free_vars(), without(body.free_vars(), &id.val))
+            }
             Expr::TypeDef(_, _, body, _) => body.free_vars(),
         }
     }
