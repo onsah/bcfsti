@@ -58,10 +58,7 @@ fn run(args: &Args) -> Result<(), IErr> {
     }
     let (_e, _t, cs, _p) = typecheck(&src, args.verbose)?;
 
-    constraints_check(cs)?;
-    // if args.verbose {
-    //     println!("===== CONSTRAINTS CHECKING =====");
-    // }
+    constraints_check(cs, args.verbose)?;
 
     // println!("===== EVALUATION =====");
     // println!("Program stdout:");
@@ -120,8 +117,17 @@ pub fn typecheck(src: &str, verbose: bool) -> Result<(SExpr, Type, Constraints, 
     Ok((e, t.val, cs, p))
 }
 
-fn constraints_check(cs: Constraints) -> Result<(), IErr> {
+fn constraints_check(cs: Constraints, verbose: bool) -> Result<(), IErr> {
     let cs = cs.solve();
+
+    if verbose {
+        println!("===== CONSTRAINTS CHECKING =====");
+        println!("Constraints:");
+        for (ty1, ty2) in cs.iter() {
+            println!("{} == {}", pretty_def(&ty1.val), pretty_def(&ty2.val));
+        }
+        println!();
+    }
 
     for (ty1, ty2) in cs.iter() {
         match check_equivalence(&ty1.val, &ty2.val) {

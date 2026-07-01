@@ -7,7 +7,7 @@ pub fn typecheck_(src: &str, src_path: &str) -> Result<(), ()> {
         report_error(src_path, &src, e.clone());
         ()
     })?;
-    constraints_check(cs).map_err(|e| {
+    constraints_check(cs, false).map_err(|e| {
         report_error(src_path, &src, e.clone());
         ()
     })
