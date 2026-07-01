@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
 use crate::ren::Ren;
-use crate::syntax::{Id, Mult, SId, SType, Session, Type, TypeSemEq};
+use crate::syntax::{Id, Mult, SId, SType, Type, TypeSemEq};
 use crate::util::boxed::Boxed;
 use crate::util::graph::Graph;
 use crate::util::pretty::{Pretty, PrettyEnv};
@@ -314,31 +314,6 @@ impl Ctx {
             }
         });
         ctx
-    }
-
-    // split-ctx function from Agda
-    pub fn split_ctx(&self, sis: &HashMap<Id, Session>, r1: &Ren, r2: &Ren) -> Ctx {
-        self.flatmap_binds(&mut |x, t| {
-            if let Some(s1) = sis.get(&x) {
-                if let Type::Chan(s) = &t {
-                    todo!()
-                    // if let Some(s2) = s.split(s1) {
-                    //     return Ctx::Join(
-                    //         Box::new(Ctx::Bind(
-                    //             fake_span(r1.map.get(&x).unwrap().clone()),
-                    //             fake_span(Type::Chan(fake_span(s1.clone()))),
-                    //         )),
-                    //         Box::new(Ctx::Bind(
-                    //             fake_span(r2.map.get(&x).unwrap().clone()),
-                    //             fake_span(Type::Chan(fake_span(s2))),
-                    //         )),
-                    //         JoinOrd::Ordered,
-                    //     );
-                    // }
-                }
-            }
-            Ctx::Bind(fake_span(x), fake_span(t))
-        })
     }
 }
 

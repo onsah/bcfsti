@@ -371,7 +371,7 @@ pub fn eval_(env: &Env, e: &SExpr) -> Result<Value, EvalError> {
             }
             Ok(Value::Const(Const::Unit))
         }
-        Expr::BorrowEnd(SessionOp::Recv, e1) => todo!(),
+        Expr::BorrowEnd(SessionOp::Recv, _) => todo!(),
         Expr::End(op, e1) => {
             let v1 = eval_(env, e1)?;
             let Value::Chan(c) = v1 else {
@@ -483,9 +483,9 @@ pub fn eval_(env: &Env, e: &SExpr) -> Result<Value, EvalError> {
             };
             eval_(env, if *b { e2 } else { e3 })
         }
-        Expr::LSplit(spanned, spanned1) => todo!(),
-        Expr::RSplit(spanned, spanned1) => todo!(),
-        Expr::LetDecl(spanned, spanned1, spanned2, spanned3) => todo!(),
+        Expr::LSplit(_, _) => todo!(),
+        Expr::RSplit(_, _) => todo!(),
+        Expr::LetDecl(_, _, _, _) => todo!(),
         Expr::TypeDef(_, _, body, _) => {
             unreachable!(
                 "TypeDef should be removed by type alias expansion: {}",

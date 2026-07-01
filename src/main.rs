@@ -32,7 +32,6 @@ use crate::{
     equivalence::{EquivalenceResult, check_equivalence},
     error_reporting::{IErr, report_error},
     lexer::Token,
-    semantics::eval,
     syntax::{Eff, Type},
     util::{
         lexer_offside::{self, Braced},

@@ -405,60 +405,6 @@ impl Session {
     pub fn sem_eq(&self, other: &Self) -> bool {
         self.sem_eq_(other, &HashSet::new())
     }
-    pub fn split_(
-        &self,
-        p: &Session,
-        seen: &HashSet<(Session, Session)>,
-    ) -> Result<Option<Self>, ()> {
-        let mut seen = seen.clone();
-        if !seen.insert((self.clone(), p.clone())) {
-            Ok(None)
-        } else {
-            match (self, p) {
-                (Session::End(op1), Session::End(op2)) => {
-                    if op1 == op2 {
-                        Ok(None)
-                    } else {
-                        Err(())
-                    }
-                }
-                (_, Session::BorrowEnd(_)) => todo!(), // Ok(Some(self.clone())),
-                (Session::Op(op1, t1), Session::Op(op2, t2)) => todo!(),
-                // if op1 == op2 && t1.sem_eq(t2) => {
-                // s1.split_(s2, &seen)
-                // }
-                (Session::Choice(op1, cs1), Session::Choice(op2, cs2)) if op1 == op2 => {
-                    if let Some(cs) = merge_clauses(&cs1, &cs2, *op1 == SessionOp::Send) {
-                        let cs = cs
-                            .iter()
-                            .map(|(_, s1, s2)| s1.split_(s2, &seen))
-                            .collect::<Result<Vec<_>, ()>>()?;
-                        let mut it = cs.into_iter().flatten();
-                        if let Some(r) = it.next() {
-                            if it.all(|r2| r.sem_eq(&r2)) {
-                                Ok(Some(r))
-                            } else {
-                                Err(())
-                            }
-                        } else {
-                            Ok(None)
-                        }
-                    } else {
-                        return Err(());
-                    }
-                }
-                (Session::Mu(x1, s1), _) => s1.unfold(&x1).split_(p, &seen),
-                (_, Session::Mu(x2, s2)) => self.split_(&s2.unfold(&x2), &seen),
-                (Session::Var(_x1), _) => unreachable!(),
-                (_, Session::Var(_x2)) => unreachable!(),
-                _ => Err(()),
-            }
-        }
-    }
-    pub fn split(&self, s1: &Session) -> Option<Self> {
-        let r = self.split_(s1, &HashSet::new()).ok()?;
-        r
-    }
     pub fn dual(&self) -> Self {
         match self {
             Session::Op(op, t) => Session::Op(op.dual(), t.clone()),
@@ -485,7 +431,7 @@ impl Session {
     fn concatenate(&self, other: &Session) -> Session {
         match (self, other) {
             (_, Session::Skip) => self.clone(),
-            (Session::Semi { first, second }, s2) => Session::Semi {
+            (Session::Semi { first, second }, other) => Session::Semi {
                 first: first.clone(),
                 second: Box::new(fake_span(second.val.concatenate(other))),
             },

@@ -2,17 +2,13 @@ use std::collections::HashSet;
 
 use crate::{
     constraint::Constraints,
-    ren::Ren,
     session_type,
     syntax::{
-        Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, Pattern, SEff, SExpr, SId, SLabel, SMult,
-        SPattern, SSession, SType, Session, SessionOp, Type,
+        Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, Pattern, SEff, SExpr, SId, SMult, SPattern,
+        SSession, SType, Session, SessionOp, Type,
     },
     type_context::{Ctx, JoinOrd, ext},
-    util::{
-        pretty::pretty_def,
-        span::{Spanned, fake_span},
-    },
+    util::span::{Spanned, fake_span},
 };
 
 #[derive(Debug, Clone)]
@@ -1024,23 +1020,6 @@ impl TypeChecker {
         Ok(())
     }
 
-    fn infer_recv_arg(
-        &mut self,
-        ctx: &Ctx,
-        e: &SExpr,
-    ) -> Result<(SType, Constraints, Eff), TypeError> {
-        self.infer(ctx, e)
-    }
-
-    fn infer_select_arg(
-        &mut self,
-        ctx: &Ctx,
-        e: &SExpr,
-        l: &SLabel,
-    ) -> Result<(SType, Constraints, Eff), TypeError> {
-        self.infer(ctx, e)
-    }
-
     fn new_uvar(&mut self) -> SSession {
         let id = self.uvar_counter;
         self.uvar_counter += 1;
@@ -1082,7 +1061,7 @@ fn check_wf_session_(s: &SSession, at_mu: bool, vars: &HashSet<Id>) -> Result<()
             vars.insert(x.val.clone());
             check_wf_session_(s1, true, &vars)
         }
-        Session::Op(_op, t1) => todo!(),
+        Session::Op(_op, _) => todo!(),
         Session::Choice(_op, cs) => {
             if cs.len() == 0 {
                 Err(TypeError::WfEmptyChoice(s.clone()))
@@ -1096,7 +1075,7 @@ fn check_wf_session_(s: &SSession, at_mu: bool, vars: &HashSet<Id>) -> Result<()
         Session::End(_op) => Ok(()),
         Session::BorrowEnd(_op) => Ok(()),
         Session::Skip => todo!(),
-        Session::Semi { first, second } => todo!(),
+        Session::Semi { .. } => todo!(),
         Session::UVar(_) => todo!(),
     }
 }
@@ -1107,7 +1086,7 @@ pub fn check_wf_session(s: &SSession) -> Result<(), TypeError> {
 
 pub fn check_wf_type(t: &SType) -> Result<(), TypeError> {
     match &t.val {
-        Type::Chan(s) => check_wf_session(todo!()),
+        Type::Chan(_) => todo!(),
         Type::Arr {
             param: t1, ret: t2, ..
         } => {
@@ -1156,74 +1135,6 @@ pub fn check_pattern(pat: &SPattern, t: &SType) -> Result<Ctx, TypeError> {
             Ok(ext(m.val, c1, c2))
         }
         (Pattern::Pair(_pat1, _pat2), _) => Err(TypeError::PatternMismatch(pat.clone(), t.clone())),
-    }
-}
-
-fn union<T: std::hash::Hash + Eq + Clone>(xss: impl IntoIterator<Item = HashSet<T>>) -> HashSet<T> {
-    let mut out = HashSet::new();
-    for xs in xss {
-        out = out.union(&xs).cloned().collect();
-    }
-    out
-}
-
-fn intersection<T: std::hash::Hash + Eq + Clone>(
-    xss: impl IntoIterator<Item = HashSet<T>>,
-) -> HashSet<T> {
-    let xss: Vec<_> = xss.into_iter().collect();
-    if xss.len() == 0 {
-        return HashSet::new();
-    }
-    let mut it = xss.into_iter();
-    let mut out = it.next().unwrap().clone();
-    for xs in it {
-        out = out.intersection(&xs).cloned().collect();
-    }
-    out
-}
-
-fn rename_vars(r: &Ren, xs: &HashSet<Id>) -> HashSet<Id> {
-    let mut out = HashSet::new();
-    for x in xs {
-        if let Some(y) = r.map.get(x) {
-            out.insert(y.clone());
-        } else {
-            out.insert(x.clone());
-        }
-    }
-    out
-}
-
-fn indented(n: usize, s: impl AsRef<str>) -> String {
-    let mut out = String::new();
-    for l in s.as_ref().lines() {
-        for _ in 0..n {
-            out += " ";
-        }
-        out += l;
-    }
-    out
-}
-
-fn split_arrow_type(mut t: &SType) -> (Vec<(SType, SMult)>, SType, Option<SEff>) {
-    let mut args = vec![];
-    let mut eff = None;
-    loop {
-        match &t.val {
-            Type::Arr {
-                mob,
-                mult: m,
-                eff: e,
-                param: t1,
-                ret: t2,
-            } => {
-                todo!();
-                t = t2;
-                eff = Some(e.clone());
-                args.push((t1.as_ref().clone(), m.clone()));
-            }
-            _ => return (args, t.clone(), eff),
-        }
     }
 }
 

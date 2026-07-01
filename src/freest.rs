@@ -38,6 +38,7 @@ pub(crate) enum FreestType {
         var: Label,
         body: Box<FreestType>,
     },
+    #[allow(dead_code)]
     Rec {
         var: Label,
         body: Box<FreestType>,
@@ -228,10 +229,6 @@ mod tests {
 
     fn session_op() -> impl Strategy<Value = SessionOp> {
         prop_oneof![Just(SessionOp::Recv), Just(SessionOp::Send)]
-    }
-
-    fn label() -> impl Strategy<Value = Label> {
-        prop::string::string_regex("[a-zA-Z]+").unwrap()
     }
 
     const KEYWORDS: [&str; 2] = ["if", "of"];

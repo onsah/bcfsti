@@ -1,12 +1,6 @@
 use std::{io::Write, path::PathBuf};
 
-use crate::{
-    constraint::Constraints,
-    constraints_check,
-    error_reporting::{IErr, report_error},
-    syntax::{Eff, SExpr, Type},
-    typecheck,
-};
+use crate::{constraints_check, error_reporting::report_error, typecheck};
 
 pub fn typecheck_(src: &str, src_path: &str) -> Result<(), ()> {
     let (_, _, cs, _) = typecheck(src, false).map_err(|e| {
