@@ -195,8 +195,8 @@ impl TypeChecker {
                     if !ctx.is_subctx_of(&res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
                             e.clone(),
-                            res_ctx.clone(),
                             ctx.clone(),
+                            res_ctx.clone(),
                         ));
                     }
                 }
