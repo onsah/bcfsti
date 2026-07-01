@@ -338,7 +338,7 @@ impl TypeChecker {
                 let (chan_cs, chan_eff) = self.check(chan_ctx, chan, &expected_chan_ty)?;
 
                 let ret_ty = Type::Prod {
-                    mult: fake_span(Mult::Lin),
+                    mult: fake_span(Mult::OrdL),
                     first: Box::new(fake_span(Type::Chan(prefix_session.val.clone()))),
                     second: Box::new(fake_span(Type::Chan(uvar.val))),
                 };
