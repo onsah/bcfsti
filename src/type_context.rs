@@ -62,8 +62,8 @@ pub fn ext(m: Mult, c1: Ctx, c2: Ctx) -> Ctx {
     match m {
         Mult::Unr => CtxS::Join(c1, c2, JoinOrd::Unordered),
         Mult::Lin => CtxS::Join(c1, c2, JoinOrd::Unordered),
-        Mult::OrdR => CtxS::Join(c1, c2, JoinOrd::Ordered),
-        Mult::OrdL => CtxS::Join(c2, c1, JoinOrd::Ordered),
+        Mult::OrdR => CtxS::Join(c2, c1, JoinOrd::Ordered),
+        Mult::OrdL => CtxS::Join(c1, c2, JoinOrd::Ordered),
     }
 }
 
