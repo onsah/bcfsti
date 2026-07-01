@@ -48,14 +48,14 @@ impl Constraints {
     pub fn solve(self) -> Constraints {
         let (assignments, remaining_constraints) = self.infer_assignments();
 
-        println!("assignments:");
-        for (var, ty) in assignments.iter() {
-            println!("{} = {}", var, pretty_def(ty));
-        }
-        println!("remaining_constraints:");
-        for (ty1, ty2) in remaining_constraints.iter() {
-            println!("{} = {}", pretty_def(ty1), pretty_def(ty2));
-        }
+        // println!("assignments:");
+        // for (var, ty) in assignments.iter() {
+        //     println!("{} = {}", var, pretty_def(ty));
+        // }
+        // println!("remaining_constraints:");
+        // for (ty1, ty2) in remaining_constraints.iter() {
+        //     println!("{} = {}", pretty_def(ty1), pretty_def(ty2));
+        // }
 
         let assignments = if assignments.is_empty() {
             remaining_constraints
@@ -74,10 +74,10 @@ impl Constraints {
             result.add(ty1, ty2);
         }
 
-        println!("result:");
-        for (ty1, ty2) in result.iter() {
-            println!("{} = {}", pretty_def(ty1), pretty_def(ty2));
-        }
+        // println!("result:");
+        // for (ty1, ty2) in result.iter() {
+        //     println!("{} = {}", pretty_def(ty1), pretty_def(ty2));
+        // }
 
         if result.is_closed() {
             result

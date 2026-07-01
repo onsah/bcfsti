@@ -59,9 +59,10 @@ fn run(args: &Args) -> Result<(), IErr> {
     }
     let (_e, _t, cs, _p) = typecheck(&src, args.verbose)?;
 
-    println!("===== CONSTRAINTS CHECKING =====");
-
     constraints_check(cs)?;
+    // if args.verbose {
+    //     println!("===== CONSTRAINTS CHECKING =====");
+    // }
 
     // println!("===== EVALUATION =====");
     // println!("Program stdout:");
@@ -109,11 +110,13 @@ pub fn typecheck(src: &str, verbose: bool) -> Result<(SExpr, Type, Constraints, 
         println!();
     }
 
-    println!("===== TYPECHECKER =====");
     let (t, cs, p) = type_checker::infer_type(&e).map_err(IErr::Typing)?;
-    println!("Type:    {}", pretty_def(&t));
-    println!("Effect:  {}", pretty_def(&p));
-    println!();
+    if verbose {
+        println!("===== TYPECHECKER =====");
+        println!("Type:    {}", pretty_def(&t));
+        println!("Effect:  {}", pretty_def(&p));
+        println!();
+    }
 
     Ok((e, t.val, cs, p))
 }

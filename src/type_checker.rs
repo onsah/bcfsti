@@ -64,9 +64,9 @@ pub enum TypeError {
 pub fn infer_type(e: &SExpr) -> Result<(SType, Constraints, Eff), TypeError> {
     let mut checker = TypeChecker { uvar_counter: 0 };
     let (t, cs, eff) = checker.infer(&Ctx::Empty, e)?;
-    for (ty1, ty2) in cs.iter() {
-        println!("Constraint: {} == {}", pretty_def(ty1), pretty_def(ty2));
-    }
+    // for (ty1, ty2) in cs.iter() {
+    //     println!("Constraint: {} == {}", pretty_def(ty1), pretty_def(ty2));
+    // }
     if t.is_ord() {
         return Err(TypeError::MainReturnsOrd(e.clone(), t.clone()));
     }
@@ -958,12 +958,12 @@ impl TypeChecker {
             }
             _ => {
                 let (inferred_ty, mut cs, eff) = self.infer(ctx, e)?;
-                dbg!(pretty_def(e));
-                dbg!(pretty_def(&inferred_ty));
-                dbg!(pretty_def(expected_ty));
+                // dbg!(pretty_def(e));
+                // dbg!(pretty_def(&inferred_ty));
+                // dbg!(pretty_def(expected_ty));
 
                 if !inferred_ty.sem_eq(expected_ty) {
-                    println!("adding constraint");
+                    // println!("adding constraint");
                     cs.add(inferred_ty.clone(), expected_ty.clone());
                 }
 

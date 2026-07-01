@@ -15,7 +15,7 @@ pub enum EquivalenceResult {
 pub fn check_equivalence(type1: &Type, type2: &Type) -> EquivalenceResult {
     let mut test_file = tempfile::Builder::new().suffix(".fst").tempfile().unwrap();
 
-    println!("Test file path: {:?}", test_file.path());
+    // println!("Test file path: {:?}", test_file.path());
 
     writeln!(test_file, "module Tmp where").unwrap();
 
