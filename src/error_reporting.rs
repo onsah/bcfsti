@@ -704,6 +704,21 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     )],
                 );
             }
+            TypeError::SessionTypeNotMobileInContext(expr, ctx, id) => {
+                report(
+                    &src,
+                    expr.span.clone(),
+                    "Type Error",
+                    [label(
+                        expr.span,
+                        format!(
+                            "This variable {} is not mobile in the context {}.",
+                            pretty_def(&id),
+                            pretty_def(&ctx.simplify())
+                        ),
+                    )],
+                );
+            }
         },
         IErr::Eval(e) => match e {
             EvalError::ValMismatch(e, v_expected, v_actual) => {

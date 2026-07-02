@@ -1,0 +1,13 @@
+let
+    foo : !String; ?Int -[m u 1]-> Int
+    foo c =
+        let cin, cout = rsplit !String c in
+        fork (\x.
+            let cin1, cin2 = lsplit !String cin in
+            send @String "hello" cin1;
+            drop cin2);
+        let cout1, cout2 = lsplit Acq cout in
+        acquire cout1;
+        recv @Int cout2
+in
+unit

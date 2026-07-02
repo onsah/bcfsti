@@ -635,6 +635,53 @@ mod typechecker_tests {
                 || (ty1.val == Type::String && ty2.val == Type::Int)
         ));
     }
+
+    #[test]
+    fn fork_mobile() {
+        let src = r#"
+            let
+                foo : !String; ?Int -[m u 1]-> Int
+                foo c =
+                    let cin, cout = rsplit !String c in
+                    fork (\x.
+                        let cout1, cout2 = lsplit Acq cout in
+                        acquire cout1;
+                        recv @Int cout2);
+                    let cin1, cin2 = lsplit !String cin in
+                    send @String "hello" cin1;
+                    drop cin2
+            in
+            unit
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Unit, _, Eff::No)));
+    }
+
+    #[test]
+    fn fork_non_mobile() {
+        let src = r#"
+            let
+                foo : !String; ?Int -[m u 1]-> Int
+                foo c =
+                    let c1, c2 = lsplit !String c in
+                    fork (\x.
+                        send @String "hello" c1);
+                    recv @Int c2
+            in
+            unit
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(
+            res,
+            Err(IErr::Typing(TypeError::SessionTypeNotMobileInContext(
+                _,
+                _,
+                _
+            )))
+        );
+    }
 }
 
 #[test]

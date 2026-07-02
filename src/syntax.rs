@@ -72,6 +72,8 @@ pub enum Session {
 pub type SSession = Spanned<Session>;
 
 impl Session {
+    const ACQ: Session = Session::BorrowEnd(SessionOp::Recv);
+
     pub fn is_only_skips(&self) -> bool {
         match self {
             Session::Skip => true,
@@ -113,6 +115,34 @@ impl Session {
             Session::Mu(_, body) => body.unification_variables(),
             Session::Var(_) => HashSet::new(),
             Session::UVar(x) => HashSet::from([*x]),
+        }
+    }
+
+    fn is_mobile(&self) -> bool {
+        self.is_only_skips() || self.starts_with_acq_and_bounded()
+    }
+
+    fn starts_with_acq_and_bounded(&self) -> bool {
+        if let Session::Semi { first, second } = self.normalise() {
+            matches!(first.val, Session::ACQ) && second.is_bounded()
+        } else {
+            false
+        }
+    }
+
+    fn is_bounded(&self) -> bool {
+        match self {
+            Session::Semi { first, second } => {
+                second.is_bounded() || (first.is_bounded() && second.is_only_skips())
+            }
+            Session::BorrowEnd(session_op) => session_op == &SessionOp::Send,
+            Session::Choice(_, branches) => branches.iter().all(|(_, branch)| branch.is_bounded()),
+            Session::Mu(_, body) => body.is_bounded(),
+            Session::End(_) => true,
+            Session::Var(_) => true,
+            Session::Op(_, _) => false,
+            Session::UVar(_) => false, // TODO: Not sure if this is correct
+            Session::Skip => false,
         }
     }
 }
@@ -176,6 +206,16 @@ impl Type {
         match self {
             Type::Chan(session) => Type::Chan(session.normalise()),
             _ => self.clone(),
+        }
+    }
+
+    pub fn is_mobile(&self) -> bool {
+        match self {
+            Type::Chan(session) => session.is_mobile(),
+            Type::Arr { mob, .. } => mob.val == Mob::Mobile,
+            Type::Prod { first, second, .. } => first.is_mobile() && second.is_mobile(),
+            Type::Variant(cases) => cases.iter().all(|(_, ty)| ty.is_mobile()),
+            Type::Unit | Type::Int | Type::Bool | Type::String => true,
         }
     }
 }
@@ -424,7 +464,7 @@ impl Session {
                 first: Box::new(fake_span(first.dual())),
                 second: Box::new(fake_span(second.dual())),
             },
-            Session::UVar(_) => todo!(),
+            Session::UVar(_) => unreachable!(),
         }
     }
 

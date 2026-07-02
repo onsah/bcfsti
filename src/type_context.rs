@@ -315,6 +315,24 @@ impl Ctx {
         });
         ctx
     }
+
+    /// Returns Ok(()) if the context is mobile, otherwise returns Err(x) where x is a variable that is not mobile.
+    pub fn is_mobile(&self) -> Result<(), SId> {
+        match self {
+            Ctx::Empty => Ok(()),
+            Ctx::Bind(var, ty) => {
+                if ty.val.is_mobile() {
+                    Ok(())
+                } else {
+                    Err(var.clone())
+                }
+            }
+            Ctx::Join(ctx1, ctx2, _) => {
+                ctx1.is_mobile()?;
+                ctx2.is_mobile()
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

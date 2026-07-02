@@ -55,6 +55,7 @@ pub enum TypeError {
     WfSessionShadowing(SSession, SId),
     TypeNotValidForNew(SSession),
     SessionTypeOnlySkips(SSession),
+    SessionTypeNotMobileInContext(SExpr, Ctx, SId),
 }
 
 pub fn infer_type(e: &SExpr) -> Result<(SType, Constraints, Eff), TypeError> {
@@ -844,7 +845,10 @@ impl TypeChecker {
                         expected_ty.clone(),
                     ));
                 };
-                // TODO: Check context mobility
+
+                if mob.val == Mob::Mobile {
+                    assert_mob_ctx(e, ctx)?;
+                }
 
                 // For unrestricted lambdas: ensure that context is unrestricted.
                 if mult.val == Mult::Unr {
@@ -1133,5 +1137,16 @@ fn assert_unr_ctx(e: &SExpr, ctx: &Ctx) -> Result<(), TypeError> {
         Ok(())
     } else {
         Err(TypeError::LeftOverCtx(e.clone(), ctx.clone()))
+    }
+}
+
+fn assert_mob_ctx(e: &SExpr, ctx: &Ctx) -> Result<(), TypeError> {
+    match ctx.is_mobile() {
+        Ok(()) => Ok(()),
+        Err(var) => Err(TypeError::SessionTypeNotMobileInContext(
+            e.clone(),
+            ctx.clone(),
+            var,
+        )),
     }
 }
