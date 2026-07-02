@@ -6,6 +6,13 @@ use std::{
 use crate::syntax::{Label, SessionOp};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[allow(dead_code)]
+pub(crate) enum Kind {
+    Type,
+    Session,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum FreestType {
     // Simple types
     Unit,
@@ -36,11 +43,7 @@ pub(crate) enum FreestType {
     #[allow(dead_code)]
     Forall {
         var: Label,
-        body: Box<FreestType>,
-    },
-    #[allow(dead_code)]
-    Rec {
-        var: Label,
+        kind: Kind,
         body: Box<FreestType>,
     },
     Var(Label),
@@ -55,7 +58,6 @@ impl FreestType {
             | FreestType::Semi { .. }
             | FreestType::Message { .. }
             | FreestType::Choice { .. } => true,
-            FreestType::Rec { .. } => true,
             _ => false,
         }
     }
@@ -70,10 +72,10 @@ impl fmt::Display for FreestType {
             FreestType::String => write!(f, "String"),
             FreestType::Tuple(tys) => {
                 write!(f, "(")?;
-                for ty in &tys[..tys.len() - 1] {
-                    write!(f, "{}, ", ty)?;
+                write!(f, "{}", tys.first().unwrap())?;
+                for ty in &tys[1..] {
+                    write!(f, ", {}", ty)?;
                 }
-                write!(f, "{}", tys.last().unwrap())?;
                 write!(f, ")")?;
                 Ok(())
             }
@@ -113,8 +115,13 @@ impl fmt::Display for FreestType {
                 }
                 write!(f, "}}")
             }
-            FreestType::Forall { var, body } => write!(f, "(forall {}. {})", var, body),
-            FreestType::Rec { var, body } => write!(f, "(rec {}. {})", var, body),
+            FreestType::Forall { var, kind, body } => {
+                let kind = match kind {
+                    Kind::Type => "1T",
+                    Kind::Session => "1S",
+                };
+                write!(f, "(forall ({} : {}) -> {})", var, kind, body)
+            }
             FreestType::Var(label) => write!(f, "{}", label),
         }
     }
@@ -136,7 +143,7 @@ mod tests {
     use proptest::prelude::*;
     use tempfile::Builder;
 
-    use crate::freest::FreestType;
+    use crate::freest::{FreestType, Kind};
     use crate::syntax::{Label, SessionOp};
 
     impl FreestType {
@@ -172,57 +179,12 @@ mod tests {
                     }
                     result
                 }
-                FreestType::Forall { var, body } => {
-                    let mut free_in_body = body.free_variables();
-                    free_in_body.remove(var);
-                    free_in_body
-                }
-                FreestType::Rec { var, body } => {
+                FreestType::Forall { var, body, .. } => {
                     let mut free_in_body = body.free_variables();
                     free_in_body.remove(var);
                     free_in_body
                 }
                 FreestType::Var(label) => HashSet::from([label.clone()]),
-            }
-        }
-
-        fn is_terminated(&self) -> bool {
-            match self {
-                FreestType::Unit
-                | FreestType::Int
-                | FreestType::Bool
-                | FreestType::String
-                | FreestType::Skip => true,
-                FreestType::Tuple(_) => true,
-                FreestType::Arrow { .. } => true,
-                FreestType::End(_) => false,
-                FreestType::Choice { .. } => false,
-                FreestType::Message { .. } => false,
-                FreestType::Var(_) => false,
-                FreestType::Semi { first, second } => {
-                    first.is_terminated() && second.is_terminated()
-                }
-                FreestType::Forall { body, .. } => body.is_terminated(),
-                FreestType::Rec { body, .. } => body.is_terminated(),
-            }
-        }
-
-        fn is_contractive(&self, on: &Label, polymorphic_vars: &HashSet<&Label>) -> bool {
-            match self {
-                FreestType::Unit | FreestType::Int | FreestType::Bool | FreestType::String => true,
-                FreestType::Tuple(_) => true,
-                FreestType::Arrow { .. } => true,
-                FreestType::Skip => true,
-                FreestType::End(_) => true,
-                FreestType::Semi { first, second } => match first.is_terminated() {
-                    true => second.is_contractive(on, polymorphic_vars),
-                    false => first.is_contractive(on, polymorphic_vars),
-                },
-                FreestType::Message { .. } => true,
-                FreestType::Choice { .. } => true,
-                FreestType::Forall { body, .. } => body.is_contractive(on, polymorphic_vars),
-                FreestType::Rec { body, .. } => body.is_contractive(on, polymorphic_vars),
-                FreestType::Var(label) => on != label && !polymorphic_vars.contains(label),
             }
         }
     }
@@ -236,6 +198,25 @@ mod tests {
     fn ty_label() -> impl Strategy<Value = Label> {
         (
             prop::char::range('a', 'z'),
+            prop::collection::vec(
+                prop_oneof![prop::char::range('a', 'z'), prop::char::range('A', 'Z')],
+                0..4,
+            ),
+        )
+            .prop_map(|(c, cs)| {
+                let mut str = String::new();
+                str.push(c);
+                for c in cs {
+                    str.push(c);
+                }
+                str
+            })
+            .prop_filter("keyword", |label| !KEYWORDS.contains(&label.as_str()))
+    }
+
+    fn choice_label() -> impl Strategy<Value = Label> {
+        (
+            prop::char::range('A', 'Z'),
             prop::collection::vec(
                 prop_oneof![prop::char::range('a', 'z'), prop::char::range('A', 'Z')],
                 0..4,
@@ -271,10 +252,7 @@ mod tests {
         }
     }
 
-    fn freest_session_primitive(
-        bound_vars: Vec<String>,
-        rec_vars: Vec<String>,
-    ) -> BoxedStrategy<FreestType> {
+    fn freest_session_primitive(bound_vars: Vec<String>) -> BoxedStrategy<FreestType> {
         let mut strategy = prop_oneof![
             Just(FreestType::Skip),
             session_op().prop_map(FreestType::End),
@@ -286,13 +264,6 @@ mod tests {
             strategy = prop_oneof![
                 strategy,
                 proptest::sample::select(bound_vars.clone()).prop_map(FreestType::Var),
-            ]
-            .boxed();
-        }
-        if !rec_vars.is_empty() {
-            strategy = prop_oneof![
-                strategy,
-                proptest::sample::select(rec_vars.clone()).prop_map(FreestType::Var),
             ]
             .boxed();
         }
@@ -322,6 +293,7 @@ mod tests {
             for var in bound_vars.iter() {
                 ty = Box::new(FreestType::Forall {
                     var: var.clone(),
+                    kind: Kind::Type,
                     body: ty,
                 })
             }
@@ -331,13 +303,9 @@ mod tests {
 
     fn freest_session_type(
         forall_vars: Vec<String>,
-        rec_vars: Vec<String>,
+        session_vars: Vec<String>,
     ) -> impl Strategy<Value = Box<FreestType>> {
-        let leaf =
-            freest_session_primitive(forall_vars.clone(), rec_vars.clone()).prop_map(Box::new);
-
-        let forall_vars_clone = forall_vars.clone();
-        let rec_vars_clone = rec_vars.clone();
+        let leaf = freest_session_primitive(session_vars.clone()).prop_map(Box::new);
 
         leaf.prop_recursive(
             4,  // depth
@@ -350,37 +318,39 @@ mod tests {
                         .prop_map(Box::new),
                     (
                         session_op(),
-                        prop::collection::vec((ty_label(), inner.clone()), 1..3)
+                        prop::collection::vec((choice_label(), inner.clone()), 1..3)
                     )
                         .prop_map(|(dir, branches)| { FreestType::Choice { dir, branches } })
                         .prop_map(Box::new)
                 ]
             },
         )
-        // Add forall & rec quantifiers on top
-        .prop_map(move |ty| {
-            let mut ty = ty;
-            // Only quantify for the used variables
-            let (free_poly_vars, free_rec_vars): (Vec<String>, Vec<String>) = ty
+        // Add forall quantifiers on top
+        .prop_map(move |mut ty| {
+            let type_vars = ty
                 .free_variables()
                 .into_iter()
-                .partition(|var| forall_vars.contains(var));
-            for var in free_rec_vars {
-                ty = Box::new(FreestType::Rec { var, body: ty });
+                .filter(|var| forall_vars.contains(var));
+            for var in type_vars {
+                ty = Box::new(FreestType::Forall {
+                    var: var.to_owned(),
+                    kind: Kind::Type,
+                    body: ty,
+                });
             }
-            for var in free_poly_vars {
-                ty = Box::new(FreestType::Forall { var: var, body: ty });
+            let sess_vars = ty
+                .free_variables()
+                .into_iter()
+                .filter(|var| session_vars.contains(var));
+            for var in sess_vars {
+                ty = Box::new(FreestType::Forall {
+                    var: var.to_owned(),
+                    kind: Kind::Session,
+                    body: ty,
+                });
             }
             ty
         })
-        // Filter out non-contractive types
-        .prop_filter("Not contractive", move |prop| {
-            let bound_vars_set = HashSet::from_iter(forall_vars_clone.iter());
-            rec_vars_clone
-                .iter()
-                .all(|rec_var| prop.is_contractive(rec_var, &bound_vars_set))
-        })
-        // TODO: Filter non-contractive types
     }
 
     static FREEST_AVAILABLE: OnceLock<bool> = OnceLock::new();
@@ -404,21 +374,20 @@ mod tests {
             max_global_rejects: 1,
             .. ProptestConfig::default()
         })]
-        #[ignore]
         #[test]
         fn freest_functional_type_display(
             ty in prop::collection::vec(ty_label(), 0..5)
                 .prop_flat_map(freest_functional_type)
         ) {
             assert!(freest_available(), "'freest' executable not found on PATH");
-
             let mut test_file = Builder::new().suffix(".fst").disable_cleanup(true).tempfile()?;
-            writeln!(test_file, "type T = {}", ty)?;
+            writeln!(test_file, "
+                module Test where
+                type T : 1T
+                type T = {}", ty)?;
             test_file.flush()?;
 
-            println!("Type: {}", ty);
-
-            let freest_cmd = Command::new("freest").arg("--subtyping").arg(test_file.path()).output()?;
+            let freest_cmd = Command::new("freest").arg(test_file.path()).output()?;
             let error_output = String::from_utf8(freest_cmd.stderr)?;
 
             assert!(freest_cmd.status.success(), "TEST OUTPUT: {}", error_output);
@@ -434,21 +403,21 @@ mod tests {
             max_global_rejects: 1,
             .. ProptestConfig::default()
         })]
-        #[ignore]
         #[test]
         fn freest_session_type_display(
             ty in (prop::collection::vec(ty_label(), 0..3), prop::collection::vec(ty_label(), 0..3))
-                .prop_flat_map(|(forall_vars, rec_vars)| freest_session_type(forall_vars, rec_vars))
+                .prop_flat_map(|(type_vars, sess_vars)| freest_session_type(type_vars, sess_vars))
         ) {
             assert!(freest_available(), "'freest' executable not found on PATH");
 
             let mut test_file = Builder::new().suffix(".fst").disable_cleanup(true).tempfile()?;
-            writeln!(test_file, "type T = {}", ty)?;
+            writeln!(test_file, "
+                module Test where
+                type T : 1S
+                type T = {}", ty)?;
             test_file.flush()?;
 
-            println!("Type: {}", ty);
-
-            let freest_cmd = Command::new("freest").arg("--subtyping").arg(test_file.path()).output()?;
+            let freest_cmd = Command::new("freest").arg(test_file.path()).output()?;
             let error_output = String::from_utf8(freest_cmd.stderr)?;
 
             assert!(freest_cmd.status.success(), "TEST OUTPUT: {}", error_output);
