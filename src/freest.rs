@@ -252,18 +252,21 @@ mod tests {
         }
     }
 
-    fn freest_session_primitive(bound_vars: Vec<String>) -> BoxedStrategy<FreestType> {
+    fn freest_session_primitive(
+        forall_vars: Vec<String>,
+        sess_vars: Vec<String>,
+    ) -> BoxedStrategy<FreestType> {
         let mut strategy = prop_oneof![
             Just(FreestType::Skip),
             session_op().prop_map(FreestType::End),
-            (session_op(), freest_functional_type(Vec::new()))
+            (session_op(), freest_functional_type(forall_vars.clone()))
                 .prop_map(|(dir, ty)| FreestType::Message { dir, ty }),
         ]
         .boxed();
-        if !bound_vars.is_empty() {
+        if !sess_vars.is_empty() {
             strategy = prop_oneof![
                 strategy,
-                proptest::sample::select(bound_vars.clone()).prop_map(FreestType::Var),
+                proptest::sample::select(sess_vars.clone()).prop_map(FreestType::Var),
             ]
             .boxed();
         }
@@ -305,7 +308,8 @@ mod tests {
         forall_vars: Vec<String>,
         session_vars: Vec<String>,
     ) -> impl Strategy<Value = Box<FreestType>> {
-        let leaf = freest_session_primitive(session_vars.clone()).prop_map(Box::new);
+        let leaf =
+            freest_session_primitive(forall_vars.clone(), session_vars.clone()).prop_map(Box::new);
 
         leaf.prop_recursive(
             4,  // depth
