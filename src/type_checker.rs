@@ -1142,7 +1142,6 @@ fn assert_unr_ctx(e: &SExpr, ctx: &Ctx) -> Result<(), TypeError> {
 }
 
 fn assert_mob_ctx(expr: &SExpr, ctx: &Ctx, cs: &mut Constraints) {
-    // dbg!(ctx);
     // If we can't ensure that the type is mobile
     // we add a constraint that the type must be mobile
     // to later check that the solution satisfies mobility requirements.
@@ -1152,7 +1151,6 @@ fn assert_mob_ctx(expr: &SExpr, ctx: &Ctx, cs: &mut Constraints) {
         .filter(|(_id, ty)| !ty.is_mobile())
         .map(|(id, _ty)| id.clone())
         .collect::<HashSet<_>>();
-    dbg!(&non_mobile_ids);
     if !non_mobile_ids.is_empty() {
         cs.check_mobility(expr.clone(), non_mobile_ids, ctx.clone());
     }

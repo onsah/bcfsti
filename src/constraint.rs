@@ -89,9 +89,9 @@ impl Constraints {
         if result.is_closed() {
             for (expr, ids, ctx) in mobilities.iter_mut() {
                 Constraints::subst_ctx(ctx, &assignments);
-
+                let binds = ctx.binds();
                 for id in ids.iter() {
-                    if !ctx.lookup_ord_pure(id).unwrap().1.val.is_mobile() {
+                    if !binds.get(&id.val).unwrap().is_mobile() {
                         return Err(ConstraintSolutionError::AssignmentNotMobile {
                             expr: expr.clone(),
                             id: id.clone(),
@@ -103,6 +103,7 @@ impl Constraints {
 
             Ok(result)
         } else {
+            result.mobilities = mobilities;
             result.solve()
         }
     }
