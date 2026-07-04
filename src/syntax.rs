@@ -141,7 +141,8 @@ impl Session {
             Session::End(_) => true,
             Session::Var(_) => true,
             Session::Op(_, _) => false,
-            Session::UVar(_) => false, // TODO: Not sure if this is correct
+            // Unification variables are not bounded, as they can be instantiated to any session type.
+            Session::UVar(_) => false,
             Session::Skip => false,
         }
     }

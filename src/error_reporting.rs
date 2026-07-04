@@ -1,6 +1,7 @@
 use std::{collections::HashSet, ops::Range};
 
 use crate::{
+    constraint::ConstraintSolutionError,
     lexer::LexerError,
     semantics::EvalError,
     syntax::SType,
@@ -18,7 +19,8 @@ pub enum IErr {
     Alias(AliasError),
     Typing(TypeError),
     Eval(EvalError),
-    Constraint {
+    Constraint(ConstraintSolutionError),
+    Equivalence {
         ty1: SType,
         ty2: SType,
         reason: String,
@@ -745,11 +747,27 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                 );
             }
         },
-        IErr::Constraint { ty1, ty2, reason } => {
+        IErr::Constraint(ConstraintSolutionError::AssignmentNotMobile { expr, id, ctx }) => {
+            let (_, ty) = ctx.lookup_ord_pure(&id).unwrap();
+            report(
+                &src,
+                expr.span.clone(),
+                "Constraint Solution Error",
+                [label(
+                    expr.span,
+                    format!(
+                        "Type {} is not mobile in context: {}",
+                        pretty_def(&ty.val),
+                        pretty_def(&ctx.simplify())
+                    ),
+                )],
+            );
+        }
+        IErr::Equivalence { ty1, ty2, reason } => {
             report(
                 &src,
                 ty1.span.clone(),
-                "Constraint Solution Error",
+                "Eqivalence Error",
                 [label(
                     ty1.span.clone(),
                     format!(

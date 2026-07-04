@@ -35,7 +35,7 @@ impl Mult {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Ctx {
     Empty,
     Bind(SId, SType),
@@ -75,6 +75,16 @@ impl Ctx {
             Ctx::Join(c1, c2, _o) => {
                 c1.map_binds(f);
                 c2.map_binds(f);
+            }
+        }
+    }
+    pub fn map_binds_spanned(&self, f: &mut impl FnMut(&SId, &Type)) {
+        match self {
+            Ctx::Empty => (),
+            Ctx::Bind(x, t) => f(x, t),
+            Ctx::Join(c1, c2, _o) => {
+                c1.map_binds_spanned(f);
+                c2.map_binds_spanned(f);
             }
         }
     }
@@ -166,6 +176,13 @@ impl Ctx {
     pub fn binds(&self) -> HashMap<Id, Type> {
         let mut res = HashMap::new();
         self.map_binds(&mut |x, t| {
+            res.insert(x.clone(), t.clone());
+        });
+        res
+    }
+    pub fn binds_spanned(&self) -> HashMap<SId, Type> {
+        let mut res = HashMap::new();
+        self.map_binds_spanned(&mut |x, t| {
             res.insert(x.clone(), t.clone());
         });
         res

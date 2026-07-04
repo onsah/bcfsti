@@ -846,8 +846,9 @@ impl TypeChecker {
                     ));
                 };
 
+                let mut ctx_cs = Constraints::empty();
                 if mob.val == Mob::Mobile {
-                    assert_mob_ctx(e, ctx)?;
+                    assert_mob_ctx(e, ctx, &mut ctx_cs);
                 }
 
                 // For unrestricted lambdas: ensure that context is unrestricted.
@@ -876,7 +877,7 @@ impl TypeChecker {
                     ));
                 }
 
-                Ok((body_cs, Eff::No))
+                Ok((ctx_cs.join(body_cs), Eff::No))
             }
             Expr::Pair(first, second) => {
                 let first_ctx = ctx.restrict(&first.free_vars());
@@ -1140,13 +1141,19 @@ fn assert_unr_ctx(e: &SExpr, ctx: &Ctx) -> Result<(), TypeError> {
     }
 }
 
-fn assert_mob_ctx(e: &SExpr, ctx: &Ctx) -> Result<(), TypeError> {
-    match ctx.is_mobile() {
-        Ok(()) => Ok(()),
-        Err(var) => Err(TypeError::SessionTypeNotMobileInContext(
-            e.clone(),
-            ctx.clone(),
-            var,
-        )),
+fn assert_mob_ctx(expr: &SExpr, ctx: &Ctx, cs: &mut Constraints) {
+    // dbg!(ctx);
+    // If we can't ensure that the type is mobile
+    // we add a constraint that the type must be mobile
+    // to later check that the solution satisfies mobility requirements.
+    let non_mobile_ids = ctx
+        .binds_spanned()
+        .into_iter()
+        .filter(|(_id, ty)| !ty.is_mobile())
+        .map(|(id, _ty)| id.clone())
+        .collect::<HashSet<_>>();
+    dbg!(&non_mobile_ids);
+    if !non_mobile_ids.is_empty() {
+        cs.check_mobility(expr.clone(), non_mobile_ids, ctx.clone());
     }
 }

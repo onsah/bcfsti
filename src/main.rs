@@ -118,7 +118,7 @@ pub fn typecheck(src: &str, verbose: bool) -> Result<(SExpr, Type, Constraints, 
 }
 
 fn constraints_check(cs: Constraints, verbose: bool) -> Result<(), IErr> {
-    let cs = cs.solve();
+    let cs = cs.solve().map_err(IErr::Constraint)?;
 
     if verbose {
         println!("===== CONSTRAINTS CHECKING =====");
@@ -132,7 +132,7 @@ fn constraints_check(cs: Constraints, verbose: bool) -> Result<(), IErr> {
     for (ty1, ty2) in cs.iter() {
         match check_equivalence(&ty1.val, &ty2.val) {
             EquivalenceResult::Success => (),
-            EquivalenceResult::Error { reason } => Err(IErr::Constraint {
+            EquivalenceResult::Error { reason } => Err(IErr::Equivalence {
                 ty1: ty1.clone(),
                 ty2: ty2.clone(),
                 reason,

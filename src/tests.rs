@@ -24,7 +24,7 @@ mod typechecker_tests {
     use std::assert_matches;
 
     use crate::{
-        constraint::Constraints,
+        constraint::{ConstraintSolutionError, Constraints},
         error_reporting::IErr,
         session_type,
         syntax::{Eff, Expr, Mult, Session, Type},
@@ -673,14 +673,17 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
+        assert_matches!(res, Ok(_));
+        let (_, _, cs, _) = res.unwrap();
+        let cs_result = cs.solve();
         assert_matches!(
-            res,
-            Err(IErr::Typing(TypeError::SessionTypeNotMobileInContext(
-                _,
-                _,
-                _
-            )))
+            cs_result,
+            Err(ConstraintSolutionError::AssignmentNotMobile { .. })
         );
+        let Err(ConstraintSolutionError::AssignmentNotMobile { id, .. }) = cs_result else {
+            unreachable!()
+        };
+        assert_eq!(id, fake_span("c1".to_owned()))
     }
 }
 

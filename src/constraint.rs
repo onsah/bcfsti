@@ -1,43 +1,75 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    syntax::{SType, Session, Type, UVarId},
-    util::span::{Spanned, fake_span},
+    syntax::{SExpr, SId, SType, Session, Type, UVarId},
+    type_context::Ctx,
+    util::{
+        pretty::pretty_def,
+        span::{Spanned, fake_span},
+    },
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Constraints(HashSet<(SType, SType)>);
+pub struct Constraints {
+    equivalences: HashSet<(SType, SType)>,
+    mobilities: Vec<(SExpr, HashSet<SId>, Ctx)>,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+pub enum ConstraintSolutionError {
+    AssignmentNotMobile { expr: SExpr, id: SId, ctx: Ctx },
+}
 
 type Assignments = HashMap<UVarId, Session>;
 
 impl Constraints {
     pub fn empty() -> Constraints {
-        Constraints(HashSet::new())
+        Constraints {
+            equivalences: HashSet::new(),
+            mobilities: Vec::new(),
+        }
     }
 
-    pub fn join(self, other: Constraints) -> Constraints {
-        let mut constraints = self.0;
-        for constraint in other.0 {
-            constraints.insert(constraint);
+    pub fn from_equivalences(equivalences: HashSet<(SType, SType)>) -> Constraints {
+        Constraints {
+            equivalences,
+            mobilities: Vec::new(),
         }
-        Constraints(constraints)
+    }
+
+    pub fn join(self, mut other: Constraints) -> Constraints {
+        let mut equivalences = self.equivalences;
+        for constraint in other.equivalences {
+            equivalences.insert(constraint);
+        }
+        let mut mobilities = self.mobilities;
+        mobilities.append(&mut other.mobilities);
+        Constraints {
+            equivalences,
+            mobilities,
+        }
     }
 
     pub fn add(&mut self, ty1: SType, ty2: SType) {
-        self.0.insert((ty1, ty2));
+        self.equivalences.insert((ty1, ty2));
+    }
+
+    pub fn check_mobility(&mut self, expr: SExpr, ids: HashSet<SId>, ctx: Ctx) {
+        self.mobilities.push((expr, ids, ctx));
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &(SType, SType)> {
-        self.0.iter()
+        self.equivalences.iter()
     }
 
     pub fn into_iter(self) -> impl Iterator<Item = (SType, SType)> {
-        self.0.into_iter()
+        self.equivalences.into_iter()
     }
 
     /// Solve the constraints by propagating assignments to unification variables until a fixed point is reached.
     /// If there is still no solution for some unification variables, `Skip` is substituted instead.
-    pub fn solve(self) -> Constraints {
+    pub fn solve(mut self) -> Result<Constraints, ConstraintSolutionError> {
+        let mut mobilities = std::mem::take(&mut self.mobilities);
         let (assignments, remaining_constraints) = self.infer_assignments();
 
         let assignments = if assignments.is_empty() {
@@ -58,7 +90,21 @@ impl Constraints {
         }
 
         if result.is_closed() {
-            result
+            for (expr, ids, ctx) in mobilities.iter_mut() {
+                Constraints::subst_ctx(ctx, &assignments);
+
+                for id in ids.iter() {
+                    if !ctx.lookup_ord_pure(id).unwrap().1.val.is_mobile() {
+                        return Err(ConstraintSolutionError::AssignmentNotMobile {
+                            expr: expr.clone(),
+                            id: id.clone(),
+                            ctx: ctx.clone(),
+                        });
+                    }
+                }
+            }
+
+            Ok(result)
         } else {
             result.solve()
         }
@@ -302,6 +348,12 @@ impl Constraints {
         }
     }
 
+    fn subst_ctx(ctx: &mut Ctx, assignments: &Assignments) {
+        ctx.map_binds_mut(&mut |_, ty| {
+            *ty = Constraints::subst(fake_span(ty.clone()), assignments).val;
+        })
+    }
+
     fn is_closed(&self) -> bool {
         self.iter()
             .all(|(ty1, ty2)| ty1.val.is_closed() && ty2.val.is_closed())
@@ -345,11 +397,11 @@ mod tests {
 
         assert_eq!(
             solved,
-            Constraints(
+            Ok(Constraints::from_equivalences(
                 vec![(session1.clone(), session2.clone())]
                     .into_iter()
                     .collect()
-            )
+            ))
         );
     }
 
@@ -372,7 +424,9 @@ mod tests {
 
         assert_eq!(
             solved,
-            Constraints(vec![(session2, session1)].into_iter().collect())
+            Ok(Constraints::from_equivalences(
+                vec![(session2, session1)].into_iter().collect()
+            ))
         );
     }
 
@@ -391,10 +445,10 @@ mod tests {
 
         assert_eq!(
             solved,
-            Constraints(HashSet::from([(
+            Ok(Constraints::from_equivalences(HashSet::from([(
                 fake_span(Type::Chan(session_type! { Skip }.val)),
                 fake_span(Type::Chan(session_type! { Skip }.val))
-            )]))
+            )])))
         );
     }
 
@@ -423,7 +477,7 @@ mod tests {
         );
 
         let solved = constraints.solve();
-        assert_eq!(solved, Constraints(HashSet::new()));
+        assert_eq!(solved, Ok(Constraints::from_equivalences(HashSet::new())));
 
         let mut constraints = Constraints::empty();
         constraints.add(
@@ -460,7 +514,7 @@ mod tests {
         let solved = constraints.solve();
         assert_eq!(
             solved,
-            Constraints(HashSet::from([(
+            Ok(Constraints::from_equivalences(HashSet::from([(
                 fake_span(Type::Chan(
                     session_type! { !(Type::Prod {
                         mult: fake_span(Mult::Lin),
@@ -477,7 +531,7 @@ mod tests {
                     }) }
                     .val
                 )),
-            ),]))
+            ),])))
         );
     }
 
@@ -508,7 +562,7 @@ mod tests {
         );
 
         let solved = constraints.solve();
-        assert_eq!(solved, Constraints(HashSet::new()));
+        assert_eq!(solved, Ok(Constraints::from_equivalences(HashSet::new())));
 
         let mut constraints = Constraints::empty();
         constraints.add(
@@ -549,7 +603,7 @@ mod tests {
         let solved = constraints.solve();
         assert_eq!(
             solved,
-            Constraints(HashSet::from([(
+            Ok(Constraints::from_equivalences(HashSet::from([(
                 fake_span(Type::Chan(
                     session_type! { !(Type::Arr {
                         mob: fake_span(Mob::Mobile),
@@ -570,7 +624,7 @@ mod tests {
                     }) }
                     .val
                 )),
-            ),]))
+            ),])))
         );
     }
 
@@ -598,7 +652,7 @@ mod tests {
         );
 
         let solved = constraints.solve();
-        assert_eq!(solved, Constraints(HashSet::new()));
+        assert_eq!(solved, Ok(Constraints::from_equivalences(HashSet::new())));
 
         let mut constraints = Constraints::empty();
         constraints.add(
@@ -633,7 +687,7 @@ mod tests {
         let solved = constraints.solve();
         assert_eq!(
             solved,
-            Constraints(HashSet::from([(
+            Ok(Constraints::from_equivalences(HashSet::from([(
                 fake_span(Type::Chan(
                     session_type! { !(Type::Variant(vec![
                         (fake_span("Left".to_string()), fake_span(Type::Chan(session_type! { !Int }.val))),
@@ -648,7 +702,7 @@ mod tests {
                     ])) }
                     .val
                 )),
-            ),]))
+            ),])))
         );
     }
 
@@ -678,10 +732,10 @@ mod tests {
         let solved = constraints.solve();
         assert_eq!(
             solved,
-            Constraints(HashSet::from([(
+            Ok(Constraints::from_equivalences(HashSet::from([(
                 fake_span(Type::Chan(session_type! { ?String; !Int }.val)),
                 fake_span(Type::Chan(session_type! { ?String; !Int }.val)),
-            )]))
+            )])))
         );
     }
 
@@ -700,7 +754,7 @@ mod tests {
         );
 
         let solved = constraints.solve();
-        assert_eq!(solved, Constraints::empty());
+        assert_eq!(solved, Ok(Constraints::empty()));
     }
 
     #[test]
@@ -716,7 +770,7 @@ mod tests {
         );
 
         let solved = constraints.solve();
-        assert_eq!(solved, Constraints::empty());
+        assert_eq!(solved, Ok(Constraints::empty()));
     }
 
     #[test]
@@ -747,14 +801,14 @@ mod tests {
         let solved = constraints.solve();
         assert_eq!(
             solved,
-            Constraints(HashSet::from([(
+            Ok(Constraints::from_equivalences(HashSet::from([(
                 fake_span(Type::Chan(
                     session_type! { mu X. +{ a: !Int; X, b: !Bool; ?String; Wait } }.val
                 )),
                 fake_span(Type::Chan(
                     session_type! { mu X. +{ a: !Int; X, b: !Bool; ?String; Wait } }.val
                 )),
-            )]))
+            )])))
         );
     }
 
@@ -786,10 +840,10 @@ mod tests {
         let solved = constraints.solve();
         assert_eq!(
             solved,
-            Constraints(HashSet::from([(
+            Ok(Constraints::from_equivalences(HashSet::from([(
                 fake_span(Type::Chan(session_type! { !Int; ?String }.val,)),
                 fake_span(Type::Chan(session_type! { !Int; ?String }.val,)),
-            )]))
+            )])))
         );
     }
 }
