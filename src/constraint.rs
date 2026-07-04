@@ -3,10 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     syntax::{SExpr, SId, SType, Session, Type, UVarId},
     type_context::Ctx,
-    util::{
-        pretty::pretty_def,
-        span::{Spanned, fake_span},
-    },
+    util::span::{Spanned, fake_span},
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
