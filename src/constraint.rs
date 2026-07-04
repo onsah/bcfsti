@@ -10,11 +10,6 @@ pub struct Constraints(HashSet<(SType, SType)>);
 
 type Assignments = HashMap<UVarId, Session>;
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum ConstraintSolutionError {
-    MissingAssignments(HashSet<UVarId>),
-}
-
 impl Constraints {
     pub fn empty() -> Constraints {
         Constraints(HashSet::new())
