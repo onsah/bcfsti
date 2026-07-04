@@ -405,8 +405,11 @@ mod tests {
         })]
         #[test]
         fn freest_session_type_display(
-            ty in (prop::collection::vec(ty_label(), 0..3), prop::collection::vec(ty_label(), 0..3))
-                .prop_flat_map(|(type_vars, sess_vars)| freest_session_type(type_vars, sess_vars))
+            ty in (prop::collection::vec(ty_label(), 0..6))
+                .prop_flat_map(|vars| {
+                    let (ty_vars, sess_vars) = vars.split_at(vars.len() / 2);
+                    freest_session_type(Vec::from(ty_vars), Vec::from(sess_vars))
+                })
         ) {
             assert!(freest_available(), "'freest' executable not found on PATH");
 
