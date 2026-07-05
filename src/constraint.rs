@@ -8,9 +8,15 @@ use crate::{
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Constraints {
-    equivalences: HashSet<(SType, SType)>,
-    mobilities: Vec<(SExpr, HashSet<SId>, Ctx)>,
+    equivalences: Equivalences,
+    mobilities: Mobilities,
 }
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+struct Equivalences(HashSet<(SType, SType)>);
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+struct Mobilities(Vec<(SExpr, HashSet<SId>, Ctx)>);
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ConstraintSolutionError {
@@ -22,37 +28,31 @@ type Assignments = HashMap<UVarId, Session>;
 impl Constraints {
     pub fn empty() -> Constraints {
         Constraints {
-            equivalences: HashSet::new(),
-            mobilities: Vec::new(),
+            equivalences: Equivalences::new(),
+            mobilities: Mobilities::new(),
         }
     }
 
     pub fn from_equivalences(equivalences: HashSet<(SType, SType)>) -> Constraints {
         Constraints {
-            equivalences,
-            mobilities: Vec::new(),
+            equivalences: Equivalences::from(equivalences),
+            mobilities: Mobilities::new(),
         }
     }
 
-    pub fn join(self, mut other: Constraints) -> Constraints {
-        let mut equivalences = self.equivalences;
-        for constraint in other.equivalences {
-            equivalences.insert(constraint);
-        }
-        let mut mobilities = self.mobilities;
-        mobilities.append(&mut other.mobilities);
+    pub fn join(self, other: Constraints) -> Constraints {
         Constraints {
-            equivalences,
-            mobilities,
+            equivalences: self.equivalences.join(other.equivalences),
+            mobilities: self.mobilities.join(other.mobilities),
         }
     }
 
     pub fn add(&mut self, ty1: SType, ty2: SType) {
-        self.equivalences.insert((ty1, ty2));
+        self.equivalences.add((ty1, ty2));
     }
 
     pub fn check_mobility(&mut self, expr: SExpr, ids: HashSet<SId>, ctx: Ctx) {
-        self.mobilities.push((expr, ids, ctx));
+        self.mobilities.add(expr, ids, ctx);
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &(SType, SType)> {
@@ -65,52 +65,134 @@ impl Constraints {
 
     /// Solve the constraints by propagating assignments to unification variables until a fixed point is reached.
     /// If there is still no solution for some unification variables, `Skip` is substituted instead.
-    pub fn solve(mut self) -> Result<Constraints, ConstraintSolutionError> {
-        let mut mobilities = std::mem::take(&mut self.mobilities);
-        let (assignments, remaining_constraints) = self.infer_assignments();
+    pub fn solve(self) -> Result<Constraints, ConstraintSolutionError> {
+        let (assignments, remaining_equivalences) = self.equivalences.infer_assignments();
+        let equivalences = remaining_equivalences.subst(&assignments);
 
-        let assignments = if assignments.is_empty() {
-            remaining_constraints
-                .unsolved_variables()
-                .into_iter()
-                .map(|var| (var, Session::Skip))
-                .collect()
-        } else {
-            assignments
-        };
-
-        let mut result = Constraints::empty();
-        for (ty1, ty2) in remaining_constraints.into_iter() {
-            let ty1 = Constraints::subst(ty1.clone(), &assignments);
-            let ty2 = Constraints::subst(ty2.clone(), &assignments);
-            result.add(ty1, ty2);
+        if !equivalences.is_closed() {
+            return Constraints {
+                equivalences,
+                mobilities: self.mobilities,
+            }
+            .solve();
         }
 
-        if result.is_closed() {
-            for (expr, ids, ctx) in mobilities.iter_mut() {
-                Constraints::subst_ctx(ctx, &assignments);
-                let binds = ctx.binds();
-                for id in ids.iter() {
-                    if !binds.get(&id.val).unwrap().is_mobile() {
-                        return Err(ConstraintSolutionError::AssignmentNotMobile {
-                            expr: expr.clone(),
-                            id: id.clone(),
-                            ctx: ctx.clone(),
-                        });
-                    }
+        self.mobilities.check(&assignments)?;
+        Ok(Constraints {
+            equivalences,
+            mobilities: Mobilities::new(),
+        })
+    }
+
+    fn subst(ty: SType, assignments: &Assignments) -> SType {
+        let span = ty.span.clone();
+        let val = match ty.val {
+            Type::Chan(session) => Type::Chan(Self::subst_session(session, assignments)),
+            Type::Bool | Type::Int | Type::String => ty.val,
+            Type::Prod {
+                mult,
+                first,
+                second,
+            } => Type::Prod {
+                mult,
+                first: Box::new(Self::subst(*first, assignments)),
+                second: Box::new(Self::subst(*second, assignments)),
+            },
+            Type::Arr {
+                mob,
+                mult,
+                eff,
+                param,
+                ret,
+            } => Type::Arr {
+                mob,
+                mult,
+                eff,
+                param: Box::new(Self::subst(*param, assignments)),
+                ret: Box::new(Self::subst(*ret, assignments)),
+            },
+            Type::Variant(items) => Type::Variant(
+                items
+                    .into_iter()
+                    .map(|(label, ty)| (label, Self::subst(ty, assignments)))
+                    .collect(),
+            ),
+            Type::Unit => Type::Unit,
+        };
+        Spanned::new(val, span)
+    }
+
+    fn subst_session(ty: Session, assignments: &Assignments) -> Session {
+        match ty {
+            Session::UVar(var) => {
+                if let Some(ty) = assignments.get(&var) {
+                    ty.clone()
+                } else {
+                    Session::UVar(var)
                 }
             }
-
-            Ok(result)
-        } else {
-            result.mobilities = mobilities;
-            result.solve()
+            Session::Skip => Session::Skip,
+            Session::Semi { first, second } => Session::Semi {
+                first: Box::new(fake_span(Self::subst_session(first.val, assignments))),
+                second: Box::new(fake_span(Self::subst_session(second.val, assignments))),
+            },
+            Session::End(session_op) => Session::End(session_op),
+            Session::BorrowEnd(session_op) => Session::BorrowEnd(session_op),
+            Session::Op(session_op, ty) => {
+                Session::Op(session_op, Box::new(Self::subst(*ty, assignments)))
+            }
+            Session::Choice(session_op, items) => Session::Choice(
+                session_op,
+                items
+                    .into_iter()
+                    .map(|(label, s)| (label, fake_span(Self::subst_session(s.val, assignments))))
+                    .collect(),
+            ),
+            Session::Mu(id, body) => Session::Mu(
+                id,
+                Box::new(fake_span(Self::subst_session(body.val, assignments))),
+            ),
+            Session::Var(id) => Session::Var(id),
         }
     }
 
-    fn infer_assignments(self) -> (Assignments, Constraints) {
+    fn subst_ctx(ctx: &mut Ctx, assignments: &Assignments) {
+        ctx.map_binds_mut(&mut |_, ty| {
+            *ty = Constraints::subst(fake_span(ty.clone()), assignments).val;
+        })
+    }
+}
+
+impl Equivalences {
+    pub fn new() -> Equivalences {
+        Equivalences(HashSet::new())
+    }
+
+    fn join(self, other: Equivalences) -> Equivalences {
+        let mut equivalences = self.0;
+        for constraint in other.0 {
+            equivalences.insert(constraint);
+        }
+        Equivalences(equivalences)
+    }
+
+    fn add(&mut self, constraint: (SType, SType)) {
+        self.0.insert(constraint);
+    }
+
+    fn iter(&self) -> impl Iterator<Item = &(SType, SType)> {
+        self.0.iter()
+    }
+
+    fn into_iter(self) -> impl Iterator<Item = (SType, SType)> {
+        self.0.into_iter()
+    }
+
+    /// Infer assignments for unification variables from the equivalences.
+    /// Returns a tuple of the assignments and the remaining equivalences that didn't yield an assignment.
+    fn infer_assignments(self) -> (Assignments, Self) {
         let mut assignments: Assignments = HashMap::new();
-        let mut other_cs = Constraints::empty();
+        let mut other = Self::new();
         for (ty1, ty2) in self.into_iter() {
             match Self::extract_bare_assignment(&ty1.val, &ty2.val)
                 .or(Self::extract_bare_assignment(&ty2.val, &ty1.val))
@@ -119,7 +201,7 @@ impl Constraints {
                     if !assignments.contains_key(&uvar_id) {
                         assignments.insert(uvar_id, session);
                     } else {
-                        other_cs.add(ty1, ty2);
+                        other.add((ty1, ty2));
                     }
                 }
                 None => {
@@ -132,14 +214,26 @@ impl Constraints {
                             }
                         }
                         None => {
-                            other_cs.add(ty1, ty2);
+                            other.add((ty1, ty2));
                         }
                     }
                 }
             }
         }
 
-        (assignments, other_cs)
+        // If there are still unsolved variables with no more assignments,
+        // substitute Skip for them
+        let assignments = if assignments.is_empty() {
+            other
+                .unsolved_variables()
+                .into_iter()
+                .map(|var| (var, Session::Skip))
+                .collect()
+        } else {
+            assignments
+        };
+
+        (assignments, other)
     }
 
     /// If `lhs` is a channel carrying a bare unification variable and `rhs` is a channel
@@ -274,84 +368,6 @@ impl Constraints {
         }
     }
 
-    fn subst(ty: SType, assignments: &Assignments) -> SType {
-        let span = ty.span.clone();
-        let val = match ty.val {
-            Type::Chan(session) => Type::Chan(Self::subst_session(session, assignments)),
-            Type::Bool | Type::Int | Type::String => ty.val,
-            Type::Prod {
-                mult,
-                first,
-                second,
-            } => Type::Prod {
-                mult,
-                first: Box::new(Self::subst(*first, assignments)),
-                second: Box::new(Self::subst(*second, assignments)),
-            },
-            Type::Arr {
-                mob,
-                mult,
-                eff,
-                param,
-                ret,
-            } => Type::Arr {
-                mob,
-                mult,
-                eff,
-                param: Box::new(Self::subst(*param, assignments)),
-                ret: Box::new(Self::subst(*ret, assignments)),
-            },
-            Type::Variant(items) => Type::Variant(
-                items
-                    .into_iter()
-                    .map(|(label, ty)| (label, Self::subst(ty, assignments)))
-                    .collect(),
-            ),
-            Type::Unit => Type::Unit,
-        };
-        Spanned::new(val, span)
-    }
-
-    fn subst_session(ty: Session, assignments: &Assignments) -> Session {
-        match ty {
-            Session::UVar(var) => {
-                if let Some(ty) = assignments.get(&var) {
-                    ty.clone()
-                } else {
-                    Session::UVar(var)
-                }
-            }
-            Session::Skip => Session::Skip,
-            Session::Semi { first, second } => Session::Semi {
-                first: Box::new(fake_span(Self::subst_session(first.val, assignments))),
-                second: Box::new(fake_span(Self::subst_session(second.val, assignments))),
-            },
-            Session::End(session_op) => Session::End(session_op),
-            Session::BorrowEnd(session_op) => Session::BorrowEnd(session_op),
-            Session::Op(session_op, ty) => {
-                Session::Op(session_op, Box::new(Self::subst(*ty, assignments)))
-            }
-            Session::Choice(session_op, items) => Session::Choice(
-                session_op,
-                items
-                    .into_iter()
-                    .map(|(label, s)| (label, fake_span(Self::subst_session(s.val, assignments))))
-                    .collect(),
-            ),
-            Session::Mu(id, body) => Session::Mu(
-                id,
-                Box::new(fake_span(Self::subst_session(body.val, assignments))),
-            ),
-            Session::Var(id) => Session::Var(id),
-        }
-    }
-
-    fn subst_ctx(ctx: &mut Ctx, assignments: &Assignments) {
-        ctx.map_binds_mut(&mut |_, ty| {
-            *ty = Constraints::subst(fake_span(ty.clone()), assignments).val;
-        })
-    }
-
     fn is_closed(&self) -> bool {
         self.iter()
             .all(|(ty1, ty2)| ty1.val.is_closed() && ty2.val.is_closed())
@@ -364,6 +380,55 @@ impl Constraints {
             result.extend(ty2.val.unification_variables());
         }
         result
+    }
+
+    /// Substitute the assignments into the equivalences, and return new ones
+    fn subst(&self, assignments: &Assignments) -> Self {
+        let mut new_equivalences = HashSet::new();
+        for (ty1, ty2) in self.0.iter() {
+            let ty1 = Constraints::subst(ty1.clone(), assignments);
+            let ty2 = Constraints::subst(ty2.clone(), assignments);
+            new_equivalences.insert((ty1, ty2));
+        }
+        Equivalences(new_equivalences)
+    }
+}
+
+impl From<HashSet<(SType, SType)>> for Equivalences {
+    fn from(equivalences: HashSet<(SType, SType)>) -> Self {
+        Equivalences(equivalences)
+    }
+}
+
+impl Mobilities {
+    fn new() -> Mobilities {
+        Mobilities(Vec::new())
+    }
+
+    fn join(mut self, mut other: Mobilities) -> Mobilities {
+        self.0.append(&mut other.0);
+        self
+    }
+
+    fn add(&mut self, expr: SExpr, ids: HashSet<SId>, ctx: Ctx) {
+        self.0.push((expr, ids, ctx));
+    }
+
+    fn check(mut self, assignments: &Assignments) -> Result<(), ConstraintSolutionError> {
+        for (expr, ids, ctx) in self.0.iter_mut() {
+            Constraints::subst_ctx(ctx, &assignments);
+            let binds = ctx.binds();
+            for id in ids.iter() {
+                if !binds.get(&id.val).unwrap().is_mobile() {
+                    return Err(ConstraintSolutionError::AssignmentNotMobile {
+                        expr: expr.clone(),
+                        id: id.clone(),
+                        ctx: ctx.clone(),
+                    });
+                }
+            }
+        }
+        Ok(())
     }
 }
 
