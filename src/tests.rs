@@ -673,14 +673,15 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok(_));
-        let (_, _, cs, _) = res.unwrap();
-        let cs_result = cs.solve();
         assert_matches!(
-            cs_result,
-            Err(ConstraintSolutionError::AssignmentNotMobile { .. })
+            res,
+            Err(IErr::Typing(TypeError::SessionTypeNotMobileInContext(
+                _,
+                _,
+                _
+            )))
         );
-        let Err(ConstraintSolutionError::AssignmentNotMobile { id, .. }) = cs_result else {
+        let Err(IErr::Typing(TypeError::SessionTypeNotMobileInContext(_, _, id))) = res else {
             unreachable!()
         };
         assert_eq!(id, fake_span("c1".to_owned()))
