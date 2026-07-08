@@ -28,7 +28,11 @@ fn expand_expr(e: &SExpr, env: &AliasEnv, visiting: &HashSet<Id>) -> Result<SExp
                 env.clone()
             };
             let t_expanded = expand_type(t, &env_def, visiting)?;
-            let t_final = if *is_rec { wrap_mu(name, t_expanded) } else { t_expanded };
+            let t_final = if *is_rec {
+                wrap_mu(name, t_expanded)
+            } else {
+                t_expanded
+            };
             let mut env2 = env.clone();
             env2.insert(name.val.clone(), t_final);
             return expand_expr(body, &env2, visiting);
@@ -113,6 +117,7 @@ fn expand_expr(e: &SExpr, env: &AliasEnv, visiting: &HashSet<Id>) -> Result<SExp
         Expr::Fork(e) => Expr::Fork(Box::new(expand_expr(e, env, visiting)?)),
         Expr::End(op, e) => Expr::End(*op, Box::new(expand_expr(e, env, visiting)?)),
         Expr::BorrowEnd(op, e) => Expr::BorrowEnd(*op, Box::new(expand_expr(e, env, visiting)?)),
+        Expr::Discard(e) => Expr::Discard(Box::new(expand_expr(e, env, visiting)?)),
     };
     Ok(Spanned::new(e2, span))
 }
@@ -251,7 +256,10 @@ fn expand_session(
 fn wrap_mu(name: &SId, t: SType) -> SType {
     let span = t.span.clone();
     let t2 = match t.val {
-        Type::Chan(s) => Type::Chan(Session::Mu(name.clone(), Box::new(Spanned::new(s, t.span.clone())))),
+        Type::Chan(s) => Type::Chan(Session::Mu(
+            name.clone(),
+            Box::new(Spanned::new(s, t.span.clone())),
+        )),
         other => other,
     };
     Spanned::new(t2, span)

@@ -228,6 +228,7 @@ peg::parser! {
             = tok(New) s:ssession() { Expr::New(s) }
             / tok(Send) tok(At) ty:stype() e1:sexpr_atom() e2:sexpr_atom() { Expr::Send(ty, Box::new(e1), Box::new(e2)) }
             / tok(Recv) tok(At) ty:stype() e:sexpr_atom() { Expr::Recv(ty, Box::new(e)) }
+            / tok(Discard) e:sexpr_atom() { Expr::Discard(Box::new(e)) }
             / tok(Drop) e:sexpr_atom() { Expr::BorrowEnd(SessionOp::Send, Box::new(e)) }
             / tok(Acquire) e:sexpr_atom() { Expr::BorrowEnd(SessionOp::Recv, Box::new(e)) }
             / tok(Close) e:sexpr_atom() { Expr::End(SessionOp::Send, Box::new(e)) }

@@ -3,8 +3,7 @@ let
     sendTree : TreeChannel -[m u 1]-> Unit
     sendTree c =
         if true then
-            let x = select leaf c in
-            unit
+            discard (select leaf c)
         else
             let c1 = select node c in
             let c2, c3 = lsplit !Int c1 in

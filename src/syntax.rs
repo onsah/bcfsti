@@ -296,6 +296,7 @@ pub enum Expr {
     LSplit(SSession, Box<SExpr>),
     RSplit(SSession, Box<SExpr>),
     BorrowEnd(SessionOp, Box<SExpr>),
+    Discard(Box<SExpr>),
 
     Var(SId),
     Abs(SId, Box<SExpr>),
@@ -573,6 +574,7 @@ impl Expr {
                 union(clause.body.free_vars(), without(body.free_vars(), &id.val))
             }
             Expr::TypeDef(_, _, body, _) => body.free_vars(),
+            Expr::Discard(e) => e.free_vars(),
         }
     }
 }
@@ -653,7 +655,7 @@ impl Type {
     }
     pub fn is_unr(&self) -> bool {
         match self {
-            Type::Chan(s) => s.is_only_skips(),
+            Type::Chan(_) => false,
             Type::Arr { mult: m, .. } => m.val == Mult::Unr,
             Type::Prod {
                 first: t1,

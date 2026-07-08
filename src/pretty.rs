@@ -392,6 +392,10 @@ impl Pretty<UserState> for Expr {
                 p.pp(" in\n");
                 p.pp(e)
             }
+            Expr::Discard(e) => p.infix(10, L, |p| {
+                p.pp("discard ");
+                p.pp_arg(R, e);
+            }),
         }
     }
 }

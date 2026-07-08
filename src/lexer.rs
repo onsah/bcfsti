@@ -75,6 +75,8 @@ pub enum Token<'a> {
     StringT,
     #[token("drop")]
     Drop,
+    #[token("discard")]
+    Discard,
     #[token("acquire")]
     Acquire,
     #[token("Acq")]
@@ -325,6 +327,7 @@ impl<'a> Token<'a> {
             Token::Acquire => "acquire",
             Token::AcqT => "Acq",
             Token::Skip => "Skip",
+            Token::Discard => "discard",
         }
     }
 }

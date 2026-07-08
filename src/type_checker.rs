@@ -278,6 +278,21 @@ impl TypeChecker {
 
                 Ok((fake_span(Type::Unit), body_cs, body_eff))
             }
+            Expr::Discard(chan) => {
+                let chan_ctx = ctx.restrict(&chan.free_vars());
+                if !ctx.is_subctx_of(&chan_ctx) {
+                    return Err(TypeError::CtxSplitFailed(
+                        e.clone(),
+                        ctx.clone(),
+                        chan_ctx.clone(),
+                    ));
+                }
+
+                let (chan_cs, chan_eff) =
+                    self.check(&chan_ctx, chan, &fake_span(Type::Chan(Session::Skip)))?;
+
+                Ok((fake_span(Type::Unit), chan_cs, chan_eff))
+            }
             Expr::BorrowEnd(op, chan) => {
                 let chan_ctx = ctx.restrict(&chan.free_vars());
                 if !ctx.is_subctx_of(&chan_ctx) {
