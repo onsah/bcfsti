@@ -103,11 +103,13 @@ impl TypeChecker {
                     let typ = fake_span(Type::Prod {
                         mult: fake_span(Mult::Lin),
                         first: Box::new(Spanned::new(
-                            Type::Chan(session_type! { Acq; (sess_type.clone(); Wait) }.val),
+                            Type::Chan(session_type! { Acq; (sess_type.clone(); Close) }.val),
                             sess_type.span.clone(),
                         )),
                         second: Box::new(Spanned::new(
-                            Type::Chan(session_type! { Acq; (sess_type.clone(); Close) }.val),
+                            Type::Chan(
+                                session_type! { Acq; (fake_span(sess_type.dual()); Wait) }.val,
+                            ),
                             sess_type.span.clone(),
                         )),
                     });
