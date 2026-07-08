@@ -119,11 +119,8 @@ impl Session {
     }
 
     fn is_mobile(&self) -> bool {
-        self.is_only_skips() || self.starts_with_acq_and_bounded()
-    }
-
-    fn starts_with_acq_and_bounded(&self) -> bool {
-        if let Session::Semi { first, second } = self.normalise() {
+        let this = &self;
+        if let Session::Semi { first, second } = this.normalise() {
             matches!(first.val, Session::ACQ) && second.is_bounded()
         } else {
             false
