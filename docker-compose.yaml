@@ -1,6 +1,6 @@
 services:
-  bsti:
+  cstb:
     build: .
 
     volumes:
-      - .:/bsti
+      - .:/cstb

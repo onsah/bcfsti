@@ -24,11 +24,11 @@ The implementation supports all features for CSTB mentioned in the paper and add
 2.  Run the image via
 
     ```bash
-    docker-compose run bsti
+    docker-compose run cstb
     ```
 
     This drops you into an interactive bash shell, where the compiled
-    interpreter `bsti` is already on the `PATH`.
+    interpreter `cstb` is already on the `PATH`.
 
 3.  Typecheck and interpret a program via e.g.
 

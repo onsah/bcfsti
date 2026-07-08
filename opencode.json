@@ -3,6 +3,7 @@
   "permission": {
     "bash": {
       "*": "ask",
+      "git show *": "allow",
       "git *": "deny",
       "npm *": "allow",
       "rm *": "deny",
@@ -16,7 +17,10 @@
       "sbt *": "allow",
       "sed *": "allow",
       "sort *": "allow",
-      "cargo *": "allow"
+      "cargo *": "allow",
+      "tail *": "allow",
+      "echo *": "allow",
+      "wc *": "allow"
     },
     "read": "allow",
     "edit": {
@@ -27,5 +31,13 @@
       "*": "allow"
     },
     "grep": "allow"
+  },
+  "lsp": {
+    "rust": {
+      "command": ["rust-analyzer"],
+      "env": {
+        "RUST_LOG": "debug"
+      }
+    }
   }
 }

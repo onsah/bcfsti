@@ -1,6 +1,6 @@
-FROM rust:1.87
+FROM docker.io/rust:1.96
 
-WORKDIR /bsti
+WORKDIR /cstb
 COPY . .
 
 RUN cargo install --path .
