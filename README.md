@@ -1,4 +1,4 @@
-# Borrowing from Session Types
+# Context-Free Session Types with Borrowing
 
 This repository contains an implementation of a typechecker
 for the language from the paper *Context-Free Session Types with Borrowing*.
@@ -7,13 +7,13 @@ The implementation supports all features for CSTB mentioned in the paper and add
 
 - unrestricted base types `String`, `Int`, and `Bool` with the usual operations
 - a function that prints to stdout.
-- `new S` differs from the paper that it's not a function but it's as if already applied to `Unit`. 
+- `new S` differs from the paper that it's not a function but it's as if already applied to `Unit`
+- let binding with explicit type annotation
+- type aliasing to better showcase the examples from the appaer
 
 ## Installation
 
 ### Docker
-
-TODO: Update
 
 1.  Build the image via
 
@@ -59,8 +59,12 @@ The following grammar describes the complete, concrete syntax supported by the i
 For readability, operator precedence, associativity and whitespace are omitted.
 
 ```
+Mobilities
+m ::= 'm'                           (mobile)
+    | 's'                           (static)
+
 Multiplicities
-m ::= 'u' | 'unr'                   (unrestricted)
+d ::= 'u' | 'unr'                   (unrestricted)
     | 'p' | 'lin'                   (linear/"parallel")
     | 'l' | 'left'                  (left ordered)
     | 'r' | 'right'                 (right ordered)
@@ -70,8 +74,8 @@ E ::= '0'                           (pure)
     | '1'                           (impure)
 
 Types
-t ::= t '-[' m ';'? E ']->' t       (function type)
-    | t '*[' m ']' t                (product type)
+t ::= t '-[' m ';'? d ';'? E ']->' t(function type)
+    | t '*[' d ']' t                (product type)
     | '<' (l ':' t ',')* '>'        (variant type)
     | 'Chan'? s                     (session type)
     | 'Unit'                        (unit type)
@@ -80,21 +84,24 @@ t ::= t '-[' m ';'? E ']->' t       (function type)
     | 'String'                      (unicode string type)
 
 Session Types
-s ::=  '!' t '.' so                 (sending session type)
-     | '?' t '.' so                 (receiving session type)
-     | '+{' (l ':' s ',')* '}'      (internal choice type)
-     | '&{' (l ':' s ',')* '}'      (external choice type)
-     | 'Close'                      (sending end of protocol of owned session)
+s ::=  s ';' s                      (sequential composition)
+     | 'Return'                     (sending end of protocol of borrowed session)
+     | 'Acq'                        (receiving end of protocol of borrowed session)
      | 'Wait'                       (receiving end of protocol of owned session)
-     | 'Return'                     (end of protocol of borrowed session)
+     | 'Close'                      (sending end of protocol of owned session)
+     | 'Skip'                       (empty session type)
+     | '!' t                        (sending session type)
+     | '?' t                        (receiving session type)
+     | '&{' (l ':' s ',')* '}'      (external choice type)
+     | '+{' (l ':' s ',')* '}'      (internal choice type)
      | 'mu' x '.' s                 (recursive session type)
      | x                            (session variable)
+     | '(' s ')'                    (parenthesized session type)
 
 Expressions
 e ::= x                             (variable)
     | '\' x '.' e                   (lambda abstraction)
     | e e                           (unr/lin/right function application)
-    | e '|>' e                      (left function application with flipped arguments)
 
     | 'let' x '=' e 'in' e          (let expression)
     | e ';' e                       (sequencing)
@@ -108,19 +115,21 @@ e ::= x                             (variable)
       '}'
 
     | 'let' x ':' t '\n'
-            x p+ '=' e 'in' e       (let expression for recursive function
-                                     with irrefutable pattern matching clauses)
+            x x '=' e 'in' e        (let expression for recursive functions)
 
     | 'fork' e                      (thread spawning)
     | 'new' s                       (channel allocation)
-    | 'send' e1 e2                  (channel send operation)
-    | 'recv' e                      (channel receive operation)
+    | 'send' @t e1 e2               (channel send operation)
+    | 'recv' @t e                   (channel receive operation)
     | 'branch' e                    (external choice operation)
     | 'select' l e                  (internal choice operation)
     | 'drop' e                      (elimination of borrowed channels)
+    | 'acquire' e                   (elimination of borrowed channels)
     | 'close' e                     (elimination of owned channels)
     | 'wait' e                      (elimination of owned channels)
-    | '&' x                         (borrow)
+    | 'lsplit' e                    (local channel split)
+    | 'rsplit' e                    (remove channel split)
+    
 
     | 'true' | 'false'              (boolean introduction)
     | 'if' e 'then' e 'else' e      (boolean elimination)
@@ -177,7 +186,7 @@ We also provide unicode alternatives for certain tokens:
 
 - A lambda `\x. e` can also be written as `λx. e`
 
-- A function type `t1 -[ m E ]-> t2` can also be written as `t1 –[ m E ]→ t2`
+- A function type `t1 -[ d E ]-> t2` can also be written as `t1 –[ d E ]→ t2`
 
 - An unordered product type `t1 *[ p ] t2` can also be written as `t1 ⊗ t2`
 
