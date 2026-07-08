@@ -1,0 +1,25 @@
+let
+  server : Acq;?Int;!Int;Wait -[m u 1]→ Unit
+  server c =
+    let cAcq, c1 = lsplit Acq c in
+    acquire cAcq;
+    let cRecv, c2 = lsplit ?Int c1 in
+    let x = recv @Int cRecv in
+    let cSend, cWait = lsplit !Int c2 in
+    send @Int (0 - x) cSend;
+    wait cWait
+in
+let
+  client : Acq;!Int;?Int;Close -[m u 1]→ Unit
+  client c =
+    let cAcq, c1 = lsplit Acq c in
+    acquire cAcq;
+    let cSend, c2 = lsplit !Int c1 in
+    send @Int 42 cSend;
+    let cRecv, cClose = lsplit ?Int c2 in
+    print (recv @Int cRecv);
+    close cClose
+in
+let c1, c2 = new !Int;?Int in
+fork (\x. server c2);
+client c1
