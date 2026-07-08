@@ -7,8 +7,6 @@ pub mod fresh_var;
 pub mod lexer;
 pub mod parser;
 pub mod pretty;
-pub mod ren;
-pub mod semantics;
 pub mod syntax;
 pub mod type_alias;
 pub mod type_checker;

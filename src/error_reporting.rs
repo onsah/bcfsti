@@ -3,7 +3,6 @@ use std::{collections::HashSet, ops::Range};
 use crate::{
     constraint::ConstraintSolutionError,
     lexer::LexerError,
-    semantics::EvalError,
     syntax::SType,
     type_alias::AliasError,
     type_checker::TypeError,
@@ -18,7 +17,6 @@ pub enum IErr {
     Parser(ParseError<usize>),
     Alias(AliasError),
     Typing(TypeError),
-    Eval(EvalError),
     Constraint(ConstraintSolutionError),
     Equivalence {
         ty1: SType,
@@ -719,31 +717,6 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                             pretty_def(&ctx.simplify())
                         ),
                     )],
-                );
-            }
-        },
-        IErr::Eval(e) => match e {
-            EvalError::ValMismatch(e, v_expected, v_actual) => {
-                report(
-                    &src,
-                    e.span.clone(),
-                    "Evaluation Error",
-                    [label(
-                        e.span,
-                        format!(
-                            "This expression evaluates to {} but should be {}.",
-                            pretty_def(&v_actual),
-                            v_expected,
-                        ),
-                    )],
-                );
-            }
-            EvalError::UndefinedVar(x) => {
-                report(
-                    &src,
-                    x.span.clone(),
-                    "Evaluation Error",
-                    [label(x.span, format!("This variable is undefined",))],
                 );
             }
         },

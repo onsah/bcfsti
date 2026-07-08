@@ -1,12 +1,10 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
-use crate::ren::Ren;
 use crate::syntax::{Id, Mult, SId, SType, Type, TypeSemEq};
 use crate::util::boxed::Boxed;
 use crate::util::graph::Graph;
 use crate::util::pretty::{Pretty, PrettyEnv};
-use crate::util::span::fake_span;
 
 use CtxCtxS::*;
 use CtxS::*;
@@ -322,17 +320,6 @@ impl Ctx {
         self.to_sem().is_subctx_of(&other.to_sem())
     }
 
-    // ⋯ᵘ operator from Agda
-    pub fn rename(&self, r: &Ren) -> Ctx {
-        let mut ctx = self.clone();
-        ctx.map_binds_mut(&mut |x: &mut Id, _: &mut Type| {
-            if let Some(y) = r.map.get(x) {
-                *x = y.clone();
-            }
-        });
-        ctx
-    }
-
     /// Returns Ok(()) if the context is mobile, otherwise returns Err(x) where x is a variable that is not mobile.
     pub fn is_mobile(&self) -> Result<(), SId> {
         match self {
@@ -511,15 +498,6 @@ impl CtxCtx {
                 (c1, c2) => CtxCtxS::JoinR(c1, c2, *o),
             },
         }
-    }
-    // ⋯ᵘᶜ operator from Agda
-    pub fn rename(&self, r: &Ren) -> Self {
-        let mut ctx = self.clone();
-        ctx.flatmap_binds_mut(&mut |x: Id, t: Type| {
-            let y = r.map.get(&x).cloned().unwrap_or(x);
-            Ctx::Bind(fake_span(y), fake_span(t))
-        });
-        ctx
     }
 
     pub fn vars(&self) -> HashSet<Id> {
