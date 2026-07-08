@@ -24,7 +24,7 @@ mod typechecker_tests {
     use std::assert_matches;
 
     use crate::{
-        constraint::{ConstraintSolutionError, Constraints},
+        constraint::Constraints,
         error_reporting::IErr,
         session_type,
         syntax::{Eff, Expr, Mult, Session, Type},

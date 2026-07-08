@@ -305,7 +305,6 @@ impl TypeChecker {
                 let expected_ty = fake_span(Type::Chan(Session::End(*op)));
                 let (chan_cs, chan_eff) = self.check(&chan_ctx, chan, &expected_ty)?;
 
-                // TODO: double check whether acquire constant is pure
                 Ok((fake_span(Type::Unit), chan_cs, chan_eff))
             }
             Expr::LSplit(prefix_session, chan) => {
@@ -851,7 +850,6 @@ impl TypeChecker {
                     check_mobility(e, ctx, &mut ctx_cs)?;
                 }
 
-                // For unrestricted lambdas: ensure that context is unrestricted.
                 if mult.val == Mult::Unr {
                     if !ctx.is_unr() {
                         return Err(TypeError::CtxNotUnr(e.clone(), ctx.clone()));
