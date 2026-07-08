@@ -53,8 +53,8 @@ peg::parser! {
 
         // Mobilities
         pub rule mob() -> Mob
-            = (tok(Unr) / [Tok(Id("m"))]) { Mob::Mobile }
-            / (tok(Lin) / [Tok(Id("s"))]) { Mob::Static }
+            = [Tok(Id("m"))] { Mob::Mobile }
+            / [Tok(Id("s"))] { Mob::Static }
             / expected!("mobility")
         pub rule smob() -> SMob = spanned(<mob()>)
 
@@ -100,7 +100,6 @@ peg::parser! {
             / x:sid()
               { Session::Var(x) }
             / tok(ParenL) s:session() tok(ParenR) { s }
-            / tok(BracketL) s:session() tok(BracketR) { s }
         pub rule ssession() -> SSession = spanned(<session()>)
 
         pub rule type_() -> Type = t:type_arrow() { t }
@@ -334,6 +333,56 @@ mod tests {
             );
             if failures_pos.len() == 0 {
                 logln!("ALL {} TESTS PASSED!", positives.len());
+            } else {
+                logln!("{} TESTS FAILED:\n", failures_pos.len());
+                for n in failures_pos {
+                    logln!("  {n}")
+                }
+                assert!(false)
+            }
+        }
+
+        let negatives: Vec<PathBuf> = std::fs::read_dir("examples/negative")
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .collect();
+
+        for (i, p) in negatives.iter().enumerate() {
+            let name = p.to_string_lossy().to_string();
+            logln!(
+                "\n================================================================================"
+            );
+            logln!(
+                "Running negative test {} / {}: {}\n",
+                i + 1,
+                negatives.len(),
+                name
+            );
+            let src = std::fs::read_to_string(p).unwrap();
+
+            let toks = lexer::lex(&src).unwrap();
+            let mut toks = lexer_offside::process_indent(toks, |_| false, |_| false);
+            toks.toks = toks
+                .toks
+                .into_iter()
+                .filter(|t| t.val != Braced::Token(Token::NewLine))
+                .collect::<Vec<_>>();
+
+            let mut failures_pos = vec![];
+
+            let res = parser::parse(&toks);
+            if res.is_ok() {
+                logln!("TEST SUCCEEDED.")
+            } else {
+                logln!("TEST FAILED.");
+                failures_pos.push(name.clone())
+            }
+
+            logln!(
+                "\n================================================================================\n"
+            );
+            if failures_pos.len() == 0 {
+                logln!("ALL {} TESTS PASSED!", negatives.len());
             } else {
                 logln!("{} TESTS FAILED:\n", failures_pos.len());
                 for n in failures_pos {
