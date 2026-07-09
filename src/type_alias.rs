@@ -1,15 +1,10 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::syntax::{Expr, Id, SExpr, SSession, SType, Session, Type};
+use crate::syntax::{Expr, Id, SExpr, SSession, Session, Type};
+use crate::type_checker::TypeError;
 use crate::util::span::Spanned;
 
 pub type AliasEnv = HashMap<Id, SSession>;
-
-#[derive(Debug, Clone)]
-pub enum AliasError {
-    NonSessionAliasUsedAsSession(SSession, SType),
-    CyclicAlias(Id),
-}
 
 pub fn get_alias_env(e: SExpr) -> (SExpr, AliasEnv) {
     let mut env = HashMap::new();
@@ -31,7 +26,7 @@ pub fn get_alias_env(e: SExpr) -> (SExpr, AliasEnv) {
     }
 }
 
-pub fn expand_type(ty: &Type, env: &AliasEnv, bound: &HashSet<Id>) -> Result<Type, AliasError> {
+pub fn expand_type(ty: &Type, env: &AliasEnv, bound: &HashSet<Id>) -> Result<Type, TypeError> {
     match ty {
         Type::Chan(session) => expand_session(&session, env, bound).map(Type::Chan),
         Type::Arr {
@@ -77,7 +72,7 @@ pub fn expand_type(ty: &Type, env: &AliasEnv, bound: &HashSet<Id>) -> Result<Typ
                         Spanned::new(expand_type(ty, env, bound)?, ty.span.clone()),
                     ))
                 })
-                .collect::<Result<Vec<_>, AliasError>>()?,
+                .collect::<Result<_, _>>()?,
         )),
         Type::Unit => Ok(Type::Unit),
         Type::Int => Ok(Type::Int),
@@ -90,7 +85,7 @@ pub fn expand_session(
     session: &Session,
     env: &AliasEnv,
     bound: &HashSet<Id>,
-) -> Result<Session, AliasError> {
+) -> Result<Session, TypeError> {
     match &session {
         Session::Var(id) => {
             if bound.contains(&id.val) {
@@ -98,7 +93,7 @@ pub fn expand_session(
             } else if let Some(session) = env.get(&id.val) {
                 expand_session(&session, env, bound)
             } else {
-                todo!("Return unbound variable error")
+                Err(TypeError::UndefinedAlias(id.clone()))
             }
         }
         Session::Mu(id, body) => {

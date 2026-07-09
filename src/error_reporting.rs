@@ -4,7 +4,6 @@ use crate::{
     constraint::ConstraintSolutionError,
     lexer::LexerError,
     syntax::SType,
-    type_alias::AliasError,
     type_checker::TypeError,
     util::{pretty::pretty_def, span::Span},
 };
@@ -15,7 +14,6 @@ use peg::error::ParseError;
 pub enum IErr {
     Lexer(LexerError),
     Parser(ParseError<usize>),
-    Alias(AliasError),
     Typing(TypeError),
     Constraint(ConstraintSolutionError),
     Equivalence {
@@ -118,30 +116,6 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
     };
 
     match e {
-        IErr::Alias(e) => match e {
-            AliasError::NonSessionAliasUsedAsSession(s, t) => {
-                report(
-                    &src,
-                    s.span.clone(),
-                    "Type Error",
-                    [label(
-                        s.span,
-                        format!(
-                            "Type alias used as a session, but its definition is not a channel type: {}",
-                            pretty_def(&t),
-                        ),
-                    )],
-                );
-            }
-            AliasError::CyclicAlias(x) => {
-                report(
-                    &src,
-                    0..0,
-                    "Type Error",
-                    [label(0..0, format!("Cyclic type alias '{}'.", x))],
-                );
-            }
-        },
         IErr::Lexer(e) => {
             report(
                 &src,
@@ -716,6 +690,17 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                             pretty_def(&id),
                             pretty_def(&ctx.simplify())
                         ),
+                    )],
+                );
+            }
+            TypeError::UndefinedAlias(id) => {
+                report(
+                    &src,
+                    id.span.clone(),
+                    "Type Error",
+                    [label(
+                        id.span,
+                        format!("Type alias '{}' is not defined.", &id.val),
                     )],
                 );
             }

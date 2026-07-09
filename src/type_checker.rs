@@ -57,6 +57,7 @@ pub enum TypeError {
     TypeNotValidForNew(SSession),
     SessionTypeOnlySkips(SSession),
     SessionTypeNotMobileInContext(SExpr, Ctx, SId),
+    UndefinedAlias(SId),
 }
 
 pub fn infer_type(e: &SExpr, alias_env: AliasEnv) -> Result<(SType, Constraints, Eff), TypeError> {
@@ -104,7 +105,7 @@ impl TypeChecker {
                     return Err(TypeError::LeftOverCtx(e.clone(), ctx.clone()));
                 }
                 let sess_type = Spanned::new(
-                    expand_session(sess_type, &self.alias_env, &HashSet::new()).expect("TODO"),
+                    expand_session(sess_type, &self.alias_env, &HashSet::new())?,
                     sess_type.span.clone(),
                 );
                 check_wf_session(&sess_type)?;
@@ -485,8 +486,7 @@ impl TypeChecker {
             }
             Expr::LetDecl(id, expected_ty, clause, body) => {
                 let expected_ty = Spanned::new(
-                    expand_type(&expected_ty, &self.alias_env, &HashSet::new())
-                        .expect("TODO: handle error"),
+                    expand_type(&expected_ty, &self.alias_env, &HashSet::new())?,
                     expected_ty.span.clone(),
                 );
                 check_wf_type(&expected_ty)?;
@@ -695,7 +695,7 @@ impl TypeChecker {
             }
             Expr::Ann(expr, ty) => {
                 let ty = Spanned::new(
-                    expand_type(&ty, &self.alias_env, &HashSet::new()).expect("TODO: handle error"),
+                    expand_type(&ty, &self.alias_env, &HashSet::new())?,
                     ty.span.clone(),
                 );
                 check_wf_type(&ty)?;
@@ -992,13 +992,11 @@ impl TypeChecker {
             _ => {
                 let (inferred_ty, mut cs, eff) = self.infer(ctx, e)?;
                 let inferred_ty = Spanned::new(
-                    expand_type(&inferred_ty, &self.alias_env, &HashSet::new())
-                        .expect("TODO: handle error"),
+                    expand_type(&inferred_ty, &self.alias_env, &HashSet::new())?,
                     inferred_ty.span.clone(),
                 );
                 let expected_ty = Spanned::new(
-                    expand_type(&expected_ty, &self.alias_env, &HashSet::new())
-                        .expect("TODO: handle error"),
+                    expand_type(&expected_ty, &self.alias_env, &HashSet::new())?,
                     expected_ty.span.clone(),
                 );
 
