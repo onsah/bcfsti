@@ -3,11 +3,11 @@ use std::{io::Write, path::PathBuf};
 use crate::{constraints_check, error_reporting::report_error, typecheck};
 
 pub fn typecheck_(src: &str, src_path: &str) -> Result<(), ()> {
-    let (_, _, cs, _) = typecheck(src, false).map_err(|e| {
+    let (_, _, aliases, cs, _) = typecheck(src, false).map_err(|e| {
         report_error(src_path, &src, e.clone());
         ()
     })?;
-    constraints_check(cs, false).map_err(|e| {
+    constraints_check(cs, &aliases, false).map_err(|e| {
         report_error(src_path, &src, e.clone());
         ()
     })
@@ -75,7 +75,7 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Int, _, Eff::Yes)));
+        assert_matches!(res, Ok((_, Type::Int, _, _, Eff::Yes)));
     }
 
     #[test]
@@ -107,7 +107,7 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Unit, _, Eff::Yes)));
+        assert_matches!(res, Ok((_, Type::Unit, _, _, Eff::Yes)));
     }
 
     #[test]
@@ -152,8 +152,8 @@ mod typechecker_tests {
             );
             cs
         };
-        assert_matches!(res, Ok((_, Type::Unit, _, Eff::No)));
-        let Ok((_, _, constraints, _)) = res else {
+        assert_matches!(res, Ok((_, Type::Unit, _, _, Eff::No)));
+        let Ok((_, _, _, constraints, _)) = res else {
             unreachable!()
         };
         assert_eq!(constraints, expected_constraints);
@@ -173,11 +173,11 @@ mod typechecker_tests {
                 bar : !Int; ?Int -[m u 1]-> ?Int
                 bar c = foo c
             in
-            unit
+                unit
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Unit, _, Eff::No)));
+        assert_matches!(res, Ok((_, Type::Unit, _, _, Eff::No)));
 
         let src = r#"
             let
@@ -210,7 +210,7 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Prod { .. }, _, Eff::No)));
+        assert_matches!(res, Ok((_, Type::Prod { .. }, _, _, _)));
         let Ok((
             _,
             Type::Prod {
@@ -218,6 +218,7 @@ mod typechecker_tests {
                 first,
                 second,
             },
+            _,
             _,
             _,
         )) = res
@@ -301,7 +302,7 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Variant { .. }, _, _)));
+        assert_matches!(res, Ok((_, Type::Variant { .. }, _, _, _)));
     }
 
     #[test]
@@ -315,8 +316,8 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Int, _, _)));
-        let Ok((_, Type::Int, cs, _)) = res else {
+        assert_matches!(res, Ok((_, Type::Int, _, _, _)));
+        let Ok((_, Type::Int, _, cs, _)) = res else {
             unreachable!()
         };
         let expected_constraints = {
@@ -389,8 +390,8 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Arr { .. }, _, _)));
-        let Ok((_, Type::Arr { ret, .. }, _, _)) = res else {
+        assert_matches!(res, Ok((_, Type::Arr { .. }, _, _, _)));
+        let Ok((_, Type::Arr { ret, .. }, _, _, _)) = res else {
             unreachable!()
         };
         assert_eq!(ret.val, Type::Chan(session_type! { ?String }.val));
@@ -414,7 +415,7 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Arr { .. }, _, Eff::No)));
+        assert_matches!(res, Ok((_, Type::Arr { .. }, _, _, Eff::No)));
 
         let src = r#"
             (\c.
@@ -447,7 +448,7 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Arr { .. }, _, Eff::No)));
+        assert_matches!(res, Ok((_, Type::Arr { .. }, _, _, Eff::No)));
 
         let src = r#"
             (\c.
@@ -488,7 +489,7 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Int, _, Eff::No)));
+        assert_matches!(res, Ok((_, Type::Int, _, _, Eff::No)));
 
         let src = r#"
             let x = true in
@@ -508,7 +509,7 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Bool, _, Eff::No)));
+        assert_matches!(res, Ok((_, Type::Bool, _, _, Eff::No)));
 
         let src = r#"
             let x = 5 in
@@ -528,7 +529,7 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::String, _, Eff::No)));
+        assert_matches!(res, Ok((_, Type::String, _, _, Eff::No)));
 
         let src = r#"
             let x = 5 in
@@ -536,7 +537,7 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::String, _, Eff::No)));
+        assert_matches!(res, Ok((_, Type::String, _, _, Eff::No)));
 
         let src = r#"
             let x = true in
@@ -544,7 +545,7 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Unit, _, Eff::No)));
+        assert_matches!(res, Ok((_, Type::Unit, _, _, Eff::No)));
 
         let src = r#"
             let x = 5 in
@@ -552,7 +553,7 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Unit, _, Eff::No)));
+        assert_matches!(res, Ok((_, Type::Unit, _, _, Eff::No)));
     }
 
     #[test]
@@ -564,7 +565,7 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Int, _, Eff::No)));
+        assert_matches!(res, Ok((_, Type::Int, _, _, Eff::No)));
 
         let src = r#"
             let x = "foo" in
@@ -573,7 +574,7 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::String, _, Eff::No)));
+        assert_matches!(res, Ok((_, Type::String, _, _, Eff::No)));
 
         let src = r#"
             let x = 5 in
@@ -595,7 +596,7 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Bool, _, Eff::No)));
+        assert_matches!(res, Ok((_, Type::Bool, _, _, Eff::No)));
 
         let src = r#"
             let x = true in
@@ -618,15 +619,15 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Int, _, Eff::No)));
+        assert_matches!(res, Ok((_, Type::Int, _, _, Eff::No)));
 
         let src = r#"
             if true then 5 else "foo"
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Int, _, Eff::No)));
-        let Ok((_, _, cs, _)) = res else {
+        assert_matches!(res, Ok((_, Type::Int, _, _, Eff::No)));
+        let Ok((_, _, _, cs, _)) = res else {
             unreachable!()
         };
 
@@ -655,7 +656,7 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(res, Ok((_, Type::Unit, _, Eff::No)));
+        assert_matches!(res, Ok((_, Type::Unit, _, _, Eff::No)));
     }
 
     #[test]

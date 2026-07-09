@@ -1,10 +1,11 @@
 use crate::{
     freest::FreestType,
     syntax::{Eff, Label, Mob, Mult, Session, SessionOp, Type},
+    type_alias::AliasEnv,
     util::span::fake_span,
 };
 
-use std::{io::Write, process::Command};
+use std::{collections::HashMap, io::Write, process::Command};
 
 #[allow(dead_code)]
 pub enum EquivalenceResult {
@@ -12,7 +13,7 @@ pub enum EquivalenceResult {
     Error { reason: String },
 }
 
-pub fn check_equivalence(type1: &Type, type2: &Type) -> EquivalenceResult {
+pub fn check_equivalence(type1: &Type, type2: &Type, alias_env: &AliasEnv) -> EquivalenceResult {
     let mut test_file = tempfile::Builder::new().suffix(".fst").tempfile().unwrap();
 
     writeln!(test_file, "module Tmp where").unwrap();
@@ -21,8 +22,13 @@ pub fn check_equivalence(type1: &Type, type2: &Type) -> EquivalenceResult {
     writeln!(test_file, "data Ret = Ret").unwrap();
     // Convert CFSession -> FreestType and then wrap in freest::Type for display
     let mut defs = Definitions::new();
-    let type1_converted = convert_type_impl(type1, &mut defs);
 
+    for (name, session) in alias_env.iter() {
+        let alias_type = convert_session_impl(session, &mut defs);
+        defs.add(name, alias_type);
+    }
+
+    let type1_converted = convert_type_impl(type1, &mut defs);
     let type2_converted = convert_type_impl(type2, &mut defs);
 
     for def in defs.iter() {
@@ -58,7 +64,11 @@ fn write_freest_type(name: &str, ty: &FreestType, test_file: &mut impl Write) {
 }
 
 pub fn check_equivalence_sessions(type1: &Session, type2: &Session) -> EquivalenceResult {
-    check_equivalence(&Type::Chan(type1.clone()), &Type::Chan(type2.clone()))
+    check_equivalence(
+        &Type::Chan(type1.clone()),
+        &Type::Chan(type2.clone()),
+        &HashMap::new(),
+    )
 }
 
 impl FreestType {

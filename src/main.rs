@@ -31,6 +31,7 @@ use crate::{
     error_reporting::{IErr, report_error},
     lexer::Token,
     syntax::{Eff, Type},
+    type_alias::AliasEnv,
     util::{
         lexer_offside::{self, Braced},
         pretty::pretty_def,
@@ -54,9 +55,9 @@ fn run(args: &Args) -> Result<(), IErr> {
         println!("{src}");
         println!();
     }
-    let (_e, _t, cs, _p) = typecheck(&src, args.verbose)?;
+    let (_e, _t, aliases, cs, _p) = typecheck(&src, args.verbose)?;
 
-    constraints_check(cs, args.verbose)?;
+    constraints_check(cs, &aliases, args.verbose)?;
 
     // println!("===== EVALUATION =====");
     // println!("Program stdout:");
@@ -68,7 +69,10 @@ fn run(args: &Args) -> Result<(), IErr> {
     Ok(())
 }
 
-pub fn typecheck(src: &str, verbose: bool) -> Result<(SExpr, Type, Constraints, Eff), IErr> {
+pub fn typecheck(
+    src: &str,
+    verbose: bool,
+) -> Result<(SExpr, Type, AliasEnv, Constraints, Eff), IErr> {
     // println!("===== TOKENS =====");
     let toks = lexer::lex(&src).map_err(IErr::Lexer)?;
     // for (i, t) in toks.toks.iter().enumerate() {
@@ -92,6 +96,7 @@ pub fn typecheck(src: &str, verbose: bool) -> Result<(SExpr, Type, Constraints, 
 
     let e = parser::parse(&toks).map_err(IErr::Parser)?;
     let (e, alias_env) = type_alias::get_alias_env(e);
+    type_alias::check_shadowing(&e, &alias_env).map_err(IErr::Typing)?;
     if verbose {
         println!("===== AST =====");
         println!("{e:#?}");
@@ -104,7 +109,7 @@ pub fn typecheck(src: &str, verbose: bool) -> Result<(SExpr, Type, Constraints, 
         println!();
     }
 
-    let (t, cs, p) = type_checker::infer_type(&e, alias_env).map_err(IErr::Typing)?;
+    let (t, cs, p) = type_checker::infer_type(&e, alias_env.clone()).map_err(IErr::Typing)?;
     if verbose {
         println!("===== TYPECHECKER =====");
         println!("Type:    {}", pretty_def(&t));
@@ -112,10 +117,10 @@ pub fn typecheck(src: &str, verbose: bool) -> Result<(SExpr, Type, Constraints, 
         println!();
     }
 
-    Ok((e, t.val, cs, p))
+    Ok((e, t.val, alias_env, cs, p))
 }
 
-fn constraints_check(cs: Constraints, verbose: bool) -> Result<(), IErr> {
+fn constraints_check(cs: Constraints, alias_env: &AliasEnv, verbose: bool) -> Result<(), IErr> {
     let cs = cs.solve().map_err(IErr::Constraint)?;
 
     if verbose {
@@ -128,7 +133,7 @@ fn constraints_check(cs: Constraints, verbose: bool) -> Result<(), IErr> {
     }
 
     for (ty1, ty2) in cs.iter() {
-        match check_equivalence(&ty1.val, &ty2.val) {
+        match check_equivalence(&ty1.val, &ty2.val, alias_env) {
             EquivalenceResult::Success => (),
             EquivalenceResult::Error { reason } => Err(IErr::Equivalence {
                 ty1: ty1.clone(),
