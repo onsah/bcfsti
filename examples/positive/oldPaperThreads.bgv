@@ -1,0 +1,20 @@
+# Example from our paper, section 2.5
+
+let
+  threads : Acq; ?Int; ?String; Close -[m u 1]-> Unit
+  threads c =
+    let cFork, cLocal = rsplit Acq; ?Int c in
+    let _ = fork (\x.
+        let cAcq, cRest = lsplit Acq cFork in
+        acquire cAcq;
+        let cInt, cDrop = lsplit ?Int cRest in
+        let i = 17 + recv @Int cInt in
+        drop cDrop) in
+    let cLocalAcq, cLocalRest = lsplit Acq cLocal in
+    acquire cLocalAcq;
+    let cStr, cClose = lsplit ?String cLocalRest in
+    let n = "" + (recv @String cStr) in
+    close cClose
+in
+
+unit
