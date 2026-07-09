@@ -31,9 +31,9 @@ pub fn get_alias_env(e: SExpr) -> (SExpr, AliasEnv) {
     }
 }
 
-pub fn expand_type2(ty: &Type, env: &AliasEnv, bound: &HashSet<Id>) -> Result<Type, AliasError> {
+pub fn expand_type(ty: &Type, env: &AliasEnv, bound: &HashSet<Id>) -> Result<Type, AliasError> {
     match ty {
-        Type::Chan(session) => expand_session2(&session, env, bound).map(Type::Chan),
+        Type::Chan(session) => expand_session(&session, env, bound).map(Type::Chan),
         Type::Arr {
             mob,
             mult,
@@ -45,11 +45,11 @@ pub fn expand_type2(ty: &Type, env: &AliasEnv, bound: &HashSet<Id>) -> Result<Ty
             mult: mult.clone(),
             eff: eff.clone(),
             param: Box::new(Spanned::new(
-                expand_type2(param, env, bound)?,
+                expand_type(param, env, bound)?,
                 param.span.clone(),
             )),
             ret: Box::new(Spanned::new(
-                expand_type2(ret, env, bound)?,
+                expand_type(ret, env, bound)?,
                 ret.span.clone(),
             )),
         }),
@@ -60,11 +60,11 @@ pub fn expand_type2(ty: &Type, env: &AliasEnv, bound: &HashSet<Id>) -> Result<Ty
         } => Ok(Type::Prod {
             mult: mult.clone(),
             first: Box::new(Spanned::new(
-                expand_type2(first, env, bound)?,
+                expand_type(first, env, bound)?,
                 first.span.clone(),
             )),
             second: Box::new(Spanned::new(
-                expand_type2(second, env, bound)?,
+                expand_type(second, env, bound)?,
                 second.span.clone(),
             )),
         }),
@@ -74,7 +74,7 @@ pub fn expand_type2(ty: &Type, env: &AliasEnv, bound: &HashSet<Id>) -> Result<Ty
                 .map(|(label, ty)| {
                     Ok((
                         label.clone(),
-                        Spanned::new(expand_type2(ty, env, bound)?, ty.span.clone()),
+                        Spanned::new(expand_type(ty, env, bound)?, ty.span.clone()),
                     ))
                 })
                 .collect::<Result<Vec<_>, AliasError>>()?,
@@ -86,7 +86,7 @@ pub fn expand_type2(ty: &Type, env: &AliasEnv, bound: &HashSet<Id>) -> Result<Ty
     }
 }
 
-pub fn expand_session2(
+pub fn expand_session(
     session: &Session,
     env: &AliasEnv,
     bound: &HashSet<Id>,
@@ -96,7 +96,7 @@ pub fn expand_session2(
             if bound.contains(&id.val) {
                 Ok(Session::Var(id.clone()))
             } else if let Some(session) = env.get(&id.val) {
-                expand_session2(&session, env, bound)
+                expand_session(&session, env, bound)
             } else {
                 todo!("Return unbound variable error")
             }
@@ -104,7 +104,7 @@ pub fn expand_session2(
         Session::Mu(id, body) => {
             let mut new_bound = bound.clone();
             new_bound.insert(id.val.clone());
-            let expanded_body = expand_session2(&body.val, env, &new_bound)?;
+            let expanded_body = expand_session(&body.val, env, &new_bound)?;
             Ok(Session::Mu(
                 id.clone(),
                 Box::new(Spanned::new(expanded_body, body.span.clone())),
@@ -112,18 +112,18 @@ pub fn expand_session2(
         }
         Session::Semi { first, second } => Ok(Session::Semi {
             first: Box::new(Spanned::new(
-                expand_session2(&first.val, env, bound)?,
+                expand_session(&first.val, env, bound)?,
                 first.span.clone(),
             )),
             second: Box::new(Spanned::new(
-                expand_session2(&second.val, env, bound)?,
+                expand_session(&second.val, env, bound)?,
                 second.span.clone(),
             )),
         }),
         Session::Op(op, ty) => Ok(Session::Op(
             *op,
             Box::new(Spanned::new(
-                expand_type2(&ty.val, env, bound)?,
+                expand_type(&ty.val, env, bound)?,
                 ty.span.clone(),
             )),
         )),
@@ -132,7 +132,7 @@ pub fn expand_session2(
             for (name, session) in items {
                 new_items.push((
                     name.clone(),
-                    Spanned::new(expand_session2(session, env, bound)?, session.span.clone()),
+                    Spanned::new(expand_session(session, env, bound)?, session.span.clone()),
                 ));
             }
             Ok(Session::Choice(*op, new_items))
