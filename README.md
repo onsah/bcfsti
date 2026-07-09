@@ -33,7 +33,7 @@ The implementation supports all features for CSTB mentioned in the paper and add
 3.  Typecheck and interpret a program via e.g.
 
     ```bash
-    bsti examples/positive/example-simple.bgv
+    cstb examples/positive/renderUser.bgv
     ```
 
     The current host directory is mounted into the current guest directory, so

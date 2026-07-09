@@ -18,6 +18,7 @@ ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US:en
 ENV LC_ALL en_US.UTF-8
 COPY --from=cstb /usr/local/cargo/bin/cstb /usr/local/bin/cstb
+COPY --from=cstb /cstb/examples /examples
 COPY --from=freest /usr/local/bin .
 COPY --from=freest /freest/.stack-work /freest/.stack-work
 CMD ["bash"]
