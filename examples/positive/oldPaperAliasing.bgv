@@ -5,12 +5,20 @@
 # Consider the following forwarding function, which takes two channel ends,
 # receives an integer on the first, and sends the integer on the second:
 let
-  forward : ?Int *[p] !Int -[m u 1]-> Unit
+  forward : ?Int *[l] !Int -[m u 1]-> Unit
   forward pair =
     let c, d = pair in
+    let y = recv @Int c in
     let snd = (\x. send @Int x d) : Int -[s p 1]-> Unit
     in
-    let y = recv @Int c in
     snd y
+in
+# Our language allows to use the `forward` function with aliasing, i.e. it is
+# possible to call `forward` with the same channel end for both arguments:
+let
+  example : ?Int; !Int -[m u 1]-> Unit
+  example c =
+    let cRecv, cSend = lsplit ?Int c in
+    forward (cRecv, cSend)
 in
 unit
