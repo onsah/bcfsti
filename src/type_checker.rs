@@ -176,8 +176,11 @@ impl TypeChecker {
                         Ctx::Bind(id1.clone(), *first.clone()),
                         Ctx::Bind(id2.clone(), *second.clone()),
                     );
-                    let body_ctx =
-                        Ctx::Join(Box::new(var_ctx), Box::new(body_ctx), JoinOrd::Ordered);
+                    let body_ctx = if expr_eff == Eff::Yes {
+                        Ctx::Join(Box::new(var_ctx), Box::new(body_ctx), JoinOrd::Ordered)
+                    } else {
+                        Ctx::Join(Box::new(var_ctx), Box::new(body_ctx), JoinOrd::Unordered)
+                    };
                     self.infer(&body_ctx, body)
                 }?;
 

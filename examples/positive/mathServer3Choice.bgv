@@ -1,0 +1,51 @@
+# This file illustrates internal & external choice by showing a simple
+# math server that offers the choice between addition and negation.
+
+# n-ary internal and external choice types are written as `+{ l: s, ... }` and
+# `&{ l: s, ... }`, respectively.
+
+# The `select l c` instruction sends the choice of label `l` on a channel end `c`.
+# The `branch c` instruction receives a choice of a label and returns a variant
+# type of continuations, which can be eliminated with a `case` expression.
+type MathClient = +{ neg: !Int;?Int;Close, add: !Int;!Int;?Int;Close } in
+type MathServer = &{ neg: ?Int;!Int;Wait, add: ?Int;?Int;!Int;Wait } in
+let
+  client : Acq; MathClient -[m u 1]→ Unit
+  client c =
+    let cAcq, c1 = lsplit Acq c in
+    acquire cAcq;
+    let cNeg = select neg (c1 : MathClient) in
+    let cSendInt, cNeg2 = lsplit !Int cNeg in
+    send @Int 42 cSendInt;
+    let cRecvInt, cClose = lsplit ?Int cNeg2 in
+    let y = recv @Int cRecvInt in
+    print y;
+    close cClose
+in
+let
+  server : Acq; MathServer -[m u 1]→ Unit
+  server c =
+    let cAcq, cServer = lsplit Acq c in
+    acquire cAcq;
+    case branch (cServer: MathServer) {
+      add c1 -> {
+        let cRecvInt1, c2 = lsplit ?Int c1 in
+        let x = recv @Int cRecvInt1 in
+        let cRecvInt2, c3 = lsplit ?Int c2 in
+        let y = recv @Int cRecvInt2 in
+        let cSendInt, cWait = lsplit !Int c3 in
+        send @Int (x + y) cSendInt;
+        wait cWait
+      }
+      neg c1 -> {
+        let cRecvInt, c2 = lsplit ?Int c1 in
+        let x = recv @Int cRecvInt in
+        let cSendInt, cWait = lsplit !Int c2 in
+        send @Int (0 - x) cSendInt;
+        wait cWait
+      }
+    }
+in
+let c1, c2 = new +{ neg: !Int;?Int, add: !Int;!Int;?Int } in
+fork (\x. server c2);
+client c1

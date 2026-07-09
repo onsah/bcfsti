@@ -1,0 +1,31 @@
+# This file contains a desugared form of `math-server-1-send-and-recv.bgv`,
+# where function definitions have been replaced by `let`-expressions and
+# lambda-abstractions as in the paper's core calculus.
+
+let
+  server = \c.
+    let cAcq, c1 = lsplit Acq c in
+    acquire cAcq;
+    let cRecv, c2 = lsplit ?Int c1 in
+    let x = recv @Int cRecv in
+    let cSend, cWait = lsplit !Int c2 in
+    send @Int (0 - x) cSend;
+    wait cWait
+  : Acq;?Int;!Int;Wait -[m u 1]→ Unit
+in
+
+let
+  client = \c.
+    let cAcq, c1 = lsplit Acq c in
+    acquire cAcq;
+    let cSend, c2 = lsplit !Int c1 in
+    send @Int 42 cSend;
+    let cRecv, cClose = lsplit ?Int c2 in
+    print (recv @Int cRecv);
+    close cClose
+  : Acq;!Int;?Int;Close -[m u 1]→ Unit
+in
+
+let c1, c2 = new !Int;?Int in
+fork (\x. server c2);
+client c1

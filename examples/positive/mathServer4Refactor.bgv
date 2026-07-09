@@ -1,0 +1,45 @@
+# This file contains a refactoring of `math-server-3-choice.bgv`, where the
+# `server` function avoids code duplication by sending the result after the
+# `case` expression on the math operation.
+
+type MathClient = +{ neg: !Int;?Int;Close, add: !Int;!Int;?Int;Close } in
+type MathServer = &{ neg: ?Int;!Int;Wait, add: ?Int;?Int;!Int;Wait } in
+let
+  client : Acq; MathClient -[m u 1]→ Unit
+  client c =
+    let cAcq, c1 = lsplit Acq c in
+    acquire cAcq;
+    let cNeg = select neg (c1 : MathClient) in
+    let cSendInt, cNeg2 = lsplit !Int cNeg in
+    send @Int 42 cSendInt;
+    let cRecvInt, cClose = lsplit ?Int cNeg2 in
+    let y = recv @Int cRecvInt in
+    print y;
+    close cClose
+in
+let
+  server : Acq; MathServer -[m u 1]→ Unit
+  server c =
+    let cAcq, cServer = lsplit Acq c in
+    acquire cAcq;
+    let cRest, z = case branch (cServer: MathServer) {
+      add c1 -> {
+        let cRecvInt1, c2 = lsplit ?Int c1 in
+        let x = recv @Int cRecvInt1 in
+        let cRecvInt2, c3 = lsplit ?Int c2 in
+        let y = recv @Int cRecvInt2 in
+        ((c3, x + y) : !Int; Wait *[u] Int)
+      }
+      neg c1 -> {
+        let cRecvInt, c2 = lsplit ?Int c1 in
+        let x = recv @Int cRecvInt in
+        ((c2, 0 - x) : !Int; Wait *[u] Int)
+      }
+    } in
+    let cSendInt, cWait = lsplit !Int cRest in
+    send @Int z cSendInt;
+    wait cWait
+in
+let c1, c2 = new +{ neg: !Int;?Int, add: !Int;!Int;?Int } in
+fork (\x. server c2);
+client c1

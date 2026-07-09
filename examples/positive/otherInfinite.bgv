@@ -1,0 +1,22 @@
+let
+  two_shot : ?Int;?Int -[m u 1]-> Int
+  two_shot c =
+    let c1, c2 = lsplit ?Int c in
+    let x = recv @Int c1 in
+    let c3, c4 = lsplit ?Int c2 in
+    let y = recv @Int c3 in
+    discard c4;
+    x + y
+in
+
+let
+  main : (mu X. ?Int; X) *[u] (mu X. !Int; X) -[m u 1]-> Unit
+  main pair =
+    let cin, cout = pair in
+    let cin1, cin2 = lsplit ?Int;?Int cin in
+    let cout1, cout2 = lsplit !Int cout in
+    send @Int (two_shot cin1) cout1;
+    main (cin2, cout2)
+in
+
+unit
