@@ -1,0 +1,5 @@
+let
+    foo : X -[m u 0]-> X
+    foo x = x
+in
+unit
