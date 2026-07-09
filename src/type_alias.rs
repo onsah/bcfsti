@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::syntax::{Expr, Id, SExpr, SSession, Session, Type};
+use crate::syntax::{Expr, Id, SExpr, SSession, SType, Session, Type};
 use crate::type_checker::TypeError;
 use crate::util::span::Spanned;
 
@@ -24,6 +24,11 @@ pub fn get_alias_env(e: SExpr) -> (SExpr, AliasEnv) {
             _ => break (current_expr, env),
         }
     }
+}
+
+pub fn expand_stype(ty: &SType, env: &AliasEnv) -> Result<SType, TypeError> {
+    let bound = HashSet::new();
+    Ok(Spanned::new(expand_type(ty, env, &bound)?, ty.span.clone()))
 }
 
 pub fn expand_type(ty: &Type, env: &AliasEnv, bound: &HashSet<Id>) -> Result<Type, TypeError> {

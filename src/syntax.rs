@@ -391,7 +391,13 @@ impl Session {
         match self {
             Session::Var(y) if *x == **y => s_new.clone(),
             Session::Var(y) => Session::Var(y.clone()),
-            Session::Mu(y, e) => Session::Mu(y.clone(), Box::new(fake_span(e.subst(x, s_new)))),
+            Session::Mu(y, e) => {
+                if x != &y.val {
+                    Session::Mu(y.clone(), Box::new(fake_span(e.subst(x, s_new))))
+                } else {
+                    self.clone()
+                }
+            }
             Session::Op(op, t) => Session::Op(op.clone(), t.clone()),
             Session::Choice(op, cs) => {
                 let cs2 = cs

@@ -7,7 +7,7 @@ use crate::{
         Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, SEff, SExpr, SId, SMult, SPattern, SSession,
         SType, Session, SessionOp, Type,
     },
-    type_alias::{AliasEnv, expand_session, expand_type},
+    type_alias::{AliasEnv, expand_session, expand_stype},
     type_context::{Ctx, JoinOrd, ext},
     util::span::{Spanned, fake_span},
 };
@@ -94,9 +94,9 @@ impl TypeChecker {
                 Ok((fake_span(ty), Constraints::empty(), Eff::No))
             }
             Expr::Var(x) => match ctx.lookup_ord_pure(x) {
-                Some((ctx, t)) => {
+                Some((ctx, ty)) => {
                     assert_unr_ctx(e, &ctx)?;
-                    Ok((t.clone(), Constraints::empty(), Eff::No))
+                    Ok((self.expand_type(&ty)?, Constraints::empty(), Eff::No))
                 }
                 None => Err(TypeError::UndefinedVariable(x.clone())),
             },
@@ -445,7 +445,7 @@ impl TypeChecker {
                 }
 
                 Ok((
-                    *ret,
+                    self.expand_type(&ret)?,
                     abs_cs.join(arg_cs),
                     Eff::lub(*eff, Eff::lub(abs_eff, arg_eff)),
                 ))
@@ -485,11 +485,6 @@ impl TypeChecker {
                 Ok((body_ty, var_cs.join(body_cs), Eff::lub(var_eff, body_eff)))
             }
             Expr::LetDecl(id, expected_ty, clause, body) => {
-                let expected_ty = Spanned::new(
-                    expand_type(&expected_ty, &self.alias_env, &HashSet::new())?,
-                    expected_ty.span.clone(),
-                );
-                check_wf_type(&expected_ty)?;
                 let decl_ctx = ctx.restrict(&clause.free_vars());
                 let body_ctx = ctx.restrict(&body.free_vars());
 
@@ -694,11 +689,7 @@ impl TypeChecker {
                 Ok((fake_span(ty), chan_cs, Eff::Yes))
             }
             Expr::Ann(expr, ty) => {
-                let ty = Spanned::new(
-                    expand_type(&ty, &self.alias_env, &HashSet::new())?,
-                    ty.span.clone(),
-                );
-                check_wf_type(&ty)?;
+                let ty = self.expand_type(ty)?;
                 let (expr_cs, expr_eff) =
                     self.check(&ctx.restrict(&expr.free_vars()), expr, &ty)?;
 
@@ -991,17 +982,11 @@ impl TypeChecker {
             }
             _ => {
                 let (inferred_ty, mut cs, eff) = self.infer(ctx, e)?;
-                let inferred_ty = Spanned::new(
-                    expand_type(&inferred_ty, &self.alias_env, &HashSet::new())?,
-                    inferred_ty.span.clone(),
-                );
-                let expected_ty = Spanned::new(
-                    expand_type(&expected_ty, &self.alias_env, &HashSet::new())?,
-                    expected_ty.span.clone(),
-                );
+                let inferred_ty = self.expand_type(&inferred_ty)?;
+                let expected_ty = self.expand_type(expected_ty)?;
 
                 if !inferred_ty.sem_eq(&expected_ty) {
-                    cs.add(inferred_ty, expected_ty);
+                    cs.add(inferred_ty, expected_ty.clone());
                 }
 
                 Ok((cs, eff))
@@ -1066,6 +1051,12 @@ impl TypeChecker {
         self.uvar_counter += 1;
         fake_span(Session::UVar(id))
     }
+
+    fn expand_type(&self, t: &SType) -> Result<SType, TypeError> {
+        let expanded = expand_stype(t, &self.alias_env)?;
+        check_wf_type(&expanded)?;
+        Ok(expanded)
+    }
 }
 
 fn is_valid_for_new(s: &Session) -> bool {
@@ -1093,9 +1084,6 @@ fn check_wf_session_(s: &SSession, vars: &HashSet<Id>) -> Result<(), TypeError> 
             }
         }
         Session::Mu(x, s1) => {
-            if vars.contains(&x.val) {
-                return Err(TypeError::WfSessionShadowing(s.clone(), x.clone()));
-            }
             let mut vars = vars.clone();
             vars.insert(x.val.clone());
             check_wf_session_(s1, &vars)?;
