@@ -1,0 +1,19 @@
+rec type TreeChannel = &{ leaf: Skip, node: ?Int; TreeChannel; TreeChannel } in
+let
+    recvTree : TreeChannel -[m u 1]-> Unit
+    recvTree c =
+        case (branch c) {
+            leaf c1 -> {
+                discard c1
+            }
+            node c1 -> {
+                let cRecv, cRest = lsplit ?Int c1 in
+                let x = recv @Int cRecv in
+                print x;
+                let cLeft, cRight = lsplit TreeChannel cRest in
+                recvTree cLeft;
+                recvTree cRight
+            }
+        }
+in
+unit

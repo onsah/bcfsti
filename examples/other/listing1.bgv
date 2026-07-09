@@ -1,3 +1,0 @@
-let
-    renderUserRest : (mu C. +{ done: Skip, child: (mu H. +{ text: !String, elem: !String; C }); C }); End -[m u 1]-> Unit
-    renderUserRest
