@@ -96,7 +96,9 @@ impl TypeChecker {
             Expr::Var(x) => match ctx.lookup_ord_pure(x) {
                 Some((ctx, ty)) => {
                     assert_unr_ctx(e, &ctx)?;
-                    Ok((self.expand_type(&ty)?, Constraints::empty(), Eff::No))
+                    let ty = self.expand_type(&ty)?;
+                    let ty = self.normalise(ty);
+                    Ok((ty, Constraints::empty(), Eff::No))
                 }
                 None => Err(TypeError::UndefinedVariable(x.clone())),
             },
@@ -444,8 +446,9 @@ impl TypeChecker {
                     ));
                 }
 
+                let ret = self.normalise(*ret);
                 Ok((
-                    self.expand_type(&ret)?,
+                    ret,
                     abs_cs.join(arg_cs),
                     Eff::lub(*eff, Eff::lub(abs_eff, arg_eff)),
                 ))
@@ -628,7 +631,7 @@ impl TypeChecker {
                     ));
                 };
 
-                let Session::Choice(SessionOp::Send, branches) = s.normalise() else {
+                let Session::Choice(SessionOp::Send, branches) = s else {
                     return Err(TypeError::Mismatch(
                         *chan_expr.clone(),
                         Err("Choice<Send>".into()),
@@ -690,6 +693,7 @@ impl TypeChecker {
             }
             Expr::Ann(expr, ty) => {
                 let ty = self.expand_type(ty)?;
+                let ty = self.normalise(ty);
                 let (expr_cs, expr_eff) =
                     self.check(&ctx.restrict(&expr.free_vars()), expr, &ty)?;
 
@@ -1056,6 +1060,10 @@ impl TypeChecker {
         let expanded = expand_stype(t, &self.alias_env)?;
         check_wf_type(&expanded)?;
         Ok(expanded)
+    }
+
+    fn normalise(&self, ty: SType) -> SType {
+        Spanned::new(ty.val.normalise(), ty.span)
     }
 }
 
