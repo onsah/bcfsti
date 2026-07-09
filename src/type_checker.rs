@@ -340,10 +340,6 @@ impl TypeChecker {
                 Ok((fake_span(Type::Unit), chan_cs, chan_eff))
             }
             Expr::LSplit(prefix_session, chan) => {
-                if prefix_session.is_only_skips() {
-                    return Err(TypeError::SessionTypeOnlySkips(prefix_session.clone()));
-                }
-
                 let chan_ctx = &ctx.restrict(&chan.free_vars());
                 if !ctx.is_subctx_of(&chan_ctx) {
                     return Err(TypeError::CtxSplitFailed(

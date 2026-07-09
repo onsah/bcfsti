@@ -79,18 +79,6 @@ mod typechecker_tests {
     }
 
     #[test]
-    fn lsplit_only_skips() {
-        let src = r#"
-            let c1, c2 = new Skip in
-            lsplit (Skip; Skip) c1;
-            acquire c2
-        "#;
-
-        let res = typecheck(src, false);
-        assert_matches!(res, Err(IErr::Typing(TypeError::SessionTypeOnlySkips(_))));
-    }
-
-    #[test]
     fn new_and_close() {
         let src = r#"
             let cs, cr = new !Int in
