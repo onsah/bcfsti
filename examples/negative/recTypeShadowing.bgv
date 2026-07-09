@@ -1,0 +1,9 @@
+rec type X = +{ text: !String, elem: !String; X } in
+let
+    foo : mu X. !String; X -[m u 1]-> X
+    foo c =
+        let c1, c2 = lsplit !String c in
+        send @String "asdasd" c1;
+        c2
+in
+unit
