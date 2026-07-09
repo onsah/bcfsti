@@ -1,0 +1,16 @@
+# Example from our paper, section 2.3
+
+# This file illustrates how our borrowing implementation supports aliasing.
+
+# Consider the following forwarding function, which takes two channel ends,
+# receives an integer on the first, and sends the integer on the second:
+let
+  forward : ?Int *[p] !Int -[m u 1]-> Unit
+  forward pair =
+    let c, d = pair in
+    let snd = (\x. send @Int x d) : Int -[s p 1]-> Unit
+    in
+    let y = recv @Int c in
+    snd y
+in
+unit

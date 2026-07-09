@@ -1,0 +1,26 @@
+# Example from our paper, section 2.2
+type Calc = &{Add: ?Int; ?Int, Neg: ?Int} in
+let
+  calculate : Calc -[m u 1]-> Int
+  calculate c0 =
+    case branch c0 {
+      Add c -> {
+        let cInt1, cInt2 = lsplit ?Int c in
+        let i1 = recv @Int cInt1 in
+        let i2 = recv @Int cInt2 in
+        i1 + i2
+      }
+      Neg c -> { 0 - recv @Int c }
+    }
+in
+let
+    server : &{Add: ?Int; ?Int; !Int; Close, Neg: ?Int; !Int; Close} -[m u 1]-> Unit
+    server c =
+    let cCalc, c1 = lsplit Calc c in
+    let r = calculate cCalc in
+    ## some accounting
+    let cInt, cClose = lsplit !Int c1 in
+    send @Int r cInt;
+    close cClose
+in
+unit

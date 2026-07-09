@@ -1,0 +1,57 @@
+let
+  fwd0 : !String; !Int *[p] ?String; ?Int
+         -[m u 1]-> Unit
+  fwd0 pair =
+    let cout, cin = pair in
+    let cinStr, cin1 = lsplit ?String cin in
+    let coutStr, cout1 = lsplit !String cout in
+    send @String (recv @String cinStr) coutStr;
+    let cinInt, cin2 = lsplit ?Int cin1 in
+    let coutInt, cout2 = lsplit !Int cout1 in
+    send @Int (recv @Int cinInt) coutInt;
+    discard cin2;
+    discard cout2
+in
+let
+  client0 : !String; !Int; ?Bool; Close *[p] ?String; ?Int; !Bool; Wait
+            -[m u 1]-> Unit
+  client0 pair =
+    let cout, cin = pair in
+    let cout1, cout2 = lsplit !String; !Int cout in
+    let cin1, cin2 = lsplit ?String; ?Int cin in
+    fwd0 (cout1, cin1);
+    let coutBool, coutClose = lsplit ?Bool cout2 in
+    let cinBool, cinClose = lsplit !Bool cin2 in
+    send @Bool (recv @Bool coutBool) cinBool;
+    close coutClose;
+    wait cinClose
+in
+let
+   fwd1 : ?Int; ?Bool  *[p] !Int; !Bool
+          -[m u 1]-> Unit
+   fwd1  pair =
+    let cin, cout = pair in
+    let cinInt, cin1 = lsplit ?Int cin in
+    let coutInt, cout1 = lsplit !Int cout in
+    send @Int (recv @Int cinInt) coutInt;
+    let cinBool, cin2 = lsplit ?Bool cin1 in
+    let coutBool, cout2 = lsplit !Bool cout1 in
+    send @Bool (recv @Bool cinBool) coutBool;
+    discard cin2;
+    discard cout2
+in
+let
+   client1 :  ?Int; ?Bool; !Int; !Bool; Wait *[p] !Int; !Bool; ?Int; ?Bool; Close
+             -[m u 1]-> Unit
+   client1 pair =
+    let cin, cout = pair in
+    let cinFwd1, cin2 = lsplit ?Int; ?Bool cin in
+    let coutFwd1, cout2 = lsplit !Int; !Bool cout in
+    fwd1 (cinFwd1, coutFwd1);
+    let coutFwd2, coutClose = lsplit ?Int; ?Bool cout2 in
+    let cinFwd2, cinWait = lsplit !Int; !Bool cin2 in
+    fwd1 (coutFwd2, cinFwd2);
+    close coutClose;
+    wait cinWait
+in
+unit

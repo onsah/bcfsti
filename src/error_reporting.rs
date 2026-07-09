@@ -678,13 +678,13 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     )],
                 );
             }
-            TypeError::SessionTypeNotMobileInContext(expr, ctx, id) => {
+            TypeError::SessionTypeNotMobileInContext(_, ctx, id) => {
                 report(
                     &src,
-                    expr.span.clone(),
+                    id.span.clone(),
                     "Type Error",
                     [label(
-                        expr.span,
+                        id.span.clone(),
                         format!(
                             "This variable {} is not mobile in the context {}.",
                             pretty_def(&id),

@@ -480,7 +480,11 @@ impl TypeChecker {
 
                 let body_ctx = {
                     let binding = Ctx::Bind(var_id.clone(), var_ty);
-                    Ctx::Join(Box::new(binding), Box::new(body_ctx), JoinOrd::Ordered)
+                    if var_eff == Eff::Yes {
+                        Ctx::Join(Box::new(binding), Box::new(body_ctx), JoinOrd::Ordered)
+                    } else {
+                        Ctx::Join(Box::new(binding), Box::new(body_ctx), JoinOrd::Unordered)
+                    }
                 };
                 let (body_ty, body_cs, body_eff) = self.infer(&body_ctx, body_expr)?;
 
