@@ -143,12 +143,28 @@ impl Session {
             Session::Skip => false,
         }
     }
+
+    pub fn is_contractive_on(&self, var: &SId) -> bool {
+        match self {
+            Session::Skip => true,
+            Session::Semi { first, second } => match first.is_only_skips() {
+                true => second.is_contractive_on(var),
+                false => first.is_contractive_on(var),
+            },
+            Session::End(_) => true,
+            Session::BorrowEnd(_) => true,
+            Session::Op(_, _) => true,
+            Session::Choice(_, _) => true,
+            Session::Mu(_, body) => body.is_contractive_on(var),
+            Session::Var(id) => id != var,
+            Session::UVar(_) => true,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     Chan(Session),
-    // TODO: Add mobility
     Arr {
         mob: SMob,
         mult: SMult,
@@ -309,7 +325,7 @@ pub enum Expr {
     LetDecl(SId, SType, Box<SClause>, Box<SExpr>),
     LetPair(SId, SId, Box<SExpr>, Box<SExpr>),
 
-    TypeDef(SId, SType, Box<SExpr>, bool),
+    TypeDef(SId, SSession, Box<SExpr>, bool),
 
     Inj(SLabel, Box<SExpr>),
     CaseSum(Box<SExpr>, Vec<(SLabel, SId, SExpr)>),
@@ -422,8 +438,9 @@ impl Session {
                         false
                     }
                 }
-                (Session::Mu(x1, s1), _) => s1.unfold(&x1).sem_eq_(other, &seen),
-                (_, Session::Mu(x2, s2)) => self.sem_eq_(&s2.unfold(&x2), &seen),
+                (Session::Mu(x1, s1), Session::Mu(x2, s2)) => {
+                    x1.val == x2.val && s1.sem_eq_(s2, &seen)
+                }
                 (Session::Var(x1), Session::Var(x2)) => x1.val == x2.val,
                 (
                     Session::Semi {
@@ -519,7 +536,7 @@ impl Session {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash, Eq)]
 pub struct TypeSemEq(pub Type);
 
 impl PartialEq for TypeSemEq {
@@ -528,12 +545,12 @@ impl PartialEq for TypeSemEq {
     }
 }
 
-impl Eq for TypeSemEq {}
+// impl Eq for TypeSemEq {}
 
 // Safe, but not performant
-impl Hash for TypeSemEq {
-    fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {}
-}
+// impl Hash for TypeSemEq {
+//     fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {}
+// }
 
 impl Expr {
     pub fn free_vars(&self) -> HashSet<Id> {
@@ -599,13 +616,6 @@ impl Pattern {
         }
     }
 }
-
-//impl Eq for Session {}
-//
-//// Inefficient but correct for the custom equality
-//impl Hash for Session {
-//    fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {}
-//}
 
 impl Type {
     pub fn sem_eq(&self, other: &Self) -> bool {

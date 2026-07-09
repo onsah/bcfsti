@@ -4,9 +4,10 @@ use crate::{
     constraint::Constraints,
     session_type,
     syntax::{
-        Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, Pattern, SEff, SExpr, SId, SMult, SPattern,
-        SSession, SType, Session, SessionOp, Type,
+        Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, SEff, SExpr, SId, SMult, SPattern, SSession,
+        SType, Session, SessionOp, Type,
     },
+    type_alias::{AliasEnv, expand_session2, expand_type2},
     type_context::{Ctx, JoinOrd, ext},
     util::span::{Spanned, fake_span},
 };
@@ -58,8 +59,11 @@ pub enum TypeError {
     SessionTypeNotMobileInContext(SExpr, Ctx, SId),
 }
 
-pub fn infer_type(e: &SExpr) -> Result<(SType, Constraints, Eff), TypeError> {
-    let mut checker = TypeChecker { uvar_counter: 0 };
+pub fn infer_type(e: &SExpr, alias_env: AliasEnv) -> Result<(SType, Constraints, Eff), TypeError> {
+    let mut checker = TypeChecker {
+        uvar_counter: 0,
+        alias_env,
+    };
     let (t, cs, eff) = checker.infer(&Ctx::Empty, e)?;
     if t.is_ord() {
         return Err(TypeError::MainReturnsOrd(e.clone(), t.clone()));
@@ -69,6 +73,7 @@ pub fn infer_type(e: &SExpr) -> Result<(SType, Constraints, Eff), TypeError> {
 
 struct TypeChecker {
     uvar_counter: usize,
+    alias_env: AliasEnv,
 }
 
 impl TypeChecker {
@@ -94,28 +99,32 @@ impl TypeChecker {
                 }
                 None => Err(TypeError::UndefinedVariable(x.clone())),
             },
-            Expr::New(sess_type) => match ctx.is_unr() {
-                false => Err(TypeError::LeftOverCtx(e.clone(), ctx.clone())),
-                true => {
-                    if !is_valid_for_new(&sess_type.val) {
-                        return Err(TypeError::TypeNotValidForNew(sess_type.clone()));
-                    }
-                    let typ = fake_span(Type::Prod {
-                        mult: fake_span(Mult::Lin),
-                        first: Box::new(Spanned::new(
-                            Type::Chan(session_type! { Acq; (sess_type.clone(); Close) }.val),
-                            sess_type.span.clone(),
-                        )),
-                        second: Box::new(Spanned::new(
-                            Type::Chan(
-                                session_type! { Acq; (fake_span(sess_type.dual()); Wait) }.val,
-                            ),
-                            sess_type.span.clone(),
-                        )),
-                    });
-                    Ok((typ, Constraints::empty(), Eff::No))
+            Expr::New(sess_type) => {
+                if !ctx.is_unr() {
+                    return Err(TypeError::LeftOverCtx(e.clone(), ctx.clone()));
                 }
-            },
+                let sess_type = Spanned::new(
+                    expand_session2(sess_type, &self.alias_env, &HashSet::new()).expect("TODO"),
+                    sess_type.span.clone(),
+                );
+                check_wf_session(&sess_type)?;
+
+                if !is_valid_for_new(&sess_type.val) {
+                    return Err(TypeError::TypeNotValidForNew(sess_type.clone()));
+                }
+                let typ = fake_span(Type::Prod {
+                    mult: fake_span(Mult::Lin),
+                    first: Box::new(Spanned::new(
+                        Type::Chan(session_type! { Acq; (sess_type.clone(); Close) }.val),
+                        sess_type.span.clone(),
+                    )),
+                    second: Box::new(Spanned::new(
+                        Type::Chan(session_type! { Acq; (fake_span(sess_type.dual()); Wait) }.val),
+                        sess_type.span.clone(),
+                    )),
+                });
+                Ok((typ, Constraints::empty(), Eff::No))
+            }
             Expr::LetPair(id1, id2, expr, body) => {
                 if ctx.vars().contains(&id1.val) {
                     return Err(TypeError::Shadowing(e.clone(), id1.clone()));
@@ -205,7 +214,9 @@ impl TypeChecker {
                 ))
             }
             Expr::Send(ty, val, chan) => {
-                // TODO: check if ty is mobile
+                if !ty.is_mobile() {
+                    return Err(TypeError::AbsNotMobile(e.clone(), ty.clone()));
+                }
 
                 let val_ctx = ctx.restrict(&val.free_vars());
                 let (val_cs, _) = self.check(&val_ctx, val, ty)?;
@@ -237,7 +248,9 @@ impl TypeChecker {
                 Ok((fake_span(Type::Unit), val_cs.join(chan_cs), Eff::Yes))
             }
             Expr::Recv(ty, chan) => {
-                // TODO: Check if ty is mobile
+                if !ty.is_mobile() {
+                    return Err(TypeError::AbsNotMobile(e.clone(), ty.clone()));
+                }
 
                 let chan_ctx = ctx.restrict(&chan.free_vars());
                 let expected_chan_ty = fake_span(Type::Chan(Session::Op(
@@ -306,7 +319,6 @@ impl TypeChecker {
                 let expected_ty = fake_span(Type::Chan(Session::BorrowEnd(*op)));
                 let (chan_cs, chan_eff) = self.check(&chan_ctx, chan, &expected_ty)?;
 
-                // TODO: double check whether acquire constant is pure
                 Ok((fake_span(Type::Unit), chan_cs, chan_eff))
             }
             Expr::End(op, chan) => {
@@ -472,6 +484,12 @@ impl TypeChecker {
                 Ok((body_ty, var_cs.join(body_cs), Eff::lub(var_eff, body_eff)))
             }
             Expr::LetDecl(id, expected_ty, clause, body) => {
+                let expected_ty = Spanned::new(
+                    expand_type2(&expected_ty, &self.alias_env, &HashSet::new())
+                        .expect("TODO: handle error"),
+                    expected_ty.span.clone(),
+                );
+                check_wf_type(&expected_ty)?;
                 let decl_ctx = ctx.restrict(&clause.free_vars());
                 let body_ctx = ctx.restrict(&body.free_vars());
 
@@ -501,7 +519,7 @@ impl TypeChecker {
                         decl_ctx,
                         Ctx::Bind(id.clone(), expected_ty.clone()),
                     );
-                    self.check(&decl_ctx, &clause_expr, expected_ty)?
+                    self.check(&decl_ctx, &clause_expr, &expected_ty)?
                 };
 
                 let (body_ty, body_cs, body_eff) = {
@@ -588,7 +606,6 @@ impl TypeChecker {
                         cs.add(ty1.clone(), ty2.clone());
                     }
                 }
-                // TODO: Add constraints that return type of every branch is equivalent
                 Ok((expr_ty, cs, expr_eff))
             }
             Expr::Select(label, chan_expr) => {
@@ -677,9 +694,16 @@ impl TypeChecker {
                 Ok((fake_span(ty), chan_cs, Eff::Yes))
             }
             Expr::Ann(expr, ty) => {
-                let (expr_cs, expr_eff) = self.check(&ctx.restrict(&expr.free_vars()), expr, ty)?;
+                let ty = Spanned::new(
+                    expand_type2(&ty, &self.alias_env, &HashSet::new())
+                        .expect("TODO: handle error"),
+                    ty.span.clone(),
+                );
+                check_wf_type(&ty)?;
+                let (expr_cs, expr_eff) =
+                    self.check(&ctx.restrict(&expr.free_vars()), expr, &ty)?;
 
-                Ok((ty.clone(), expr_cs, expr_eff))
+                Ok((ty, expr_cs, expr_eff))
             }
             Expr::Op1(op1, expr) => {
                 let (expr_ty, expr_cs, expr_eff) = self.infer(ctx, expr)?;
@@ -968,9 +992,19 @@ impl TypeChecker {
             }
             _ => {
                 let (inferred_ty, mut cs, eff) = self.infer(ctx, e)?;
+                let inferred_ty = Spanned::new(
+                    expand_type2(&inferred_ty, &self.alias_env, &HashSet::new())
+                        .expect("TODO: handle error"),
+                    inferred_ty.span.clone(),
+                );
+                let expected_ty = Spanned::new(
+                    expand_type2(&expected_ty, &self.alias_env, &HashSet::new())
+                        .expect("TODO: handle error"),
+                    expected_ty.span.clone(),
+                );
 
-                if !inferred_ty.sem_eq(expected_ty) {
-                    cs.add(inferred_ty.clone(), expected_ty.clone());
+                if !inferred_ty.sem_eq(&expected_ty) {
+                    cs.add(inferred_ty, expected_ty);
                 }
 
                 Ok((cs, eff))
@@ -1052,12 +1086,10 @@ fn is_valid_for_new(s: &Session) -> bool {
     }
 }
 
-fn check_wf_session_(s: &SSession, at_mu: bool, vars: &HashSet<Id>) -> Result<(), TypeError> {
+fn check_wf_session_(s: &SSession, vars: &HashSet<Id>) -> Result<(), TypeError> {
     match &s.val {
         Session::Var(x) => {
-            if at_mu {
-                Err(TypeError::WfNonContractive(s.clone(), x.clone()))
-            } else if !vars.contains(&x.val) {
+            if !vars.contains(&x.val) {
                 Err(TypeError::WfSessionNotClosed(s.clone(), x.clone()))
             } else {
                 Ok(())
@@ -1069,34 +1101,43 @@ fn check_wf_session_(s: &SSession, at_mu: bool, vars: &HashSet<Id>) -> Result<()
             }
             let mut vars = vars.clone();
             vars.insert(x.val.clone());
-            check_wf_session_(s1, true, &vars)
-        }
-        Session::Op(_op, _) => todo!(),
-        Session::Choice(_op, cs) => {
-            if cs.len() == 0 {
-                Err(TypeError::WfEmptyChoice(s.clone()))
-            } else {
-                for (_l, s1) in cs {
-                    check_wf_session_(s1, at_mu, vars)?;
-                }
-                Ok(())
+            check_wf_session_(s1, &vars)?;
+
+            if !s1.is_contractive_on(&x) {
+                return Err(TypeError::WfNonContractive(s.clone(), x.clone()));
             }
+
+            Ok(())
         }
-        Session::End(_op) => Ok(()),
+        Session::Op(_, ty) => {
+            check_wf_type(ty)?;
+            Ok(())
+        }
+        Session::Choice(_op, cs) => {
+            for (_l, s) in cs {
+                check_wf_session_(s, vars)?;
+            }
+            Ok(())
+        }
+        Session::End(_) => Ok(()),
         Session::BorrowEnd(_op) => Ok(()),
-        Session::Skip => todo!(),
-        Session::Semi { .. } => todo!(),
-        Session::UVar(_) => todo!(),
+        Session::Skip => Ok(()),
+        Session::Semi { first, second } => {
+            check_wf_session_(first, vars)?;
+            check_wf_session_(second, vars)?;
+            Ok(())
+        }
+        Session::UVar(_) => Ok(()),
     }
 }
 
-pub fn check_wf_session(s: &SSession) -> Result<(), TypeError> {
-    check_wf_session_(s, false, &HashSet::new())
+fn check_wf_session(s: &SSession) -> Result<(), TypeError> {
+    check_wf_session_(s, &HashSet::new()).map(|_| ())
 }
 
-pub fn check_wf_type(t: &SType) -> Result<(), TypeError> {
+fn check_wf_type(t: &SType) -> Result<(), TypeError> {
     match &t.val {
-        Type::Chan(_) => todo!(),
+        Type::Chan(s) => check_wf_session(&fake_span(s.clone())),
         Type::Arr {
             param: t1, ret: t2, ..
         } => {
@@ -1126,25 +1167,6 @@ pub fn check_wf_type(t: &SType) -> Result<(), TypeError> {
         Type::Int => Ok(()),
         Type::Bool => Ok(()),
         Type::String => Ok(()),
-    }
-}
-
-pub fn check_pattern(pat: &SPattern, t: &SType) -> Result<Ctx, TypeError> {
-    match (&pat.val, &t.val) {
-        (Pattern::Var(x), _) => Ok(Ctx::Bind(x.clone(), t.clone())),
-        (
-            Pattern::Pair(pat1, pat2),
-            Type::Prod {
-                mult: m,
-                first: t1,
-                second: t2,
-            },
-        ) => {
-            let c1 = check_pattern(pat1, t1)?;
-            let c2 = check_pattern(pat2, t2)?;
-            Ok(ext(m.val, c1, c2))
-        }
-        (Pattern::Pair(_pat1, _pat2), _) => Err(TypeError::PatternMismatch(pat.clone(), t.clone())),
     }
 }
 

@@ -91,7 +91,7 @@ pub fn typecheck(src: &str, verbose: bool) -> Result<(SExpr, Type, Constraints, 
     }
 
     let e = parser::parse(&toks).map_err(IErr::Parser)?;
-    let e = type_alias::expand_aliases(&e).map_err(IErr::Alias)?;
+    let (e, alias_env) = type_alias::get_alias_env(e);
     if verbose {
         println!("===== AST =====");
         println!("{e:#?}");
@@ -104,7 +104,7 @@ pub fn typecheck(src: &str, verbose: bool) -> Result<(SExpr, Type, Constraints, 
         println!();
     }
 
-    let (t, cs, p) = type_checker::infer_type(&e).map_err(IErr::Typing)?;
+    let (t, cs, p) = type_checker::infer_type(&e, alias_env).map_err(IErr::Typing)?;
     if verbose {
         println!("===== TYPECHECKER =====");
         println!("Type:    {}", pretty_def(&t));
