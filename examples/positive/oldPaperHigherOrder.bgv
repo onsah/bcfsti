@@ -1,0 +1,17 @@
+# Example from our paper, section 2.5
+
+let
+  higher_order : !(Acq; ?Int; Close); Close *[p] Acq; ?Int; Close; ?String; Close
+                 -[m u 1]-> Unit
+  higher_order pair =
+    let h, c = pair in
+    let cSend, c1 = lsplit (Acq; ?Int; Close) c in
+    let hSend, hClose = lsplit !(Acq; ?Int; Close) h in
+    send @(Acq; ?Int; Close) cSend hSend;
+    close hClose;
+    let cStr, cClose = lsplit ?String c1 in
+    let s = "" + (recv @String cStr) in
+    close cClose
+in
+
+unit
