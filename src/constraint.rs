@@ -1,9 +1,12 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    iter::once,
+};
 
 use crate::{
-    syntax::{SExpr, SId, SType, Session, Type, UVarId},
+    syntax::{Label, SExpr, SId, SType, Session, Type, UVarId},
     type_context::Ctx,
-    util::span::{Spanned, fake_span},
+    util::span::{Span, Spanned, fake_span},
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -12,14 +15,33 @@ pub struct Constraints {
     mobilities: Mobilities,
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, Clone)]
 struct Equivalences(HashSet<(SType, SType)>);
+
+impl PartialEq for Equivalences {
+    fn eq(&self, other: &Self) -> bool {
+        if self.0.len() != other.0.len() {
+            return false;
+        }
+        for (ty1, ty2) in self.0.iter() {
+            if !(other.0.contains(&(ty1.clone(), ty2.clone()))
+                || other.0.contains(&(ty2.clone(), ty1.clone())))
+            {
+                return false;
+            }
+        }
+        true
+    }
+}
+
+impl Eq for Equivalences {}
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 struct Mobilities(Vec<(SExpr, HashSet<SId>, Ctx)>);
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum ConstraintSolutionError {
+    VariablesUnsolvable { vars: HashSet<UVarId> },
     AssignmentNotMobile { expr: SExpr, id: SId, ctx: Ctx },
 }
 
@@ -66,15 +88,13 @@ impl Constraints {
     /// Solve the constraints by propagating assignments to unification variables until a fixed point is reached.
     /// If there is still no solution for some unification variables, `Skip` is substituted instead.
     pub fn solve(self) -> Result<Constraints, ConstraintSolutionError> {
-        let (assignments, remaining_equivalences) = self.equivalences.infer_assignments();
-        let equivalences = remaining_equivalences.subst(&assignments);
+        let (assignments, equivalences) = self.equivalences.unify();
 
-        if !equivalences.is_closed() {
-            return Constraints {
-                equivalences,
-                mobilities: self.mobilities,
-            }
-            .solve();
+        let unsolved_vars = equivalences.unsolved_variables();
+        if !unsolved_vars.is_empty() {
+            return Err(ConstraintSolutionError::VariablesUnsolvable {
+                vars: unsolved_vars,
+            });
         }
 
         self.mobilities.check(&assignments)?;
@@ -163,6 +183,12 @@ impl Constraints {
     }
 }
 
+enum SolveResult {
+    Assignment(UVarId, Session),
+    SubEqs(Vec<(SType, SType)>),
+    Identical,
+}
+
 impl Equivalences {
     pub fn new() -> Equivalences {
         Equivalences(HashSet::new())
@@ -186,6 +212,203 @@ impl Equivalences {
 
     fn into_iter(self) -> impl Iterator<Item = (SType, SType)> {
         self.0.into_iter()
+    }
+
+    pub fn unify(self) -> (Assignments, Equivalences) {
+        // Self::unify_impl(Box::new(self.into_iter()))
+
+        let mut assignments = Assignments::new();
+        let mut equivelances: HashSet<(SType, SType)> = HashSet::new();
+
+        for (ty1, ty2) in self.0.into_iter() {
+            equivelances.insert((ty1, ty2));
+        }
+
+        loop {
+            match equivelances.iter().find_map(|(ty1, ty2)| {
+                Self::try_solve(ty1, ty2).map(|result| (result, (ty1.clone(), ty2.clone())))
+            }) {
+                Some((result, (ty1, ty2))) => {
+                    equivelances.remove(&(ty1, ty2));
+                    match result {
+                        SolveResult::Assignment(id, session) => {
+                            assignments.insert(id, session.clone());
+                            let mut assignment = Assignments::new();
+                            assignment.insert(id, session.clone());
+                            equivelances = equivelances
+                                .into_iter()
+                                .map(|(ty1, ty2)| {
+                                    (
+                                        Constraints::subst(ty1, &assignment),
+                                        Constraints::subst(ty2, &assignment),
+                                    )
+                                })
+                                .collect();
+                        }
+                        SolveResult::SubEqs(more_eqs) => equivelances.extend(more_eqs),
+                        SolveResult::Identical => (),
+                    }
+                }
+                // Nothing more to do
+                None => break,
+            }
+        }
+
+        (assignments, Equivalences(equivelances))
+    }
+
+    fn try_solve(ty1: &Type, ty2: &Type) -> Option<SolveResult> {
+        if ty1.sem_eq(ty2) {
+            Some(SolveResult::Identical)
+        } else {
+            match (ty1, ty2) {
+                (
+                    Type::Arr {
+                        mob: mob1,
+                        mult: mult1,
+                        eff: eff1,
+                        param: p1,
+                        ret: r1,
+                    },
+                    Type::Arr {
+                        mob: mob2,
+                        mult: mult2,
+                        eff: eff2,
+                        param: p2,
+                        ret: r2,
+                    },
+                ) if mob1 == mob2 && mult1 == mult2 && eff1 == eff2 => {
+                    Some(SolveResult::SubEqs(vec![
+                        (*p1.clone(), *p2.clone()),
+                        (*r1.clone(), *r2.clone()),
+                    ]))
+                }
+                (
+                    Type::Prod {
+                        mult: mult1,
+                        first: first1,
+                        second: second1,
+                    },
+                    Type::Prod {
+                        mult: mult2,
+                        first: first2,
+                        second: second2,
+                    },
+                ) if mult1 == mult2 => Some(SolveResult::SubEqs(vec![
+                    (*first1.clone(), *first2.clone()),
+                    (*second1.clone(), *second2.clone()),
+                ])),
+                (Type::Variant(items1), Type::Variant(items2))
+                    if items1
+                        .iter()
+                        .map(|(label, _)| label.val.clone())
+                        .collect::<HashSet<_>>()
+                        == items2
+                            .iter()
+                            .map(|(label, _)| label.val.clone())
+                            .collect::<HashSet<_>>() =>
+                {
+                    Some(SolveResult::SubEqs(
+                        items1
+                            .iter()
+                            .zip(items2.iter())
+                            .map(|((_, ty1), (_, ty2))| (ty1.clone(), ty2.clone()))
+                            .collect::<Vec<(SType, SType)>>(),
+                    ))
+                }
+                (Type::Chan(session1), Type::Chan(session2)) => {
+                    Self::solve_session(session1, session2)
+                }
+                _ => None,
+            }
+        }
+    }
+
+    fn solve_session(session1: &Session, session2: &Session) -> Option<SolveResult> {
+        match (session1, session2) {
+            (Session::UVar(id), session) | (session, Session::UVar(id))
+                if !matches!(session, Session::UVar(_)) =>
+            {
+                Some(SolveResult::Assignment(*id, session.clone()))
+            }
+            (Session::Skip, Session::Skip) => Some(SolveResult::Identical),
+            (Session::End(op1), Session::End(op2)) if op1 == op2 => Some(SolveResult::Identical),
+            (Session::BorrowEnd(op1), Session::BorrowEnd(op2)) if op1 == op2 => {
+                Some(SolveResult::Identical)
+            }
+            (
+                Session::Semi {
+                    first: first1,
+                    second: second1,
+                },
+                Session::Semi {
+                    first: first2,
+                    second: second2,
+                },
+            ) => Some(SolveResult::SubEqs(vec![
+                (
+                    fake_span(Type::Chan(first1.val.clone())),
+                    fake_span(Type::Chan(first2.val.clone())),
+                ),
+                (
+                    fake_span(Type::Chan(second1.val.clone())),
+                    fake_span(Type::Chan(second2.val.clone())),
+                ),
+            ])),
+            (Session::Op(op1, session1), Session::Op(op2, session2)) if op1 == op2 => Some(
+                SolveResult::SubEqs(vec![(*session1.clone(), *session2.clone())]),
+            ),
+            (Session::Mu(id1, session1), Session::Mu(id2, session2)) if id1 == id2 => {
+                Some(SolveResult::SubEqs(vec![(
+                    Spanned::new(Type::Chan(session1.val.clone()), session1.span.clone()),
+                    Spanned::new(Type::Chan(session2.val.clone()), session2.span.clone()),
+                )]))
+            }
+            (Session::Choice(op1, branches1), Session::Choice(op2, branches2)) if op1 == op2 => {
+                let labels1: HashSet<Label> = branches1
+                    .iter()
+                    .map(|(label, _)| label.val.clone())
+                    .collect();
+                let labels2: HashSet<Label> = branches1
+                    .iter()
+                    .map(|(label, _)| label.val.clone())
+                    .collect();
+                if labels1 == labels2 {
+                    let sub_eqs = labels1.into_iter().map(|label| {
+                        let session1 = branches1
+                            .iter()
+                            .find_map(|(br_label, br)| {
+                                if &br_label.val == &label {
+                                    Some(br)
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap();
+                        let session2 = branches2
+                            .iter()
+                            .find_map(|(br_label, br)| {
+                                if &br_label.val == &label {
+                                    Some(br)
+                                } else {
+                                    None
+                                }
+                            })
+                            .unwrap();
+
+                        (
+                            Spanned::new(Type::Chan(session1.val.clone()), session1.span.clone()),
+                            Spanned::new(Type::Chan(session2.val.clone()), session2.span.clone()),
+                        )
+                    });
+
+                    Some(SolveResult::SubEqs(sub_eqs.collect()))
+                } else {
+                    None
+                }
+            }
+            _ => None,
+        }
     }
 
     /// Infer assignments for unification variables from the equivalences.
@@ -385,7 +608,7 @@ impl Equivalences {
     /// Substitute the assignments into the equivalences, and return new ones
     fn subst(&self, assignments: &Assignments) -> Self {
         let mut new_equivalences = HashSet::new();
-        for (ty1, ty2) in self.0.iter() {
+        for (ty1, ty2) in self.iter() {
             let ty1 = Constraints::subst(ty1.clone(), assignments);
             let ty2 = Constraints::subst(ty2.clone(), assignments);
             new_equivalences.insert((ty1, ty2));
@@ -437,7 +660,7 @@ mod tests {
     use std::collections::HashSet;
 
     use crate::{
-        constraint::Constraints,
+        constraint::{ConstraintSolutionError, Constraints},
         session_type,
         syntax::{Eff, Mob, Mult, Session, Type},
         util::span::fake_span,
@@ -508,10 +731,9 @@ mod tests {
 
         assert_eq!(
             solved,
-            Ok(Constraints::from_equivalences(HashSet::from([(
-                fake_span(Type::Chan(session_type! { Skip }.val)),
-                fake_span(Type::Chan(session_type! { Skip }.val))
-            )])))
+            Err(ConstraintSolutionError::VariablesUnsolvable {
+                vars: HashSet::from([1, 2])
+            })
         );
     }
 
@@ -575,27 +797,7 @@ mod tests {
         );
 
         let solved = constraints.solve();
-        assert_eq!(
-            solved,
-            Ok(Constraints::from_equivalences(HashSet::from([(
-                fake_span(Type::Chan(
-                    session_type! { !(Type::Prod {
-                        mult: fake_span(Mult::Lin),
-                        first: Box::new(fake_span(Type::Chan(session_type! { !Int }.val))),
-                        second: Box::new(fake_span(Type::Chan(session_type! { ?String }.val)))
-                    }) }
-                    .val
-                )),
-                fake_span(Type::Chan(
-                    session_type! { !(Type::Prod {
-                        mult: fake_span(Mult::Lin),
-                        first: Box::new(fake_span(Type::Chan(session_type! { !Int }.val))),
-                        second: Box::new(fake_span(Type::Chan(session_type! { ?String }.val)))
-                    }) }
-                    .val
-                )),
-            ),])))
-        );
+        assert_eq!(solved, Ok(Constraints::empty()));
     }
 
     #[test]
@@ -664,31 +866,7 @@ mod tests {
         );
 
         let solved = constraints.solve();
-        assert_eq!(
-            solved,
-            Ok(Constraints::from_equivalences(HashSet::from([(
-                fake_span(Type::Chan(
-                    session_type! { !(Type::Arr {
-                        mob: fake_span(Mob::Mobile),
-                        mult: fake_span(Mult::Lin),
-                        eff: fake_span(Eff::No),
-                        param: Box::new(fake_span(Type::Chan(session_type! { !Int }.val))),
-                        ret: Box::new(fake_span(Type::Chan(session_type! { ?String }.val)))
-                    }) }
-                    .val
-                )),
-                fake_span(Type::Chan(
-                    session_type! { !(Type::Arr {
-                        mob: fake_span(Mob::Mobile),
-                        mult: fake_span(Mult::Lin),
-                        eff: fake_span(Eff::No),
-                        param: Box::new(fake_span(Type::Chan(session_type! { !Int }.val))),
-                        ret: Box::new(fake_span(Type::Chan(session_type! { ?String }.val)))
-                    }) }
-                    .val
-                )),
-            ),])))
-        );
+        assert_eq!(solved, Ok(Constraints::empty()));
     }
 
     #[test]
@@ -748,25 +926,7 @@ mod tests {
         );
 
         let solved = constraints.solve();
-        assert_eq!(
-            solved,
-            Ok(Constraints::from_equivalences(HashSet::from([(
-                fake_span(Type::Chan(
-                    session_type! { !(Type::Variant(vec![
-                        (fake_span("Left".to_string()), fake_span(Type::Chan(session_type! { !Int }.val))),
-                        (fake_span("Right".to_string()), fake_span(Type::Chan(session_type! { ?String }.val)))
-                    ])) }
-                    .val
-                )),
-                fake_span(Type::Chan(
-                    session_type! { !(Type::Variant(vec![
-                        (fake_span("Left".to_string()), fake_span(Type::Chan(session_type! { !Int }.val))),
-                        (fake_span("Right".to_string()), fake_span(Type::Chan(session_type! { ?String }.val)))
-                    ])) }
-                    .val
-                )),
-            ),])))
-        );
+        assert_eq!(solved, Ok(Constraints::empty()));
     }
 
     #[test]
@@ -793,13 +953,7 @@ mod tests {
         );
 
         let solved = constraints.solve();
-        assert_eq!(
-            solved,
-            Ok(Constraints::from_equivalences(HashSet::from([(
-                fake_span(Type::Chan(session_type! { ?String; !Int }.val)),
-                fake_span(Type::Chan(session_type! { ?String; !Int }.val)),
-            )])))
-        );
+        assert_eq!(solved, Ok(Constraints::empty()));
     }
 
     #[test]
@@ -862,17 +1016,7 @@ mod tests {
         );
 
         let solved = constraints.solve();
-        assert_eq!(
-            solved,
-            Ok(Constraints::from_equivalences(HashSet::from([(
-                fake_span(Type::Chan(
-                    session_type! { mu X. +{ a: !Int; X, b: !Bool; ?String; Wait } }.val
-                )),
-                fake_span(Type::Chan(
-                    session_type! { mu X. +{ a: !Int; X, b: !Bool; ?String; Wait } }.val
-                )),
-            )])))
-        );
+        assert_eq!(solved, Ok(Constraints::empty()));
     }
 
     #[test]
@@ -901,12 +1045,6 @@ mod tests {
         );
 
         let solved = constraints.solve();
-        assert_eq!(
-            solved,
-            Ok(Constraints::from_equivalences(HashSet::from([(
-                fake_span(Type::Chan(session_type! { !Int; ?String }.val,)),
-                fake_span(Type::Chan(session_type! { !Int; ?String }.val,)),
-            )])))
-        );
+        assert_eq!(solved, Ok(Constraints::empty()));
     }
 }

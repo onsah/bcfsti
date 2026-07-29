@@ -5,7 +5,10 @@ use crate::{
     lexer::LexerError,
     syntax::SType,
     type_checker::TypeError,
-    util::{pretty::pretty_def, span::Span},
+    util::{
+        pretty::pretty_def,
+        span::{Span, fake_span},
+    },
 };
 use ariadne::{ColorGenerator, IndexType, Label, Report, ReportKind, Source};
 use peg::error::ParseError;
@@ -718,6 +721,17 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                         pretty_def(&ty.val),
                         pretty_def(&ctx.simplify())
                     ),
+                )],
+            );
+        }
+        IErr::Constraint(ConstraintSolutionError::VariablesUnsolvable { vars }) => {
+            report(
+                &src,
+                0..0,
+                "Constraint Solution Error",
+                [label(
+                    0..0,
+                    format!("Unification variables {:?} are not solvable", vars),
                 )],
             );
         }
