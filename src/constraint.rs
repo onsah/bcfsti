@@ -180,19 +180,9 @@ impl Constraints {
     }
 }
 
-enum SolveResult {
-    Assignments(HashMap<UVarId, Session>),
+enum SolveError {
     SubEqs(Vec<(SType, SType)>),
-}
-
-impl SolveResult {
-    pub fn done() -> SolveResult {
-        SolveResult::Assignments(HashMap::new())
-    }
-
-    pub fn assign(id: UVarId, session: Session) -> SolveResult {
-        SolveResult::Assignments(HashMap::from([(id, session)]))
-    }
+    Check,
 }
 
 impl Equivalences {
@@ -229,29 +219,32 @@ impl Equivalences {
         }
 
         loop {
-            match equivelances.iter().find_map(|(ty1, ty2)| {
-                Self::unify_type(ty1, ty2).map(|result| (result, (ty1.clone(), ty2.clone())))
-            }) {
-                Some((result, (ty1, ty2))) => {
-                    equivelances.remove(&(ty1, ty2));
-                    match result {
-                        SolveResult::Assignments(assignments_) => {
-                            equivelances = equivelances
-                                .into_iter()
-                                .map(|(ty1, ty2)| {
-                                    (
-                                        Constraints::subst(ty1, &assignments_),
-                                        Constraints::subst(ty2, &assignments_),
-                                    )
-                                })
-                                .collect();
-                            assignments.extend(assignments_);
-                        }
-                        SolveResult::SubEqs(more_eqs) => equivelances.extend(more_eqs),
-                    }
+            let Some((result, (ty1, ty2))) = equivelances
+                .iter()
+                .map(|(ty1, ty2)| (Self::unify_type(ty1, ty2), (ty1.clone(), ty2.clone())))
+                .find(|(result, _)| !matches!(result, Err(SolveError::Check)))
+            else {
+                break;
+            };
+
+            equivelances.remove(&(ty1, ty2));
+
+            match result {
+                Ok(assignments_) => {
+                    // Substitute assignments to the remaining constraints
+                    equivelances = equivelances
+                        .into_iter()
+                        .map(|(ty1, ty2)| {
+                            (
+                                Constraints::subst(ty1, &assignments_),
+                                Constraints::subst(ty2, &assignments_),
+                            )
+                        })
+                        .collect();
+                    assignments.extend(assignments_);
                 }
-                // Nothing more to do
-                None => break,
+                Err(SolveError::SubEqs(more_eqs)) => equivelances.extend(more_eqs),
+                Err(SolveError::Check) => unreachable!(),
             }
         }
 
@@ -260,9 +253,9 @@ impl Equivalences {
 
     /// Unifies two regular types. When structures match, further subconstraints are generated.
     /// When a unification variable on one side is found, it's converted to an assignment.
-    fn unify_type(ty1: &Type, ty2: &Type) -> Option<SolveResult> {
+    fn unify_type(ty1: &Type, ty2: &Type) -> Result<Assignments, SolveError> {
         if ty1.sem_eq(ty2) {
-            Some(SolveResult::done())
+            Ok(HashMap::new())
         } else {
             match (ty1, ty2) {
                 (
@@ -281,7 +274,7 @@ impl Equivalences {
                         ret: r2,
                     },
                 ) if mob1 == mob2 && mult1 == mult2 && eff1 == eff2 => {
-                    Some(SolveResult::SubEqs(vec![
+                    Err(SolveError::SubEqs(vec![
                         (*p1.clone(), *p2.clone()),
                         (*r1.clone(), *r2.clone()),
                     ]))
@@ -297,7 +290,7 @@ impl Equivalences {
                         first: first2,
                         second: second2,
                     },
-                ) if mult1 == mult2 => Some(SolveResult::SubEqs(vec![
+                ) if mult1 == mult2 => Err(SolveError::SubEqs(vec![
                     (*first1.clone(), *first2.clone()),
                     (*second1.clone(), *second2.clone()),
                 ])),
@@ -311,7 +304,7 @@ impl Equivalences {
                             .map(|(label, _)| label.val.clone())
                             .collect::<HashSet<_>>() =>
                 {
-                    Some(SolveResult::SubEqs(
+                    Err(SolveError::SubEqs(
                         items1
                             .iter()
                             .zip(items2.iter())
@@ -322,7 +315,7 @@ impl Equivalences {
                 (Type::Chan(session1), Type::Chan(session2)) => {
                     Self::unify_session(session1, session2)
                 }
-                _ => None,
+                _ => Err(SolveError::Check),
             }
         }
     }
@@ -335,19 +328,17 @@ impl Equivalences {
     /// 2. When both side structurally match, further substructures are unified.
     ///    - If all substructures generate assignment, the result is the union of those assignments
     ///    - Otherwise, equivalence constraint can't be unified
-    fn unify_session(session1: &Session, session2: &Session) -> Option<SolveResult> {
+    fn unify_session(session1: &Session, session2: &Session) -> Result<Assignments, SolveError> {
         match (session1, session2) {
             (Session::UVar(id), session) | (session, Session::UVar(id))
                 if !matches!(session, Session::UVar(_)) =>
             {
-                Some(SolveResult::assign(*id, session.clone()))
+                Ok(HashMap::from([(*id, session.clone())]))
             }
-            (Session::Skip, Session::Skip) => Some(SolveResult::done()),
-            (Session::End(op1), Session::End(op2)) if op1 == op2 => Some(SolveResult::done()),
-            (Session::BorrowEnd(op1), Session::BorrowEnd(op2)) if op1 == op2 => {
-                Some(SolveResult::done())
-            }
-            (Session::Var(id1), Session::Var(id2)) if id1 == id2 => Some(SolveResult::done()),
+            (Session::Skip, Session::Skip) => Ok(HashMap::new()),
+            (Session::End(op1), Session::End(op2)) if op1 == op2 => Ok(HashMap::new()),
+            (Session::BorrowEnd(op1), Session::BorrowEnd(op2)) if op1 == op2 => Ok(HashMap::new()),
+            (Session::Var(id1), Session::Var(id2)) if id1 == id2 => Ok(HashMap::new()),
             (
                 Session::Semi {
                     first: first1,
@@ -358,63 +349,39 @@ impl Equivalences {
                     second: second2,
                 },
             ) => {
-                let result1 = Self::unify_session(first1, first2)?;
-                let result2 = Self::unify_session(second1, second2)?;
-
-                match (result1, result2) {
-                    (
-                        SolveResult::Assignments(mut assignments1),
-                        SolveResult::Assignments(assignments2),
-                    ) => {
-                        assignments1.extend(assignments2);
-                        Some(SolveResult::Assignments(assignments1))
-                    }
-                    _ => None,
-                }
+                let mut assignments = Self::unify_session(first1, first2)?;
+                assignments.extend(Self::unify_session(second1, second2)?);
+                Ok(assignments)
             }
             (Session::Op(op1, session1), Session::Op(op2, session2)) if op1 == op2 => {
-                match Self::unify_type(&session1.val, &session2.val)? {
-                    SolveResult::Assignments(assignments) => {
-                        Some(SolveResult::Assignments(assignments))
-                    }
-                    _ => None,
-                }
+                Self::unify_type(&session1.val, &session2.val).map_err(|_| SolveError::Check)
             }
             (Session::Choice(op1, branches1), Session::Choice(op2, branches2)) if op1 == op2 => {
                 if branches1.len() != branches2.len() {
-                    return None;
+                    return Err(SolveError::Check);
                 }
 
                 let mut assignments = HashMap::new();
                 for (label, branch1) in branches1.iter() {
-                    let branch2 = branches2.iter().find_map(|(label_, branch)| {
+                    let Some(branch2) = branches2.iter().find_map(|(label_, branch)| {
                         if &label_.val == &label.val {
                             Some(branch)
                         } else {
                             None
                         }
-                    })?;
+                    }) else {
+                        return Err(SolveError::Check);
+                    };
 
-                    if let Some(SolveResult::Assignments(ass)) =
-                        Self::unify_session(branch1, branch2)
-                    {
-                        assignments.extend(ass);
-                    } else {
-                        return None;
-                    }
+                    assignments.extend(Self::unify_session(branch1, branch2)?);
                 }
 
-                Some(SolveResult::Assignments(assignments))
+                Ok(assignments)
             }
             (Session::Mu(id1, session1), Session::Mu(id2, session2)) if id1 == id2 => {
-                match Self::unify_session(session1, session2)? {
-                    SolveResult::Assignments(assignments) => {
-                        Some(SolveResult::Assignments(assignments))
-                    }
-                    _ => None,
-                }
+                Self::unify_session(session1, session2).map_err(|_| SolveError::Check)
             }
-            _ => None,
+            _ => Err(SolveError::Check),
         }
     }
 
