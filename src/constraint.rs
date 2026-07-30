@@ -100,84 +100,6 @@ impl Constraints {
             mobilities: Mobilities::new(),
         })
     }
-
-    fn subst(ty: SType, assignments: &Assignments) -> SType {
-        let span = ty.span.clone();
-        let val = match ty.val {
-            Type::Chan(session) => Type::Chan(Self::subst_session(session, assignments)),
-            Type::Bool | Type::Int | Type::String => ty.val,
-            Type::Prod {
-                mult,
-                first,
-                second,
-            } => Type::Prod {
-                mult,
-                first: Box::new(Self::subst(*first, assignments)),
-                second: Box::new(Self::subst(*second, assignments)),
-            },
-            Type::Arr {
-                mob,
-                mult,
-                eff,
-                param,
-                ret,
-            } => Type::Arr {
-                mob,
-                mult,
-                eff,
-                param: Box::new(Self::subst(*param, assignments)),
-                ret: Box::new(Self::subst(*ret, assignments)),
-            },
-            Type::Variant(items) => Type::Variant(
-                items
-                    .into_iter()
-                    .map(|(label, ty)| (label, Self::subst(ty, assignments)))
-                    .collect(),
-            ),
-            Type::Unit => Type::Unit,
-        };
-        Spanned::new(val, span)
-    }
-
-    fn subst_session(ty: Session, assignments: &Assignments) -> Session {
-        match ty {
-            Session::UVar(var) => {
-                if let Some(ty) = assignments.get(&var) {
-                    ty.clone()
-                } else {
-                    Session::UVar(var)
-                }
-            }
-            Session::Skip => Session::Skip,
-            Session::Semi { first, second } => Session::Semi {
-                first: Box::new(fake_span(Self::subst_session(first.val, assignments))),
-                second: Box::new(fake_span(Self::subst_session(second.val, assignments))),
-            },
-            Session::End(session_op) => Session::End(session_op),
-            Session::BorrowEnd(session_op) => Session::BorrowEnd(session_op),
-            Session::Op(session_op, ty) => {
-                Session::Op(session_op, Box::new(Self::subst(*ty, assignments)))
-            }
-            Session::Choice(session_op, items) => Session::Choice(
-                session_op,
-                items
-                    .into_iter()
-                    .map(|(label, s)| (label, fake_span(Self::subst_session(s.val, assignments))))
-                    .collect(),
-            ),
-            Session::Mu(id, body) => Session::Mu(
-                id,
-                Box::new(fake_span(Self::subst_session(body.val, assignments))),
-            ),
-            Session::Var(id) => Session::Var(id),
-        }
-    }
-
-    fn subst_ctx(ctx: &mut Ctx, assignments: &Assignments) {
-        ctx.map_binds_mut(&mut |_, ty| {
-            *ty = Constraints::subst(fake_span(ty.clone()), assignments).val;
-        })
-    }
 }
 
 enum SolveError {
@@ -236,8 +158,8 @@ impl Equivalences {
                         .into_iter()
                         .map(|(ty1, ty2)| {
                             (
-                                Constraints::subst(ty1, &assignments_),
-                                Constraints::subst(ty2, &assignments_),
+                                subst_type(ty1, &assignments_),
+                                subst_type(ty2, &assignments_),
                             )
                         })
                         .collect();
@@ -417,7 +339,7 @@ impl Mobilities {
 
     fn check(mut self, assignments: &Assignments) -> Result<(), ConstraintSolutionError> {
         for (expr, ids, ctx) in self.0.iter_mut() {
-            Constraints::subst_ctx(ctx, &assignments);
+            subst_ctx(ctx, &assignments);
             let binds = ctx.binds();
             for id in ids.iter() {
                 if !binds.get(&id.val).unwrap().is_mobile() {
@@ -431,6 +353,84 @@ impl Mobilities {
         }
         Ok(())
     }
+}
+
+fn subst_type(ty: SType, assignments: &Assignments) -> SType {
+    let span = ty.span.clone();
+    let val = match ty.val {
+        Type::Chan(session) => Type::Chan(subst_session(session, assignments)),
+        Type::Bool | Type::Int | Type::String => ty.val,
+        Type::Prod {
+            mult,
+            first,
+            second,
+        } => Type::Prod {
+            mult,
+            first: Box::new(subst_type(*first, assignments)),
+            second: Box::new(subst_type(*second, assignments)),
+        },
+        Type::Arr {
+            mob,
+            mult,
+            eff,
+            param,
+            ret,
+        } => Type::Arr {
+            mob,
+            mult,
+            eff,
+            param: Box::new(subst_type(*param, assignments)),
+            ret: Box::new(subst_type(*ret, assignments)),
+        },
+        Type::Variant(items) => Type::Variant(
+            items
+                .into_iter()
+                .map(|(label, ty)| (label, subst_type(ty, assignments)))
+                .collect(),
+        ),
+        Type::Unit => Type::Unit,
+    };
+    Spanned::new(val, span)
+}
+
+fn subst_session(ty: Session, assignments: &Assignments) -> Session {
+    match ty {
+        Session::UVar(var) => {
+            if let Some(ty) = assignments.get(&var) {
+                ty.clone()
+            } else {
+                Session::UVar(var)
+            }
+        }
+        Session::Skip => Session::Skip,
+        Session::Semi { first, second } => Session::Semi {
+            first: Box::new(fake_span(subst_session(first.val, assignments))),
+            second: Box::new(fake_span(subst_session(second.val, assignments))),
+        },
+        Session::End(session_op) => Session::End(session_op),
+        Session::BorrowEnd(session_op) => Session::BorrowEnd(session_op),
+        Session::Op(session_op, ty) => {
+            Session::Op(session_op, Box::new(subst_type(*ty, assignments)))
+        }
+        Session::Choice(session_op, items) => Session::Choice(
+            session_op,
+            items
+                .into_iter()
+                .map(|(label, s)| (label, fake_span(subst_session(s.val, assignments))))
+                .collect(),
+        ),
+        Session::Mu(id, body) => Session::Mu(
+            id,
+            Box::new(fake_span(subst_session(body.val, assignments))),
+        ),
+        Session::Var(id) => Session::Var(id),
+    }
+}
+
+fn subst_ctx(ctx: &mut Ctx, assignments: &Assignments) {
+    ctx.map_binds_mut(&mut |_, ty| {
+        *ty = subst_type(fake_span(ty.clone()), assignments).val;
+    })
 }
 
 #[cfg(test)]
