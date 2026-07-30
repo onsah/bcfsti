@@ -2,13 +2,13 @@ use std::collections::HashSet;
 
 use crate::{
     constraint::Constraints,
+    context::{Ctx, JoinOrd, ext},
     session_type,
     syntax::{
         Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, SEff, SExpr, SId, SMult, SPattern, SSession,
         SType, Session, SessionOp, Type,
     },
     type_alias::{AliasEnv, expand_session, expand_stype},
-    type_context::{Ctx, JoinOrd, ext},
     util::span::{Spanned, fake_span},
 };
 

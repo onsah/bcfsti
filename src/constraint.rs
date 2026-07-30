@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
+    context::Ctx,
     syntax::{SExpr, SId, SType, Session, Type, UVarId},
-    type_context::Ctx,
     util::span::{Spanned, fake_span},
 };
 

@@ -1,5 +1,6 @@
 pub mod args;
 pub mod constraint;
+pub mod context;
 pub mod equivalence;
 pub mod error_reporting;
 pub mod freest;
@@ -10,7 +11,6 @@ pub mod pretty;
 pub mod syntax;
 pub mod type_alias;
 pub mod type_checker;
-pub mod type_context;
 pub mod util;
 
 #[cfg(test)]
