@@ -1,12 +1,9 @@
-use std::{
-    collections::{HashMap, HashSet},
-    iter::once,
-};
+use std::collections::{HashMap, HashSet};
 
 use crate::{
-    syntax::{Label, SExpr, SId, SType, Session, Type, UVarId},
+    syntax::{SExpr, SId, SType, Session, Type, UVarId},
     type_context::Ctx,
-    util::span::{Span, Spanned, fake_span},
+    util::span::{Spanned, fake_span},
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -88,11 +85,10 @@ impl Constraints {
     /// Solve the constraints by propagating assignments to unification variables until a fixed point is reached.
     /// If there is still no solution for some unification variables, `Skip` is substituted instead.
     pub fn solve(self) -> Result<Constraints, ConstraintSolutionError> {
-        let (assignments, equivalences) = self.equivalences.unify();
+        let (assignments, equivalences) = self.equivalences.solve();
 
         let unsolved_vars = equivalences.unsolved_variables();
         if !unsolved_vars.is_empty() {
-            dbg!();
             return Err(ConstraintSolutionError::VariablesUnsolvable {
                 vars: unsolved_vars,
             });
@@ -199,11 +195,6 @@ impl SolveResult {
     }
 }
 
-enum SessionResult {
-    Matches(HashMap<UVarId, Session>),
-    DoesntMatch,
-}
-
 impl Equivalences {
     pub fn new() -> Equivalences {
         Equivalences(HashSet::new())
@@ -229,9 +220,7 @@ impl Equivalences {
         self.0.into_iter()
     }
 
-    pub fn unify(self) -> (Assignments, Equivalences) {
-        // Self::unify_impl(Box::new(self.into_iter()))
-
+    pub fn solve(self) -> (Assignments, Equivalences) {
         let mut assignments = Assignments::new();
         let mut equivelances: HashSet<(SType, SType)> = HashSet::new();
 
@@ -240,9 +229,8 @@ impl Equivalences {
         }
 
         loop {
-            dbg!();
             match equivelances.iter().find_map(|(ty1, ty2)| {
-                Self::try_solve(ty1, ty2).map(|result| (result, (ty1.clone(), ty2.clone())))
+                Self::unify_type(ty1, ty2).map(|result| (result, (ty1.clone(), ty2.clone())))
             }) {
                 Some((result, (ty1, ty2))) => {
                     equivelances.remove(&(ty1, ty2));
@@ -267,12 +255,12 @@ impl Equivalences {
             }
         }
 
-        dbg!();
-
         (assignments, Equivalences(equivelances))
     }
 
-    fn try_solve(ty1: &Type, ty2: &Type) -> Option<SolveResult> {
+    /// Unifies two regular types. When structures match, further subconstraints are generated.
+    /// When a unification variable on one side is found, it's converted to an assignment.
+    fn unify_type(ty1: &Type, ty2: &Type) -> Option<SolveResult> {
         if ty1.sem_eq(ty2) {
             Some(SolveResult::done())
         } else {
@@ -332,15 +320,22 @@ impl Equivalences {
                     ))
                 }
                 (Type::Chan(session1), Type::Chan(session2)) => {
-                    Self::solve_session(session1, session2)
+                    Self::unify_session(session1, session2)
                 }
                 _ => None,
             }
         }
     }
 
-    // TODO: If the structure fully identical module unification variables, simplify the constraint
-    fn solve_session(session1: &Session, session2: &Session) -> Option<SolveResult> {
+    /// Unifies two session types. Unlike regular types we can't further generate subconstraints
+    /// due to associativity of sequencing operators. So either two types fully match modulo unification variables
+    /// or the equivalence constraint should be checked by FreeST.
+    ///
+    /// 1. When one part is a unification variable and the other side is not, generates an assignment
+    /// 2. When both side structurally match, further substructures are unified.
+    ///    - If all substructures generate assignment, the result is the union of those assignments
+    ///    - Otherwise, equivalence constraint can't be unified
+    fn unify_session(session1: &Session, session2: &Session) -> Option<SolveResult> {
         match (session1, session2) {
             (Session::UVar(id), session) | (session, Session::UVar(id))
                 if !matches!(session, Session::UVar(_)) =>
@@ -363,8 +358,8 @@ impl Equivalences {
                     second: second2,
                 },
             ) => {
-                let result1 = Self::solve_session(first1, first2)?;
-                let result2 = Self::solve_session(second1, second2)?;
+                let result1 = Self::unify_session(first1, first2)?;
+                let result2 = Self::unify_session(second1, second2)?;
 
                 match (result1, result2) {
                     (
@@ -378,7 +373,7 @@ impl Equivalences {
                 }
             }
             (Session::Op(op1, session1), Session::Op(op2, session2)) if op1 == op2 => {
-                match Self::try_solve(&session1.val, &session2.val)? {
+                match Self::unify_type(&session1.val, &session2.val)? {
                     SolveResult::Assignments(assignments) => {
                         Some(SolveResult::Assignments(assignments))
                     }
@@ -401,7 +396,7 @@ impl Equivalences {
                     })?;
 
                     if let Some(SolveResult::Assignments(ass)) =
-                        Self::solve_session(branch1, branch2)
+                        Self::unify_session(branch1, branch2)
                     {
                         assignments.extend(ass);
                     } else {
@@ -412,7 +407,7 @@ impl Equivalences {
                 Some(SolveResult::Assignments(assignments))
             }
             (Session::Mu(id1, session1), Session::Mu(id2, session2)) if id1 == id2 => {
-                match Self::solve_session(session1, session2)? {
+                match Self::unify_session(session1, session2)? {
                     SolveResult::Assignments(assignments) => {
                         Some(SolveResult::Assignments(assignments))
                     }
@@ -423,191 +418,6 @@ impl Equivalences {
         }
     }
 
-    /// Infer assignments for unification variables from the equivalences.
-    /// Returns a tuple of the assignments and the remaining equivalences that didn't yield an assignment.
-    fn infer_assignments(self) -> (Assignments, Self) {
-        let mut assignments: Assignments = HashMap::new();
-        let mut other = Self::new();
-        for (ty1, ty2) in self.into_iter() {
-            match Self::extract_bare_assignment(&ty1.val, &ty2.val)
-                .or(Self::extract_bare_assignment(&ty2.val, &ty1.val))
-            {
-                Some((uvar_id, session)) => {
-                    if !assignments.contains_key(&uvar_id) {
-                        assignments.insert(uvar_id, session);
-                    } else {
-                        other.add((ty1, ty2));
-                    }
-                }
-                None => {
-                    match Self::extract_nested_assignments(&ty1.val, &ty2.val)
-                        .or(Self::extract_nested_assignments(&ty2.val, &ty1.val))
-                    {
-                        Some(extracted) => {
-                            for (var, session) in extracted {
-                                assignments.entry(var).or_insert(session);
-                            }
-                        }
-                        None => {
-                            other.add((ty1, ty2));
-                        }
-                    }
-                }
-            }
-        }
-
-        // If there are still unsolved variables with no more assignments,
-        // substitute Skip for them
-        let assignments = if assignments.is_empty() {
-            other
-                .unsolved_variables()
-                .into_iter()
-                .map(|var| (var, Session::Skip))
-                .collect()
-        } else {
-            assignments
-        };
-
-        (assignments, other)
-    }
-
-    /// If `lhs` is a channel carrying a bare unification variable and `rhs` is a channel
-    /// carrying a closed session, return the variable and the type pair
-    fn extract_bare_assignment(lhs: &Type, rhs: &Type) -> Option<(UVarId, Session)> {
-        if let Type::Chan(Session::UVar(var)) = lhs
-            && let Type::Chan(session) = rhs
-            && session.is_closed()
-        {
-            Some((*var, session.clone()))
-        } else {
-            None
-        }
-    }
-
-    /// Attempt to structurally match `ty_uvars` (which contains unification variables) against
-    /// `ty_closed` (which is closed). When the structures match, every unification variable in
-    /// `ty_uvars` is assigned the corresponding sub-part of `ty_closed`. Returns `None` if the
-    /// structures do not match.
-    fn extract_nested_assignments(ty_uvars: &Type, ty_closed: &Type) -> Option<Assignments> {
-        if !(ty_closed.is_closed() && !ty_uvars.is_closed()) {
-            return None;
-        }
-
-        let mut assignments = Assignments::new();
-        if Self::match_types(ty_uvars, ty_closed, &mut assignments) {
-            Some(assignments)
-        } else {
-            None
-        }
-    }
-
-    fn match_types(ty_uvars: &Type, ty_closed: &Type, assignments: &mut Assignments) -> bool {
-        match (ty_uvars, ty_closed) {
-            (Type::Chan(s1), Type::Chan(s2)) => Self::match_sessions(s1, s2, assignments),
-            (
-                Type::Prod {
-                    mult: m1,
-                    first: f1,
-                    second: s1,
-                },
-                Type::Prod {
-                    mult: m2,
-                    first: f2,
-                    second: s2,
-                },
-            ) => {
-                m1 == m2
-                    && Self::match_types(&f1.val, &f2.val, assignments)
-                    && Self::match_types(&s1.val, &s2.val, assignments)
-            }
-            (
-                Type::Arr {
-                    mob: mob1,
-                    mult: mult1,
-                    eff: eff1,
-                    param: p1,
-                    ret: r1,
-                },
-                Type::Arr {
-                    mob: mob2,
-                    mult: mult2,
-                    eff: eff2,
-                    param: p2,
-                    ret: r2,
-                },
-            ) => {
-                mob1 == mob2
-                    && mult1 == mult2
-                    && eff1 == eff2
-                    && Self::match_types(&p1.val, &p2.val, assignments)
-                    && Self::match_types(&r1.val, &r2.val, assignments)
-            }
-            (Type::Variant(cs1), Type::Variant(cs2)) => {
-                cs1.len() == cs2.len()
-                    && cs1.iter().zip(cs2.iter()).all(|((l1, t1), (l2, t2))| {
-                        l1 == l2 && Self::match_types(&t1.val, &t2.val, assignments)
-                    })
-            }
-            (Type::Int, Type::Int)
-            | (Type::Bool, Type::Bool)
-            | (Type::String, Type::String)
-            | (Type::Unit, Type::Unit) => true,
-            _ => false,
-        }
-    }
-
-    fn match_sessions(
-        s_uvars: &Session,
-        s_closed: &Session,
-        assignments: &mut Assignments,
-    ) -> bool {
-        match (s_uvars, s_closed) {
-            (Session::UVar(var), s) => match assignments.get(var) {
-                Some(existing) => existing == s,
-                None => {
-                    assignments.insert(*var, s.clone());
-                    true
-                }
-            },
-            (Session::Skip, Session::Skip) => true,
-            (
-                Session::Semi {
-                    first: f1,
-                    second: s1,
-                },
-                Session::Semi {
-                    first: f2,
-                    second: s2,
-                },
-            ) => {
-                Self::match_sessions(&f1.val, &f2.val, assignments)
-                    && Self::match_sessions(&s1.val, &s2.val, assignments)
-            }
-            (Session::End(a), Session::End(b)) => a == b,
-            (Session::BorrowEnd(a), Session::BorrowEnd(b)) => a == b,
-            (Session::Op(op1, t1), Session::Op(op2, t2)) => {
-                op1 == op2 && Self::match_types(&t1.val, &t2.val, assignments)
-            }
-            (Session::Choice(op1, cs1), Session::Choice(op2, cs2)) => {
-                op1 == op2
-                    && cs1.len() == cs2.len()
-                    && cs1.iter().zip(cs2.iter()).all(|((l1, c1), (l2, c2))| {
-                        l1 == l2 && Self::match_sessions(&c1.val, &c2.val, assignments)
-                    })
-            }
-            (Session::Mu(id1, b1), Session::Mu(id2, b2)) => {
-                id1 == id2 && Self::match_sessions(&b1.val, &b2.val, assignments)
-            }
-            (Session::Var(id1), Session::Var(id2)) => id1 == id2,
-            _ => false,
-        }
-    }
-
-    fn is_closed(&self) -> bool {
-        self.iter()
-            .all(|(ty1, ty2)| ty1.val.is_closed() && ty2.val.is_closed())
-    }
-
     fn unsolved_variables(&self) -> HashSet<UVarId> {
         let mut result = HashSet::new();
         for (ty1, ty2) in self.iter() {
@@ -615,17 +425,6 @@ impl Equivalences {
             result.extend(ty2.val.unification_variables());
         }
         result
-    }
-
-    /// Substitute the assignments into the equivalences, and return new ones
-    fn subst(&self, assignments: &Assignments) -> Self {
-        let mut new_equivalences = HashSet::new();
-        for (ty1, ty2) in self.iter() {
-            let ty1 = Constraints::subst(ty1.clone(), assignments);
-            let ty2 = Constraints::subst(ty2.clone(), assignments);
-            new_equivalences.insert((ty1, ty2));
-        }
-        Equivalences(new_equivalences)
     }
 }
 

@@ -5,10 +5,7 @@ use crate::{
     lexer::LexerError,
     syntax::SType,
     type_checker::TypeError,
-    util::{
-        pretty::pretty_def,
-        span::{Span, fake_span},
-    },
+    util::{pretty::pretty_def, span::Span},
 };
 use ariadne::{ColorGenerator, IndexType, Label, Report, ReportKind, Source};
 use peg::error::ParseError;
@@ -727,21 +724,22 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
         IErr::Constraint(ConstraintSolutionError::VariablesUnsolvable { vars }) => {
             report(
                 &src,
-                0..0,
+                0..1,
                 "Constraint Solution Error",
                 [label(
-                    0..0,
+                    0..1,
                     format!("Unification variables {:?} are not solvable", vars),
                 )],
             );
         }
         IErr::Equivalence { ty1, ty2, reason } => {
+            dbg!();
             report(
                 &src,
-                ty1.span.clone(),
+                0..1,
                 "Eqivalence Error",
                 [label(
-                    ty1.span.clone(),
+                    0..1,
                     format!(
                         "Type {} is not equivalent to type {}. Reason: {}",
                         pretty_def(&ty1.val),

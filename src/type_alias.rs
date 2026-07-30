@@ -133,7 +133,7 @@ fn check_session_shadowing(session: &SSession, alias_env: &AliasEnv) -> Result<(
                 check_session_shadowing(body, alias_env)
             }
         }
-        Session::Var(id) => Ok(()),
+        Session::Var(_) => Ok(()),
         Session::UVar(_) => Ok(()),
     }
 }

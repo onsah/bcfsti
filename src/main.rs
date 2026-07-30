@@ -121,10 +121,18 @@ pub fn typecheck(
 }
 
 fn constraints_check(cs: Constraints, alias_env: &AliasEnv, verbose: bool) -> Result<(), IErr> {
+    if verbose {
+        println!("===== CONSTRAINTS CHECKING =====");
+        println!("Constraints to solve:");
+        for (ty1, ty2) in cs.iter() {
+            println!("{} == {}", pretty_def(&ty1.val), pretty_def(&ty2.val));
+        }
+        println!();
+    }
+
     let cs = cs.solve().map_err(IErr::Constraint)?;
 
     if verbose {
-        println!("===== CONSTRAINTS CHECKING =====");
         println!("Constraints:");
         for (ty1, ty2) in cs.iter() {
             println!("{} == {}", pretty_def(&ty1.val), pretty_def(&ty2.val));
