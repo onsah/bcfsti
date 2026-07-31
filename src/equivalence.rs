@@ -251,6 +251,7 @@ fn convert_session_impl(session: &Session, defs: &mut Definitions) -> FreestType
         Session::UVar(_) => {
             panic!("Unification variables must be solved before translation to FreeST!")
         }
+        Session::PVar(_) => todo!(),
     }
 }
 

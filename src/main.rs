@@ -11,6 +11,7 @@ pub mod pretty;
 pub mod syntax;
 pub mod type_alias;
 pub mod type_checker;
+pub mod type_context;
 pub mod util;
 
 #[cfg(test)]

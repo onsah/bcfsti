@@ -139,6 +139,7 @@ impl Pretty<UserState> for Session {
                 p.pp(&id.to_string());
                 p.pp(")");
             }
+            Session::PVar(_) => todo!(),
         }
     }
 }

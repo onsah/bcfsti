@@ -135,6 +135,7 @@ fn check_session_shadowing(session: &SSession, alias_env: &AliasEnv) -> Result<(
         }
         Session::Var(_) => Ok(()),
         Session::UVar(_) => Ok(()),
+        Session::PVar(_) => todo!(),
     }
 }
 
@@ -269,5 +270,6 @@ pub fn expand_session(
         Session::BorrowEnd(op) => Ok(Session::BorrowEnd(*op)),
         Session::Skip => Ok(Session::Skip),
         Session::UVar(id) => Ok(Session::UVar(id.clone())),
+        Session::PVar(_) => todo!(),
     }
 }
