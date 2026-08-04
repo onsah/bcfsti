@@ -402,7 +402,7 @@ fn subst_session(ty: Session, assignments: &Assignments) -> Session {
                 Session::UVar(var)
             }
         }
-        Session::PVar(_) => todo!(),
+        Session::PVar { .. } => todo!(),
         Session::Skip => Session::Skip,
         Session::Semi { first, second } => Session::Semi {
             first: Box::new(fake_span(subst_session(first.val, assignments))),

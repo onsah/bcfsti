@@ -69,7 +69,10 @@ pub enum Session {
     Var(SId),
     // Unification variable introduced from splits
     UVar(UVarId),
-    PVar(PVarId),
+    PVar {
+        id: PVarId,
+        dual: bool,
+    },
 }
 pub type SSession = Spanned<Session>;
 
@@ -97,7 +100,7 @@ impl Session {
             Session::Mu(_, body) => body.is_closed(),
             Session::Var(_) => true,
             Session::UVar(_) => false,
-            Session::PVar(_) => todo!(),
+            Session::PVar { .. } => todo!(),
         }
     }
 
@@ -118,7 +121,7 @@ impl Session {
             Session::Mu(_, body) => body.unification_variables(),
             Session::Var(_) => HashSet::new(),
             Session::UVar(x) => HashSet::from([*x]),
-            Session::PVar(_) => HashSet::new(),
+            Session::PVar { .. } => HashSet::new(),
         }
     }
 
@@ -135,7 +138,7 @@ impl Session {
             Session::Mu(_, body) => body.poly_variables(),
             Session::Var(_) => Box::new(iter::empty()),
             Session::UVar(_) => Box::new(iter::empty()),
-            Session::PVar(id) => Box::new(iter::once(*id)),
+            Session::PVar { id, .. } => Box::new(iter::once(*id)),
         }
     }
 
@@ -162,7 +165,7 @@ impl Session {
             // Unification variables are not bounded, as they can be instantiated to any session type.
             Session::UVar(_) => false,
             Session::Skip => false,
-            Session::PVar(_) => todo!(),
+            Session::PVar { .. } => todo!(),
         }
     }
 
@@ -180,7 +183,7 @@ impl Session {
             Session::Mu(_, body) => body.is_contractive_on(var),
             Session::Var(id) => id != var,
             Session::UVar(_) => true,
-            Session::PVar(_) => todo!(),
+            Session::PVar { .. } => todo!(),
         }
     }
 }
@@ -247,7 +250,7 @@ impl Type {
         &'a self,
     ) -> Box<dyn Iterator<Item = PVarId> + 'a> {
         match self {
-            Type::Chan(Session::PVar(id)) => Box::new(iter::once(*id)),
+            Type::Chan(Session::PVar { id, .. }) => Box::new(iter::once(*id)),
             Type::Prod { first, second, .. } => Box::new(
                 first
                     .poly_variables_under_prod_and_variant()
@@ -481,7 +484,7 @@ impl Session {
                 second: Box::new(fake_span(second.subst(x, s_new))),
             },
             Session::UVar(var) => Session::UVar(*var),
-            Session::PVar(_) => todo!(),
+            Session::PVar { .. } => todo!(),
         }
     }
     fn unfold(&self, x: &SId) -> Self {
@@ -555,7 +558,7 @@ impl Session {
                 second: Box::new(fake_span(second.dual())),
             },
             Session::UVar(_) => unreachable!(),
-            Session::PVar(_) => todo!(),
+            Session::PVar { .. } => todo!(),
         }
     }
 

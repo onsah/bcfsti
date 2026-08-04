@@ -5,7 +5,7 @@ use std::{
 
 use crate::syntax::{Label, SessionOp};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[allow(dead_code)]
 pub(crate) enum Kind {
     Type,

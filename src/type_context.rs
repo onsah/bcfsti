@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, ops::Deref};
 
 use crate::{
     freest::Kind,
@@ -7,10 +7,11 @@ use crate::{
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypeCtx {
-    vars: HashMap<Label, Kind>,
+    vars: HashMap<PVarId, Kind>,
     qualifications: Vec<Qualification>,
 }
 
+/// Entailment rules
 impl TypeCtx {
     pub fn entails(&self, qualification: &Qualification) -> bool {
         self.or_assumed(
@@ -67,7 +68,7 @@ impl TypeCtx {
                     .map(|(_, ty)| &ty.val)
                     .all(|ty| self.unr(ty)),
                 // Q-Unr-Conv
-                Type::Chan(Session::PVar(id)) => {
+                Type::Chan(Session::PVar { id, .. }) => {
                     self.equivalent_types_pv(*id).any(|ty| self.unr(ty))
                 }
                 _ => false,
@@ -96,7 +97,7 @@ impl TypeCtx {
                     self.bounded(second)
                 }
                 // Q-Mbl-Conv
-                Type::Chan(Session::PVar(id)) => {
+                Type::Chan(Session::PVar { id, .. }) => {
                     self.equivalent_types_pv(*id).any(|ty| self.mobile(ty))
                 }
                 _ => false,
@@ -114,7 +115,7 @@ impl TypeCtx {
                 }
                 Session::Mu(_, session) => self.bounded(session),
                 Session::Choice(_, branches) => branches.iter().all(|(_, s)| self.bounded(s)),
-                Session::PVar(id) => self
+                Session::PVar { id, .. } => self
                     .qualifications
                     .iter()
                     .filter_map::<&Session, _>(|q| match q {
@@ -144,7 +145,7 @@ impl TypeCtx {
             || Qualification::Dualable(session.clone()),
             match session {
                 Session::Skip | Session::Op(_, _) | Session::End(_) | Session::Var(_) => true,
-                Session::PVar(id) => {
+                Session::PVar { id, .. } => {
                     self.new(session)
                         || self.equivalent_types(*id).any(|ty| match ty {
                             Type::Chan(session) => self.dualable(session),
@@ -180,7 +181,7 @@ impl TypeCtx {
                 Session::Semi { first, second } => self.new(&first.val) && self.new(&second.val),
                 Session::Choice(_, items) => items.iter().all(|(_, s)| self.new(s)),
                 Session::Mu(_, body) => self.new(body),
-                Session::PVar(id) => self.equivalent_types(*id).any(|ty| match ty {
+                Session::PVar { id, .. } => self.equivalent_types(*id).any(|ty| match ty {
                     Type::Chan(session) => self.new(session),
                     _ => false,
                 }),
@@ -239,19 +240,8 @@ impl TypeCtx {
         // Q-Assume
         self.qualifications.contains(&make_qualification())
     }
-
-    pub(crate) fn has_kind(&self, var: &Label, kind: Kind) -> bool {
-        match self.vars.get(var) {
-            Some(k) if k == &kind => true,
-            _ => false,
-        }
-    }
-
-    pub fn is_well_formed(&self, qualifications: &[Qualification]) -> bool {
-        todo!()
-    }
 }
 
 fn pvar(id: PVarId) -> Type {
-    Type::Chan(Session::PVar(id))
+    Type::Chan(Session::PVar { id, dual: false })
 }

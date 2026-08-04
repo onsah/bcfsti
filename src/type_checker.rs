@@ -1111,7 +1111,7 @@ impl TypeChecker {
                 Ok(())
             }
             Session::UVar(_) => Ok(()),
-            Session::PVar(_) => todo!(),
+            Session::PVar { .. } => Ok(()),
         }
     }
 
@@ -1167,7 +1167,7 @@ fn is_valid_for_new(s: &Session) -> bool {
         Session::Var(_) => true,
         Session::UVar(_) => false,
         Session::End(_) | Session::BorrowEnd(_) => false,
-        Session::PVar(_) => todo!(),
+        Session::PVar { .. } => todo!(),
     }
 }
 
