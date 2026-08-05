@@ -1,9 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{
-    freest::Kind,
-    syntax::{PVarId, Qualification, Session, SessionOp, Type},
-};
+use crate::syntax::{Id, Kind, Label, PVarId, Qualification, Session, SessionOp, Type};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypeCtx {
@@ -99,6 +96,15 @@ impl TypeCtx {
                 // Q-Mbl-Conv
                 Type::Chan(Session::PVar { id, .. }) => {
                     self.equivalent_types_pv(*id).any(|ty| self.mobile(ty))
+                }
+                Type::Forall {
+                    id,
+                    kind,
+                    qualifications,
+                    ty,
+                } => {
+                    let new_ctx = self.extend(*id, *kind, qualifications.iter().cloned());
+                    new_ctx.mobile(ty)
                 }
                 _ => false,
             },
@@ -244,54 +250,80 @@ impl TypeCtx {
 
 // Kinding and well formedness
 impl TypeCtx {
-    fn infer_kind(&self, ty: &Type) -> Option<Kind> {
-        self.infer_kind_inner(ty, &self.domain())
+    pub(crate) fn infer_kind(&self, ty: &Type) -> Option<Kind> {
+        self.infer_kind_inner(ty)
     }
 
-    fn check_kind(&self, ty: &Type, kind: Kind) -> bool {
-        self.check_kind_inner(ty, kind, &self.domain())
+    pub(crate) fn check_kind(&self, ty: &Type, kind: Kind) -> bool {
+        self.check_kind_inner(ty, kind)
     }
 
-    fn infer_kind_inner(&self, ty: &Type, vars: &HashSet<PVarId>) -> Option<Kind> {
+    fn infer_kind_inner(&self, ty: &Type) -> Option<Kind> {
         // HACK: minimal kind inference for the type shapes used in tests.
         // Channels infer to Session; value types to Type.
         match ty {
             Type::Unit | Type::Int | Type::Bool | Type::String => Some(Kind::Type),
-            Type::Chan(session) => self.session_wf(session, vars).then_some(Kind::Session),
+            Type::Chan(session) => self
+                .is_session_well_formed(session, &HashSet::new())
+                .then_some(Kind::Session),
             Type::Variant(variants) => variants
                 .iter()
-                .all(|(_, ty)| self.infer_kind_inner(&ty.val, vars) == Some(Kind::Type))
+                .all(|(_, ty)| self.infer_kind_inner(&ty.val).is_some())
                 .then_some(Kind::Type),
-            _ => None,
-        }
-    }
-
-    fn check_kind_inner(&self, ty: &Type, kind: Kind, vars: &HashSet<PVarId>) -> bool {
-        // HACK: minimal kinding covering only the type shapes used in tests.
-        match (ty, kind) {
-            (Type::Unit | Type::Int | Type::Bool | Type::String, Kind::Type) => true,
-            (Type::Chan(session), Kind::Type | Kind::Session) => self.session_wf(session, vars),
-            (Type::Variant(variants), Kind::Type) => variants
-                .iter()
-                .all(|(_, ty)| self.check_kind_inner(&ty.val, Kind::Type, vars)),
-            _ => false,
-        }
-    }
-
-    fn session_wf(&self, session: &Session, vars: &HashSet<PVarId>) -> bool {
-        match session {
-            Session::Skip | Session::End(_) | Session::BorrowEnd(_) | Session::Var(_) => true,
-            Session::Op(_, ty) => self.check_kind_inner(&ty.val, Kind::Type, vars),
-            Session::Semi { first, second } => {
-                self.session_wf(&first.val, vars) && self.session_wf(&second.val, vars)
+            Type::Prod { first, second, .. } => (self.infer_kind_inner(first).is_some()
+                && self.infer_kind_inner(second).is_some())
+            .then_some(Kind::Type),
+            Type::Arr { param, ret, .. } => (self.infer_kind_inner(param).is_some()
+                && self.infer_kind_inner(ret).is_some())
+            .then_some(Kind::Type),
+            Type::Forall {
+                id,
+                kind,
+                qualifications,
+                ty,
+            } => {
+                let new_ctx = self.extend(*id, *kind, qualifications.iter().cloned());
+                (new_ctx.is_well_formed(&qualifications) && new_ctx.check_kind(ty, Kind::Type))
+                    .then_some(Kind::Type)
             }
-            Session::Mu(_, body) => self.session_wf(&body.val, vars),
-            Session::PVar { id, .. } => self.vars.get(id).copied() == Some(Kind::Session),
-            _ => false,
         }
     }
 
-    fn is_contractive(ty: &Type, on: PVarId, vars: &HashSet<PVarId>) -> bool {
+    fn check_kind_inner(&self, ty: &Type, kind: Kind) -> bool {
+        self.infer_kind(ty)
+            .map(|kind1| kind1.is_subkind_of(&kind))
+            .unwrap_or(false)
+    }
+
+    fn is_session_well_formed(&self, session: &Session, rvars: &HashSet<Id>) -> bool {
+        match session {
+            Session::Skip | Session::End(_) | Session::BorrowEnd(_) => true,
+            Session::Op(_, ty) => self.check_kind_inner(&ty.val, Kind::Type) && self.mobile(ty),
+            Session::Choice(_, branches) => branches
+                .iter()
+                .all(|(_, branch)| self.is_session_well_formed(branch, rvars)),
+            Session::Semi { first, second } => {
+                self.is_session_well_formed(&first.val, rvars)
+                    && self.is_session_well_formed(&second.val, rvars)
+            }
+            Session::Mu(var, body) => {
+                Self::is_contractive(body, var, &self.vars) && {
+                    // TODO: Optimize by using functional data structures
+                    let mut rvars = rvars.clone();
+                    rvars.insert(var.val.clone());
+                    self.is_session_well_formed(body, &rvars)
+                }
+            }
+            Session::PVar { id, .. } => self.vars.get(id).copied() == Some(Kind::Session),
+            Session::Var(id) => rvars.contains(&id.val),
+            // We assume unifications variables are well formed
+            // therefore we must check well formedness after unification
+            // variables are solved.
+            Session::UVar(_) => true,
+        }
+    }
+
+    fn is_contractive(session: &Session, on: &Label, pvars: &HashMap<PVarId, Kind>) -> bool {
         todo!()
     }
 
@@ -312,6 +344,22 @@ impl TypeCtx {
                 _ => false,
             },
         })
+    }
+
+    fn extend(
+        &self,
+        id: PVarId,
+        kind: Kind,
+        qualifications: impl IntoIterator<Item = Qualification>,
+    ) -> TypeCtx {
+        let mut new_vars = self.vars.clone();
+        new_vars.insert(id, kind);
+        let mut new_qualifications = self.qualifications.clone();
+        new_qualifications.extend(qualifications);
+        TypeCtx {
+            vars: new_vars,
+            qualifications: new_qualifications,
+        }
     }
 
     fn domain(&self) -> HashSet<PVarId> {
@@ -514,5 +562,29 @@ mod tests {
             })),
         );
         assert!(!ctx(&[]).is_well_formed(&[Qualification::Bounded(s)]));
+    }
+
+    #[test]
+    fn forall_with_well_formed_body() {
+        // forall (a: Session). Unit
+        let ty = Type::Forall {
+            id: 0,
+            kind: Kind::Session,
+            qualifications: vec![],
+            ty: Box::new(fake_span(Type::Unit)),
+        };
+        assert!(ctx(&[]).is_well_formed(&[Qualification::Unr(ty)]));
+    }
+
+    #[test]
+    fn forall_with_free_pvar_in_body_not_well_formed() {
+        // forall (a: Session). <b> where b is not bound by the forall
+        let ty = Type::Forall {
+            id: 0,
+            kind: Kind::Session,
+            qualifications: vec![],
+            ty: Box::new(fake_span(pvar_chan(1))),
+        };
+        assert!(!ctx(&[]).is_well_formed(&[Qualification::Unr(ty)]));
     }
 }

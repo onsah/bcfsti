@@ -190,6 +190,14 @@ impl Session {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
+    // Quantifiers
+    Forall {
+        id: PVarId,
+        kind: Kind,
+        qualifications: Vec<Qualification>,
+        ty: Box<SType>,
+    },
+    // Session Types
     Chan(Session),
     Arr {
         mob: SMob,
@@ -220,6 +228,7 @@ impl Type {
             Type::Prod { first, second, .. } => first.is_closed() && second.is_closed(),
             Type::Variant(cs) => cs.iter().all(|(_, t)| t.is_closed()),
             Type::Unit | Type::Int | Type::Bool | Type::String => true,
+            Type::Forall { ty, .. } => ty.is_closed(),
         }
     }
 
@@ -239,6 +248,7 @@ impl Type {
                 .flat_map(|(_, t)| t.unification_variables())
                 .collect(),
             Type::Unit | Type::Int | Type::Bool | Type::String => HashSet::new(),
+            Type::Forall { ty, .. } => ty.unification_variables(),
         }
     }
 
@@ -266,6 +276,10 @@ impl Type {
             | Type::String
             | Type::Arr { .. }
             | Type::Chan(_) => Box::new(iter::empty()),
+            Type::Forall { id, ty, .. } => Box::new(
+                ty.poly_variables_under_prod_and_variant()
+                    .filter(move |id1| id != id1),
+            ),
         }
     }
 
@@ -283,6 +297,12 @@ impl Type {
             Type::Prod { first, second, .. } => first.is_mobile() && second.is_mobile(),
             Type::Variant(cases) => cases.iter().all(|(_, ty)| ty.is_mobile()),
             Type::Unit | Type::Int | Type::Bool | Type::String => true,
+            Type::Forall {
+                id,
+                kind,
+                qualifications,
+                ty,
+            } => todo!("delete this function"),
         }
     }
 }
@@ -354,6 +374,17 @@ pub enum Op2 {
 pub enum Kind {
     Type,
     Session,
+}
+
+impl Kind {
+    pub fn is_subkind_of(&self, other: &Kind) -> bool {
+        match (self, other) {
+            (Kind::Type, Kind::Type) => true,
+            (Kind::Session, Kind::Type) => true,
+            (Kind::Session, Kind::Session) => true,
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
@@ -755,6 +786,7 @@ impl Type {
             Type::Int => true,
             Type::Bool => true,
             Type::String => true,
+            Type::Forall { .. } => todo!("Delete this function"),
         }
     }
 

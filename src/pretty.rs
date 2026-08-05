@@ -83,6 +83,15 @@ impl Pretty<UserState> for Type {
             Type::Int => p.pp("Int"),
             Type::Bool => p.pp("Bool"),
             Type::String => p.pp("String"),
+            Type::Forall {
+                id,
+                kind,
+                qualifications,
+                ty,
+            } => {
+                p.pp("∀ ");
+                todo!()
+            }
         }
     }
 }

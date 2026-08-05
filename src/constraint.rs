@@ -358,6 +358,17 @@ impl Mobilities {
 fn subst_type(ty: SType, assignments: &Assignments) -> SType {
     let span = ty.span.clone();
     let val = match ty.val {
+        Type::Forall {
+            id,
+            kind,
+            qualifications,
+            ty,
+        } => Type::Forall {
+            id,
+            kind,
+            qualifications,
+            ty: Box::new(subst_type(*ty, assignments)),
+        },
         Type::Chan(session) => Type::Chan(subst_session(session, assignments)),
         Type::Bool | Type::Int | Type::String => ty.val,
         Type::Prod {

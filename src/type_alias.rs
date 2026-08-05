@@ -157,6 +157,7 @@ fn check_type_shadowing(ty: &SType, alias_env: &AliasEnv) -> Result<(), TypeErro
             Ok(())
         }
         Type::Unit | Type::Int | Type::Bool | Type::String => Ok(()),
+        Type::Forall { ty, .. } => check_type_shadowing(ty, alias_env),
     }
 }
 
@@ -217,6 +218,17 @@ pub fn expand_type(ty: &Type, env: &AliasEnv, bound: &HashSet<Id>) -> Result<Typ
         Type::Int => Ok(Type::Int),
         Type::Bool => Ok(Type::Bool),
         Type::String => Ok(Type::String),
+        Type::Forall {
+            id,
+            kind,
+            qualifications,
+            ty,
+        } => expand_type(ty, env, bound).map(|ty| Type::Forall {
+            id: *id,
+            kind: *kind,
+            qualifications: qualifications.clone(),
+            ty: Box::new(fake_span(ty)),
+        }),
     }
 }
 

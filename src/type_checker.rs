@@ -1151,6 +1151,12 @@ impl TypeChecker {
             Type::Int => Ok(()),
             Type::Bool => Ok(()),
             Type::String => Ok(()),
+            Type::Forall {
+                id,
+                kind,
+                qualifications,
+                ty,
+            } => todo!("Remove this method"),
         }
     }
 }
