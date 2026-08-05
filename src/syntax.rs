@@ -197,6 +197,12 @@ pub enum Type {
         qualifications: Vec<Qualification>,
         ty: Box<SType>,
     },
+    Exists {
+        id: PVarId,
+        kind: Kind,
+        qualifications: Vec<Qualification>,
+        ty: Box<SType>,
+    },
     // Session Types
     Chan(Session),
     Arr {
@@ -229,6 +235,7 @@ impl Type {
             Type::Variant(cs) => cs.iter().all(|(_, t)| t.is_closed()),
             Type::Unit | Type::Int | Type::Bool | Type::String => true,
             Type::Forall { ty, .. } => ty.is_closed(),
+            Type::Exists { ty, .. } => ty.is_closed(),
         }
     }
 
@@ -249,6 +256,7 @@ impl Type {
                 .collect(),
             Type::Unit | Type::Int | Type::Bool | Type::String => HashSet::new(),
             Type::Forall { ty, .. } => ty.unification_variables(),
+            Type::Exists { ty, .. } => ty.unification_variables(),
         }
     }
 
@@ -280,6 +288,10 @@ impl Type {
                 ty.poly_variables_under_prod_and_variant()
                     .filter(move |id1| id != id1),
             ),
+            Type::Exists { id, ty, .. } => Box::new(
+                ty.poly_variables_under_prod_and_variant()
+                    .filter(move |id1| id != id1),
+            ),
         }
     }
 
@@ -298,6 +310,12 @@ impl Type {
             Type::Variant(cases) => cases.iter().all(|(_, ty)| ty.is_mobile()),
             Type::Unit | Type::Int | Type::Bool | Type::String => true,
             Type::Forall {
+                id,
+                kind,
+                qualifications,
+                ty,
+            } => todo!("delete this function"),
+            Type::Exists {
                 id,
                 kind,
                 qualifications,
@@ -787,6 +805,7 @@ impl Type {
             Type::Bool => true,
             Type::String => true,
             Type::Forall { .. } => todo!("Delete this function"),
+            Type::Exists { .. } => todo!("Delete this function"),
         }
     }
 

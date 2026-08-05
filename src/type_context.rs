@@ -286,6 +286,16 @@ impl TypeCtx {
                 (new_ctx.is_well_formed(&qualifications) && new_ctx.check_kind(ty, Kind::Type))
                     .then_some(Kind::Type)
             }
+            Type::Exists {
+                id,
+                kind,
+                qualifications,
+                ty,
+            } => {
+                let new_ctx = self.extend(*id, *kind, qualifications.iter().cloned());
+                (new_ctx.is_well_formed(&qualifications) && new_ctx.check_kind(ty, Kind::Type))
+                    .then_some(Kind::Type)
+            }
         }
     }
 

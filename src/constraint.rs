@@ -369,6 +369,17 @@ fn subst_type(ty: SType, assignments: &Assignments) -> SType {
             qualifications,
             ty: Box::new(subst_type(*ty, assignments)),
         },
+        Type::Exists {
+            id,
+            kind,
+            qualifications,
+            ty,
+        } => Type::Exists {
+            id,
+            kind,
+            qualifications,
+            ty: Box::new(subst_type(*ty, assignments)),
+        },
         Type::Chan(session) => Type::Chan(subst_session(session, assignments)),
         Type::Bool | Type::Int | Type::String => ty.val,
         Type::Prod {

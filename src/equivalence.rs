@@ -209,6 +209,12 @@ fn convert_type_impl(ty: &Type, defs: &mut Definitions) -> FreestType {
             qualifications,
             ty,
         } => todo!(),
+        Type::Exists {
+            id,
+            kind,
+            qualifications,
+            ty,
+        } => todo!(),
     }
 }
 

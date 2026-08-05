@@ -1157,6 +1157,12 @@ impl TypeChecker {
                 qualifications,
                 ty,
             } => todo!("Remove this method"),
+            Type::Exists {
+                id,
+                kind,
+                qualifications,
+                ty,
+            } => todo!("Remove this method"),
         }
     }
 }

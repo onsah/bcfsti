@@ -92,6 +92,15 @@ impl Pretty<UserState> for Type {
                 p.pp("∀ ");
                 todo!()
             }
+            Type::Exists {
+                id,
+                kind,
+                qualifications,
+                ty,
+            } => {
+                p.pp("∃ ");
+                todo!()
+            }
         }
     }
 }
