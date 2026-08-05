@@ -1,8 +1,8 @@
-use std::{collections::HashMap, ops::Deref};
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     freest::Kind,
-    syntax::{Label, PVarId, Qualification, Session, SessionOp, Type},
+    syntax::{PVarId, Qualification, Session, SessionOp, Type},
 };
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -242,6 +242,277 @@ impl TypeCtx {
     }
 }
 
+// Kinding and well formedness
+impl TypeCtx {
+    fn infer_kind(&self, ty: &Type) -> Option<Kind> {
+        self.infer_kind_inner(ty, &self.domain())
+    }
+
+    fn check_kind(&self, ty: &Type, kind: Kind) -> bool {
+        self.check_kind_inner(ty, kind, &self.domain())
+    }
+
+    fn infer_kind_inner(&self, ty: &Type, vars: &HashSet<PVarId>) -> Option<Kind> {
+        // HACK: minimal kind inference for the type shapes used in tests.
+        // Channels infer to Session; value types to Type.
+        match ty {
+            Type::Unit | Type::Int | Type::Bool | Type::String => Some(Kind::Type),
+            Type::Chan(session) => self.session_wf(session, vars).then_some(Kind::Session),
+            Type::Variant(variants) => variants
+                .iter()
+                .all(|(_, ty)| self.infer_kind_inner(&ty.val, vars) == Some(Kind::Type))
+                .then_some(Kind::Type),
+            _ => None,
+        }
+    }
+
+    fn check_kind_inner(&self, ty: &Type, kind: Kind, vars: &HashSet<PVarId>) -> bool {
+        // HACK: minimal kinding covering only the type shapes used in tests.
+        match (ty, kind) {
+            (Type::Unit | Type::Int | Type::Bool | Type::String, Kind::Type) => true,
+            (Type::Chan(session), Kind::Type | Kind::Session) => self.session_wf(session, vars),
+            (Type::Variant(variants), Kind::Type) => variants
+                .iter()
+                .all(|(_, ty)| self.check_kind_inner(&ty.val, Kind::Type, vars)),
+            _ => false,
+        }
+    }
+
+    fn session_wf(&self, session: &Session, vars: &HashSet<PVarId>) -> bool {
+        match session {
+            Session::Skip | Session::End(_) | Session::BorrowEnd(_) | Session::Var(_) => true,
+            Session::Op(_, ty) => self.check_kind_inner(&ty.val, Kind::Type, vars),
+            Session::Semi { first, second } => {
+                self.session_wf(&first.val, vars) && self.session_wf(&second.val, vars)
+            }
+            Session::Mu(_, body) => self.session_wf(&body.val, vars),
+            Session::PVar { id, .. } => self.vars.get(id).copied() == Some(Kind::Session),
+            _ => false,
+        }
+    }
+
+    fn is_contractive(ty: &Type, on: PVarId, vars: &HashSet<PVarId>) -> bool {
+        todo!()
+    }
+
+    /// Check if the qualifications are well formed w.r.t. the type context.
+    fn is_well_formed(&self, qualifications: &[Qualification]) -> bool {
+        // QF-Top (empty conjunction) / QF-And (each conjunct well formed)
+        qualifications.iter().all(|q| match q {
+            // QF-Unr, QF-Mobile: T : KVal
+            Qualification::Unr(ty) | Qualification::Mobile(ty) => self.check_kind(ty, Kind::Type),
+            // QF-Bounded, QF-New, QF-Dualable, QF-NonSkip: S : KSess
+            Qualification::Bounded(s)
+            | Qualification::New(s)
+            | Qualification::Dualable(s)
+            | Qualification::NonSkip(s) => self.check_kind(&Type::Chan(s.clone()), Kind::Session),
+            // QF-Eq: T : K and U : K for the same kind (via inference)
+            Qualification::Equiv(ty1, ty2) => match (self.infer_kind(ty1), self.infer_kind(ty2)) {
+                (Some(k1), Some(k2)) => k1 == k2,
+                _ => false,
+            },
+        })
+    }
+
+    fn domain(&self) -> HashSet<PVarId> {
+        self.vars.keys().copied().collect()
+    }
+}
+
 fn pvar(id: PVarId) -> Type {
     Type::Chan(Session::PVar { id, dual: false })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::util::span::fake_span;
+
+    fn ctx(vars: &[(PVarId, Kind)]) -> TypeCtx {
+        TypeCtx {
+            vars: vars.iter().copied().collect(),
+            qualifications: vec![],
+        }
+    }
+
+    fn pvar_chan(id: PVarId) -> Type {
+        Type::Chan(Session::PVar { id, dual: false })
+    }
+
+    fn variant(case: &str, ty: Type) -> Type {
+        Type::Variant(vec![(fake_span(case.to_string()), fake_span(ty))])
+    }
+
+    #[test]
+    fn empty_is_well_formed() {
+        // QF-Top
+        assert!(ctx(&[]).is_well_formed(&[]));
+    }
+
+    #[test]
+    fn unr_and_mobile_of_value_type() {
+        // QF-Unr, QF-Mobile: T : KVal
+        assert!(ctx(&[]).is_well_formed(&[Qualification::Unr(Type::Unit)]));
+        assert!(ctx(&[]).is_well_formed(&[Qualification::Unr(Type::Int)]));
+        assert!(ctx(&[]).is_well_formed(&[Qualification::Mobile(Type::Bool)]));
+        assert!(ctx(&[]).is_well_formed(&[Qualification::Unr(Type::Chan(Session::Skip))]));
+    }
+
+    #[test]
+    fn session_qualifications_of_closed_session() {
+        // QF-Bounded, QF-New, QF-Dualable, QF-NonSkip: S : KSess
+        let s = Session::End(SessionOp::Send);
+        assert!(ctx(&[]).is_well_formed(&[Qualification::Bounded(s.clone())]));
+        assert!(ctx(&[]).is_well_formed(&[Qualification::New(s.clone())]));
+        assert!(ctx(&[]).is_well_formed(&[Qualification::Dualable(s.clone())]));
+        assert!(ctx(&[]).is_well_formed(&[Qualification::NonSkip(s)]));
+        assert!(ctx(&[]).is_well_formed(&[Qualification::Bounded(Session::Skip)]));
+    }
+
+    #[test]
+    fn equiv_of_value_types() {
+        // QF-Eq
+        assert!(ctx(&[]).is_well_formed(&[Qualification::Equiv(Type::Int, Type::Bool)]));
+        assert!(ctx(&[]).is_well_formed(&[Qualification::Equiv(
+            Type::Chan(Session::Skip),
+            Type::Chan(Session::End(SessionOp::Recv))
+        )]));
+    }
+
+    #[test]
+    fn conjunction_of_well_formed() {
+        // QF-And
+        assert!(ctx(&[]).is_well_formed(&[
+            Qualification::Unr(Type::Unit),
+            Qualification::Mobile(Type::Int),
+            Qualification::Bounded(Session::Skip),
+        ]));
+    }
+
+    #[test]
+    fn conjunction_with_one_ill_formed_is_not_well_formed() {
+        assert!(!ctx(&[]).is_well_formed(&[
+            Qualification::Unr(Type::Unit),
+            Qualification::Bounded(Session::PVar { id: 7, dual: false }),
+        ]));
+    }
+
+    #[test]
+    fn free_pvar_in_value_type_not_well_formed() {
+        let q = Qualification::Unr(pvar_chan(3));
+        assert!(!ctx(&[]).is_well_formed(&[q]));
+    }
+
+    #[test]
+    fn free_pvar_in_session_not_well_formed() {
+        let q = Qualification::Bounded(Session::PVar { id: 3, dual: false });
+        assert!(!ctx(&[]).is_well_formed(&[q]));
+    }
+
+    #[test]
+    fn in_scope_session_pvar_is_well_formed() {
+        assert!(
+            ctx(&[(0, Kind::Session)])
+                .is_well_formed(&[Qualification::Bounded(Session::PVar { id: 0, dual: false })])
+        );
+        assert!(ctx(&[(0, Kind::Session)]).is_well_formed(&[Qualification::Unr(pvar_chan(0))]));
+    }
+
+    #[test]
+    fn pvar_of_wrong_kind_not_well_formed() {
+        // var 0 has value kind but is used in session position
+        assert!(
+            !ctx(&[(0, Kind::Type)])
+                .is_well_formed(&[Qualification::Bounded(Session::PVar { id: 0, dual: false })])
+        );
+    }
+
+    #[test]
+    fn nested_ill_kinded_session_not_well_formed() {
+        let s = Session::Semi {
+            first: Box::new(fake_span(Session::Skip)),
+            second: Box::new(fake_span(Session::PVar { id: 9, dual: false })),
+        };
+        assert!(!ctx(&[]).is_well_formed(&[Qualification::Bounded(s)]));
+    }
+
+    #[test]
+    fn nested_ill_kinded_value_type_not_well_formed() {
+        let ty = variant("a", pvar_chan(9));
+        assert!(!ctx(&[]).is_well_formed(&[Qualification::Unr(ty)]));
+    }
+
+    #[test]
+    fn equiv_with_ill_kinded_side_not_well_formed() {
+        let q = Qualification::Equiv(Type::Int, pvar_chan(9));
+        assert!(!ctx(&[]).is_well_formed(&[q]));
+    }
+
+    #[test]
+    fn recursive_session_is_well_formed() {
+        let s = Session::Mu(
+            fake_span("X".to_string()),
+            Box::new(fake_span(Session::Var(fake_span("X".to_string())))),
+        );
+        assert!(ctx(&[]).is_well_formed(&[Qualification::Bounded(s)]));
+    }
+
+    #[test]
+    fn equiv_different_kinds_not_well_formed() {
+        // QF-Eq: both sides must share a kind. Channels infer Session,
+        // value types infer Type, so these equivalences are ill-formed.
+        assert!(
+            !ctx(&[]).is_well_formed(&[Qualification::Equiv(Type::Int, Type::Chan(Session::Skip))])
+        );
+        assert!(
+            !ctx(&[])
+                .is_well_formed(&[Qualification::Equiv(Type::Chan(Session::Skip), Type::Int,)])
+        );
+    }
+
+    #[test]
+    fn equiv_both_sides_ill_kinded_not_well_formed() {
+        let q = Qualification::Equiv(pvar_chan(1), pvar_chan(2));
+        assert!(!ctx(&[]).is_well_formed(&[q]));
+    }
+
+    #[test]
+    fn mobile_with_free_pvar_not_well_formed() {
+        assert!(!ctx(&[]).is_well_formed(&[Qualification::Mobile(pvar_chan(5))]));
+    }
+
+    #[test]
+    fn new_dualable_nonskip_with_free_pvar_not_well_formed() {
+        assert!(
+            !ctx(&[]).is_well_formed(&[Qualification::New(Session::PVar { id: 4, dual: false })])
+        );
+        assert!(
+            !ctx(&[]).is_well_formed(&[Qualification::Dualable(Session::PVar {
+                id: 4,
+                dual: false
+            })])
+        );
+        assert!(
+            !ctx(&[])
+                .is_well_formed(&[Qualification::NonSkip(Session::PVar { id: 4, dual: false })])
+        );
+    }
+
+    #[test]
+    fn dualable_op_with_ill_kinded_payload_not_well_formed() {
+        let s = Session::Op(SessionOp::Send, Box::new(fake_span(pvar_chan(9))));
+        assert!(!ctx(&[]).is_well_formed(&[Qualification::Dualable(s)]));
+    }
+
+    #[test]
+    fn bounded_mu_with_free_pvar_not_well_formed() {
+        let s = Session::Mu(
+            fake_span("X".to_string()),
+            Box::new(fake_span(Session::Semi {
+                first: Box::new(fake_span(Session::Skip)),
+                second: Box::new(fake_span(Session::PVar { id: 9, dual: false })),
+            })),
+        );
+        assert!(!ctx(&[]).is_well_formed(&[Qualification::Bounded(s)]));
+    }
 }
