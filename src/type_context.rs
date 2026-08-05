@@ -78,7 +78,7 @@ impl TypeCtx {
             || Qualification::Mobile(ty.clone()),
             match ty {
                 // Q-Mbl-Atom
-                Type::Unit | Type::Arr { .. } => true,
+                Type::Unit | Type::String | Type::Int | Type::Bool | Type::Arr { .. } => true,
                 // Q-Mbl-Prod
                 Type::Prod { first, second, .. } => self.mobile(first) && self.mobile(second),
                 // Q-Mbl-Variant
@@ -323,8 +323,25 @@ impl TypeCtx {
         }
     }
 
-    fn is_contractive(session: &Session, on: &Label, pvars: &HashMap<PVarId, Kind>) -> bool {
-        todo!()
+    fn is_contractive(session: &Session, on: &Id, pvars: &HashMap<PVarId, Kind>) -> bool {
+        match session {
+            Session::Skip
+            | Session::Op(_, _)
+            | Session::Choice(_, _)
+            | Session::End(_)
+            | Session::BorrowEnd(_) => true,
+            Session::Semi { first, second } => {
+                if first.is_only_skips() {
+                    Self::is_contractive(second, on, pvars)
+                } else {
+                    Self::is_contractive(first, on, pvars)
+                }
+            }
+            Session::Mu(_, body) => Self::is_contractive(body, on, pvars),
+            Session::Var(id) => on != &id.val,
+            Session::PVar { id, .. } => !pvars.contains_key(&id),
+            Session::UVar(_) => unreachable!("Should be called after unification!"),
+        }
     }
 
     /// Check if the qualifications are well formed w.r.t. the type context.
@@ -361,10 +378,6 @@ impl TypeCtx {
             qualifications: new_qualifications,
         }
     }
-
-    fn domain(&self) -> HashSet<PVarId> {
-        self.vars.keys().copied().collect()
-    }
 }
 
 fn pvar(id: PVarId) -> Type {
@@ -374,7 +387,11 @@ fn pvar(id: PVarId) -> Type {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::util::span::fake_span;
+    use crate::{
+        session_type,
+        syntax::{Eff, Mob, Mult},
+        util::span::fake_span,
+    };
 
     fn ctx(vars: &[(PVarId, Kind)]) -> TypeCtx {
         TypeCtx {
@@ -500,7 +517,7 @@ mod tests {
     fn recursive_session_is_well_formed() {
         let s = Session::Mu(
             fake_span("X".to_string()),
-            Box::new(fake_span(Session::Var(fake_span("X".to_string())))),
+            Box::new(session_type! { !String; X }),
         );
         assert!(ctx(&[]).is_well_formed(&[Qualification::Bounded(s)]));
     }
@@ -553,6 +570,15 @@ mod tests {
     }
 
     #[test]
+    fn non_contrative_mu_not_well_formed() {
+        let s = Session::Mu(
+            fake_span("X".to_string()),
+            Box::new(fake_span(Session::Var(fake_span("X".to_string())))),
+        );
+        assert!(!ctx(&[]).is_well_formed(&[Qualification::Bounded(s)]));
+    }
+
+    #[test]
     fn bounded_mu_with_free_pvar_not_well_formed() {
         let s = Session::Mu(
             fake_span("X".to_string()),
@@ -586,5 +612,81 @@ mod tests {
             ty: Box::new(fake_span(pvar_chan(1))),
         };
         assert!(!ctx(&[]).is_well_formed(&[Qualification::Unr(ty)]));
+    }
+
+    #[test]
+    fn forall_using_bound_pvar_in_body_is_well_formed() {
+        // forall (a: Session). <a> - the bound pvar a is used in the body
+        let ty = Type::Forall {
+            id: 0,
+            kind: Kind::Session,
+            qualifications: vec![],
+            ty: Box::new(fake_span(pvar_chan(0))),
+        };
+        assert!(ctx(&[]).is_well_formed(&[Qualification::Unr(ty)]));
+    }
+
+    #[test]
+    fn choice_with_well_formed_branches_is_well_formed() {
+        // +{ a: !Int, b: !Bool } - a sending choice with well-formed branches
+        let s = session_type! { +{ a: !Int, b: !Bool } };
+        assert!(ctx(&[]).is_well_formed(&[Qualification::Bounded(s.val)]));
+    }
+
+    #[test]
+    fn choice_with_free_pvar_in_payload_not_well_formed() {
+        // &{ a: ?<b> } - a receiving choice with a free pvar in the payload
+        let s = session_type! { &{ a: fake_span(Session::PVar { id: 1, dual: false }) } };
+        assert!(!ctx(&[]).is_well_formed(&[Qualification::Bounded(s.val)]));
+    }
+
+    #[test]
+    fn session_kind_pvar_well_formed() {
+        // forall (a: Session). <a> - the bound pvar a is used in the body
+        let session = Session::PVar { id: 0, dual: false };
+        assert!(ctx(&[(0, Kind::Session)]).is_well_formed(&[Qualification::Dualable(session)]));
+    }
+
+    #[test]
+    fn type_kind_pvar_not_well_formed() {
+        // forall (a: Session). <a> - the bound pvar a is used in the body
+        let session = Session::PVar { id: 0, dual: false };
+        assert!(!ctx(&[(0, Kind::Type)]).is_well_formed(&[Qualification::Dualable(session)]));
+    }
+
+    #[test]
+    fn equiv_product_well_formed() {
+        // Product type equivalence with well-kinded components is well-formed
+        let prod1 = Type::Prod {
+            mult: fake_span(Mult::Unr),
+            first: Box::new(fake_span(Type::Int)),
+            second: Box::new(fake_span(Type::Bool)),
+        };
+        let prod2 = Type::Prod {
+            mult: fake_span(Mult::Unr),
+            first: Box::new(fake_span(Type::Int)),
+            second: Box::new(fake_span(Type::Bool)),
+        };
+        assert!(ctx(&[]).is_well_formed(&[Qualification::Equiv(prod1, prod2)]));
+    }
+
+    #[test]
+    fn equiv_arrow_well_formed() {
+        // Arrow type equivalence with well-kinded components is well-formed
+        let arr1 = Type::Arr {
+            mob: fake_span(Mob::Mobile),
+            mult: fake_span(Mult::Unr),
+            eff: fake_span(Eff::No),
+            param: Box::new(fake_span(Type::Int)),
+            ret: Box::new(fake_span(Type::Bool)),
+        };
+        let arr2 = Type::Arr {
+            mob: fake_span(Mob::Mobile),
+            mult: fake_span(Mult::Unr),
+            eff: fake_span(Eff::No),
+            param: Box::new(fake_span(Type::Int)),
+            ret: Box::new(fake_span(Type::Bool)),
+        };
+        assert!(ctx(&[]).is_well_formed(&[Qualification::Equiv(arr1, arr2)]));
     }
 }
