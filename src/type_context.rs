@@ -9,7 +9,14 @@ pub struct TypeCtx {
     qualifications: Vec<Qualification>,
 }
 
-/// Entailment rules
+impl TypeCtx {
+    pub fn empty() -> Self {
+        TypeCtx {
+            vars: HashMap::new(),
+            qualifications: vec![],
+        }
+    }
+}
 impl TypeCtx {
     pub fn entails(&self, qualification: &Qualification) -> bool {
         self.or_assumed(

@@ -9,6 +9,7 @@ use crate::{
         SType, Session, SessionOp, Type,
     },
     type_alias::{AliasEnv, expand_session, expand_stype},
+    type_context::TypeCtx,
     util::span::{Spanned, fake_span},
 };
 
@@ -65,7 +66,7 @@ pub fn infer_type(e: &SExpr, alias_env: AliasEnv) -> Result<(SType, Constraints,
         uvar_counter: 0,
         alias_env,
     };
-    let (t, cs, eff) = checker.infer(&Ctx::Empty, e)?;
+    let (t, cs, eff) = checker.infer(&Ctx::Empty, &TypeCtx::empty(), e)?;
     if t.is_ord() {
         return Err(TypeError::MainReturnsOrd(e.clone(), t.clone()));
     }
@@ -78,7 +79,12 @@ struct TypeChecker {
 }
 
 impl TypeChecker {
-    fn infer(&mut self, ctx: &Ctx, e: &SExpr) -> Result<(SType, Constraints, Eff), TypeError> {
+    fn infer(
+        &mut self,
+        ctx: &Ctx,
+        ty_ctx: &TypeCtx,
+        e: &SExpr,
+    ) -> Result<(SType, Constraints, Eff), TypeError> {
         // println!("Expression: {}, {:?}", pretty_def(&e), e);
         // println!("Ctx: {}", pretty_context_notype(&ctx.simplify()));
         match &e.val {
@@ -155,7 +161,7 @@ impl TypeChecker {
                     }
                 }
 
-                let (expr_ty, expr_constraints, expr_eff) = self.infer(&expr_ctx, expr)?;
+                let (expr_ty, expr_constraints, expr_eff) = self.infer(&expr_ctx, ty_ctx, expr)?;
 
                 let Type::Prod {
                     mult,
@@ -181,7 +187,7 @@ impl TypeChecker {
                     } else {
                         Ctx::Join(Box::new(var_ctx), Box::new(body_ctx), JoinOrd::Unordered)
                     };
-                    self.infer(&body_ctx, body)
+                    self.infer(&body_ctx, ty_ctx, body)
                 }?;
 
                 Ok((
@@ -210,8 +216,9 @@ impl TypeChecker {
                     }
                 }
 
-                let (e1_constraints, e1_eff) = self.check(&e1_ctx, e1, &fake_span(Type::Unit))?;
-                let (e2_ty, e2_constraints, e2_eff) = self.infer(&e2_ctx, e2)?;
+                let (e1_constraints, e1_eff) =
+                    self.check(&e1_ctx, ty_ctx, e1, &fake_span(Type::Unit))?;
+                let (e2_ty, e2_constraints, e2_eff) = self.infer(&e2_ctx, ty_ctx, e2)?;
 
                 Ok((
                     e2_ty,
@@ -225,14 +232,14 @@ impl TypeChecker {
                 }
 
                 let val_ctx = ctx.restrict(&val.free_vars());
-                let (val_cs, _) = self.check(&val_ctx, val, ty)?;
+                let (val_cs, _) = self.check(&val_ctx, ty_ctx, val, ty)?;
 
                 let chan_ctx = ctx.restrict(&chan.free_vars());
                 let expected_chan_ty = fake_span(Type::Chan(Session::Op(
                     SessionOp::Send,
                     Box::new(ty.clone()),
                 )));
-                let (chan_cs, _) = self.check(&chan_ctx, chan, &expected_chan_ty)?;
+                let (chan_cs, _) = self.check(&chan_ctx, ty_ctx, chan, &expected_chan_ty)?;
 
                 // ctx must be a subcontext of unordered join of val_ctx and chan_ctx must
                 {
@@ -263,7 +270,7 @@ impl TypeChecker {
                     SessionOp::Recv,
                     Box::new(ty.clone()),
                 )));
-                let (chan_cs, _) = self.check(&chan_ctx, chan, &expected_chan_ty)?;
+                let (chan_cs, _) = self.check(&chan_ctx, ty_ctx, chan, &expected_chan_ty)?;
 
                 if !ctx.is_subctx_of(&chan_ctx) {
                     return Err(TypeError::CtxSplitFailed(
@@ -293,7 +300,7 @@ impl TypeChecker {
                     param: Box::new(fake_span(Type::Unit)),
                     ret: Box::new(fake_span(Type::Unit)),
                 });
-                let (body_cs, body_eff) = self.check(&body_ctx, func, &expected_body_ty)?;
+                let (body_cs, body_eff) = self.check(&body_ctx, ty_ctx, func, &expected_body_ty)?;
 
                 Ok((fake_span(Type::Unit), body_cs, body_eff))
             }
@@ -307,8 +314,12 @@ impl TypeChecker {
                     ));
                 }
 
-                let (chan_cs, chan_eff) =
-                    self.check(&chan_ctx, chan, &fake_span(Type::Chan(Session::Skip)))?;
+                let (chan_cs, chan_eff) = self.check(
+                    &chan_ctx,
+                    ty_ctx,
+                    chan,
+                    &fake_span(Type::Chan(Session::Skip)),
+                )?;
 
                 Ok((fake_span(Type::Unit), chan_cs, chan_eff))
             }
@@ -323,7 +334,7 @@ impl TypeChecker {
                 }
 
                 let expected_ty = fake_span(Type::Chan(Session::BorrowEnd(*op)));
-                let (chan_cs, chan_eff) = self.check(&chan_ctx, chan, &expected_ty)?;
+                let (chan_cs, chan_eff) = self.check(&chan_ctx, ty_ctx, chan, &expected_ty)?;
 
                 Ok((fake_span(Type::Unit), chan_cs, chan_eff))
             }
@@ -338,7 +349,7 @@ impl TypeChecker {
                 }
 
                 let expected_ty = fake_span(Type::Chan(Session::End(*op)));
-                let (chan_cs, chan_eff) = self.check(&chan_ctx, chan, &expected_ty)?;
+                let (chan_cs, chan_eff) = self.check(&chan_ctx, ty_ctx, chan, &expected_ty)?;
 
                 Ok((fake_span(Type::Unit), chan_cs, chan_eff))
             }
@@ -356,7 +367,7 @@ impl TypeChecker {
                 let expected_chan_ty = fake_span(Type::Chan(
                     session_type! { prefix_session.clone(); uvar.clone() }.val,
                 ));
-                let (chan_cs, chan_eff) = self.check(chan_ctx, chan, &expected_chan_ty)?;
+                let (chan_cs, chan_eff) = self.check(chan_ctx, ty_ctx, chan, &expected_chan_ty)?;
 
                 let ret_ty = Type::Prod {
                     mult: fake_span(Mult::OrdL),
@@ -380,7 +391,7 @@ impl TypeChecker {
                 let expected_chan_ty = fake_span(Type::Chan(
                     session_type! { prefix_session.clone(); uvar.clone() }.val,
                 ));
-                let (chan_cs, chan_eff) = self.check(chan_ctx, chan, &expected_chan_ty)?;
+                let (chan_cs, chan_eff) = self.check(chan_ctx, ty_ctx, chan, &expected_chan_ty)?;
 
                 let ret_ty = Type::Prod {
                     mult: fake_span(Mult::Lin),
@@ -398,7 +409,7 @@ impl TypeChecker {
                 let abs_ctx = ctx.restrict(&abs.free_vars());
                 let arg_ctx = ctx.restrict(&arg.free_vars());
 
-                let (abs_ty, abs_cs, abs_eff) = self.infer(&abs_ctx, abs)?;
+                let (abs_ty, abs_cs, abs_eff) = self.infer(&abs_ctx, ty_ctx, abs)?;
 
                 let Type::Arr {
                     mult,
@@ -435,7 +446,7 @@ impl TypeChecker {
                     ));
                 }
 
-                let (arg_cs, arg_eff) = self.check(&arg_ctx, arg, &param)?;
+                let (arg_cs, arg_eff) = self.check(&arg_ctx, ty_ctx, arg, &param)?;
 
                 if mult.val == Mult::OrdR && arg_eff == Eff::Yes {
                     return Err(TypeError::MismatchEff(
@@ -476,7 +487,7 @@ impl TypeChecker {
                     }
                 }
 
-                let (var_ty, var_cs, var_eff) = self.infer(&var_ctx, var_expr)?;
+                let (var_ty, var_cs, var_eff) = self.infer(&var_ctx, ty_ctx, var_expr)?;
 
                 let body_ctx = {
                     let binding = Ctx::Bind(var_id.clone(), var_ty);
@@ -486,7 +497,7 @@ impl TypeChecker {
                         Ctx::Join(Box::new(binding), Box::new(body_ctx), JoinOrd::Unordered)
                     }
                 };
-                let (body_ty, body_cs, body_eff) = self.infer(&body_ctx, body_expr)?;
+                let (body_ty, body_cs, body_eff) = self.infer(&body_ctx, ty_ctx, body_expr)?;
 
                 Ok((body_ty, var_cs.join(body_cs), Eff::lub(var_eff, body_eff)))
             }
@@ -520,14 +531,14 @@ impl TypeChecker {
                         decl_ctx,
                         Ctx::Bind(id.clone(), expected_ty.clone()),
                     );
-                    self.check(&decl_ctx, &clause_expr, &expected_ty)?
+                    self.check(&decl_ctx, ty_ctx, &clause_expr, &expected_ty)?
                 };
 
                 let (body_ty, body_cs, body_eff) = {
                     let var_ctx = Ctx::Bind(id.clone(), expected_ty.clone());
                     let body_ctx =
                         Ctx::Join(Box::new(var_ctx), Box::new(body_ctx), JoinOrd::Ordered);
-                    self.infer(&body_ctx, body)?
+                    self.infer(&body_ctx, ty_ctx, body)?
                 };
 
                 Ok((
@@ -538,7 +549,7 @@ impl TypeChecker {
             }
             Expr::CaseSum(expr, cases) => {
                 let expr_ctx = ctx.restrict(&expr.free_vars());
-                let (expr_ty, expr_cs, expr_eff) = self.infer(&expr_ctx, expr)?;
+                let (expr_ty, expr_cs, expr_eff) = self.infer(&expr_ctx, ty_ctx, expr)?;
 
                 let Type::Variant(variants) = &expr_ty.val else {
                     return Err(TypeError::Mismatch(
@@ -586,7 +597,7 @@ impl TypeChecker {
                         }).expect("Bug: set of labels in the variant type must be equal to the set of labels in cases");
 
                         let case_ctx = Ctx::Join(Box::new(Ctx::Bind(var_name.clone(), case_ty)), Box::new(case_ctx), JoinOrd::Ordered);
-                        let infer_res = self.infer(&case_ctx, case_expr)?;
+                        let infer_res = self.infer(&case_ctx, ty_ctx, case_expr)?;
                         Ok((label.val.clone(), infer_res))
                     })
                     .collect::<Result<_, _>>()?;
@@ -620,7 +631,7 @@ impl TypeChecker {
                     ));
                 }
 
-                let (chan_ty, chan_cs, _chan_eff) = self.infer(&chan_ctx, chan_expr)?;
+                let (chan_ty, chan_cs, _chan_eff) = self.infer(&chan_ctx, ty_ctx, chan_expr)?;
 
                 if let Type::Chan(Session::UVar(_)) = &chan_ty.val {
                     return Err(TypeError::TypeAnnotationMissing(*chan_expr.clone()));
@@ -670,7 +681,7 @@ impl TypeChecker {
                     ));
                 }
 
-                let (chan_ty, chan_cs, _chan_eff) = self.infer(&chan_ctx, chan_expr)?;
+                let (chan_ty, chan_cs, _chan_eff) = self.infer(&chan_ctx, ty_ctx, chan_expr)?;
 
                 if let Type::Chan(Session::UVar(_)) = &chan_ty.val {
                     return Err(TypeError::TypeAnnotationMissing(*chan_expr.clone()));
@@ -698,12 +709,12 @@ impl TypeChecker {
                 let ty = self.expand_type(ty)?;
                 let ty = self.normalise(ty);
                 let (expr_cs, expr_eff) =
-                    self.check(&ctx.restrict(&expr.free_vars()), expr, &ty)?;
+                    self.check(&ctx.restrict(&expr.free_vars()), ty_ctx, expr, &ty)?;
 
                 Ok((ty, expr_cs, expr_eff))
             }
             Expr::Op1(op1, expr) => {
-                let (expr_ty, expr_cs, expr_eff) = self.infer(ctx, expr)?;
+                let (expr_ty, expr_cs, expr_eff) = self.infer(ctx, ty_ctx, expr)?;
                 let ty = match (op1, &expr_ty.val) {
                     (Op1::Neg, Type::Int) => Type::Int,
                     (Op1::Neg, _) => {
@@ -728,10 +739,10 @@ impl TypeChecker {
             }
             Expr::Op2(op2, expr1, expr2) => {
                 let expr1_ctx = ctx.restrict(&expr1.free_vars());
-                let (expr1_ty, expr1_cs, expr1_eff) = self.infer(&expr1_ctx, expr1)?;
+                let (expr1_ty, expr1_cs, expr1_eff) = self.infer(&expr1_ctx, ty_ctx, expr1)?;
 
                 let expr2_ctx = ctx.restrict(&expr2.free_vars());
-                let (expr2_ty, expr2_cs, expr2_eff) = self.infer(&expr2_ctx, expr2)?;
+                let (expr2_ty, expr2_cs, expr2_eff) = self.infer(&expr2_ctx, ty_ctx, expr2)?;
 
                 {
                     let res_ctx = Ctx::Join(
@@ -802,7 +813,7 @@ impl TypeChecker {
             Expr::If(cond_expr, then_expr, else_expr) => {
                 let cond_ctx = ctx.restrict(&cond_expr.free_vars());
                 let (cond_cs, cond_eff) =
-                    self.check(&cond_ctx, cond_expr, &fake_span(Type::Bool))?;
+                    self.check(&cond_ctx, ty_ctx, cond_expr, &fake_span(Type::Bool))?;
 
                 let then_ctx = ctx.restrict(&then_expr.free_vars());
                 let else_ctx = ctx.restrict(&else_expr.free_vars());
@@ -839,8 +850,8 @@ impl TypeChecker {
                     }
                 }
 
-                let (then_ty, then_cs, then_eff) = self.infer(&then_ctx, then_expr)?;
-                let (else_ty, else_cs, else_eff) = self.infer(&else_ctx, else_expr)?;
+                let (then_ty, then_cs, then_eff) = self.infer(&then_ctx, ty_ctx, then_expr)?;
+                let (else_ty, else_cs, else_eff) = self.infer(&else_ctx, ty_ctx, else_expr)?;
 
                 let mut cs = cond_cs.join(then_cs).join(else_cs);
                 cs.add(then_ty.clone(), else_ty.clone());
@@ -864,6 +875,7 @@ impl TypeChecker {
     fn check(
         &mut self,
         ctx: &Ctx,
+        ty_ctx: &TypeCtx,
         e: &SExpr,
         expected_ty: &SType,
     ) -> Result<(Constraints, Eff), TypeError> {
@@ -904,7 +916,7 @@ impl TypeChecker {
                 }
 
                 let ctx = ext(**mult, Ctx::Bind(id.clone(), *param.clone()), ctx.clone());
-                let (body_cs, body_eff) = self.check(&ctx, body, ret)?;
+                let (body_cs, body_eff) = self.check(&ctx, ty_ctx, body, ret)?;
 
                 if body_eff > eff.val {
                     return Err(TypeError::MismatchEffSub(
@@ -933,8 +945,10 @@ impl TypeChecker {
                     ));
                 };
 
-                let (first_cs, first_eff) = self.check(&first_ctx, first, &expected_first)?;
-                let (second_cs, second_eff) = self.check(&second_ctx, second, &expected_second)?;
+                let (first_cs, first_eff) =
+                    self.check(&first_ctx, ty_ctx, first, &expected_first)?;
+                let (second_cs, second_eff) =
+                    self.check(&second_ctx, ty_ctx, second, &expected_second)?;
 
                 if mult.val == Mult::OrdL && second_eff == Eff::Yes {
                     return Err(TypeError::MismatchEff(
@@ -984,12 +998,12 @@ impl TypeChecker {
                 };
 
                 let (expr_cs, expr_eff) =
-                    self.check(&ctx.restrict(&expr.free_vars()), expr, actual_ty)?;
+                    self.check(&ctx.restrict(&expr.free_vars()), ty_ctx, expr, actual_ty)?;
 
                 Ok((expr_cs, expr_eff))
             }
             _ => {
-                let (inferred_ty, mut cs, eff) = self.infer(ctx, e)?;
+                let (inferred_ty, mut cs, eff) = self.infer(ctx, ty_ctx, e)?;
                 let inferred_ty = self.expand_type(&inferred_ty)?;
                 let expected_ty = self.expand_type(expected_ty)?;
 
