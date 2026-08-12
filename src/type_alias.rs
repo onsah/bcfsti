@@ -107,6 +107,10 @@ pub fn check_shadowing(e: &SExpr, alias_env: &AliasEnv) -> Result<(), TypeError>
             check_shadowing(spanned1, alias_env)?;
             check_shadowing(spanned2, alias_env)
         }
+        Expr::TyApp(e, ty) => {
+            check_shadowing(e, alias_env)?;
+            check_type_shadowing(ty, alias_env)
+        }
     }
 }
 

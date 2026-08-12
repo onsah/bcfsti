@@ -36,25 +36,25 @@ mod typechecker_tests {
     #[test]
     fn session_type_new() {
         let src = r#"
-            new &{ foo: !Int; ?Int, bar: ?Unit }
+            new[&{ foo: !Int; ?Int, bar: ?Unit }]
         "#;
         let res = typecheck(src, false);
         assert_matches!(res, Err(IErr::Typing(TypeError::MainReturnsOrd(_, _))));
 
         let src = r#"
-            new Close
+            new[Close]
         "#;
         let res = typecheck(src, false);
         assert_matches!(res, Err(IErr::Typing(TypeError::TypeNotValidForNew(_))));
 
         let src = r#"
-            new &{ foo: Close; ?Int, bar: ?Unit }
+            new[&{ foo: Close; ?Int, bar: ?Unit }]
         "#;
         let res = typecheck(src, false);
         assert_matches!(res, Err(IErr::Typing(TypeError::TypeNotValidForNew(_))));
 
         let src = r#"
-            new &{ foo: !Int; ?Int, bar: Wait }
+            new[&{ foo: !Int; ?Int, bar: Wait }]
         "#;
         let res = typecheck(src, false);
         assert_matches!(res, Err(IErr::Typing(TypeError::TypeNotValidForNew(_))));
@@ -63,15 +63,15 @@ mod typechecker_tests {
     #[test]
     fn fork() {
         let src = r#"
-            let cs, cr = new !Int in
+            let cs, cr = new[!Int] in
             fork (\ x.
-                let cs1, cs2 = lsplit Acq cs in
+                let cs1, cs2 = lsplit[Acq] cs in
                 acquire cs1;
-                send @Int 5 cs2
+                send[Int] 5 cs2
             );
-            let cr1, cr2 = lsplit Acq cr in
+            let cr1, cr2 = lsplit[Acq] cr in
             acquire cr1;
-            recv @Int cr2
+            recv[Int] cr2
         "#;
 
         let res = typecheck(src, false);
@@ -81,16 +81,16 @@ mod typechecker_tests {
     #[test]
     fn new_and_close() {
         let src = r#"
-            let cs, cr = new !Int in
-            let cs1, cs2 = lsplit Acq cs in
+            let cs, cr = new[!Int] in
+            let cs1, cs2 = lsplit[Acq] cs in
             acquire cs1;
-            let cs3, cs4 = lsplit !Int cs2 in
-            send @Int 5 cs3;
+            let cs3, cs4 = lsplit[!Int] cs2 in
+            send[Int] 5 cs3;
             wait cs4;
-            let cr1, cr2 = lsplit Acq cr in
+            let cr1, cr2 = lsplit[Acq] cr in
             acquire cr1;
-            let cr3, cr4 = lsplit ?Int cr2 in
-            recv @Int cr3;
+            let cr3, cr4 = lsplit[?Int] cr2 in
+            recv[Int] cr3;
             drop cr4
         "#;
 
@@ -104,9 +104,9 @@ mod typechecker_tests {
             let
                 foo : !Int; ?Int -[m u 1]-> Acq; ?Int
                 foo c =
-                    let cp, cs = rsplit !Int c in
-                    let cp1, cp2 = lsplit !Int cp in
-                    send @Int 5 cp1;
+                    let cp, cs = rsplit[!Int] c in
+                    let cp1, cp2 = lsplit[!Int] cp in
+                    send[Int] 5 cp1;
                     drop cp2;
                     cs
             in
@@ -153,8 +153,8 @@ mod typechecker_tests {
             let
                 foo: !Int; ?Int -[m u 1]-> ?Int
                 foo c =
-                    let c1, c2 = lsplit !Int c in
-                    send @Int 5 c1;
+                    let c1, c2 = lsplit[!Int] c in
+                    send[Int] 5 c1;
                     c2
             in
             let
@@ -171,8 +171,8 @@ mod typechecker_tests {
             let
                 foo: !Int; ?Int -[m u 1]-> ?Int
                 foo c =
-                    let c1, c2 = lsplit !Int c in
-                    send @Int 5 c1;
+                    let c1, c2 = lsplit[!Int] c in
+                    send[Int] 5 c1;
                     c2
             in
             let
@@ -221,7 +221,7 @@ mod typechecker_tests {
         let
             foo : ?Int -[m u 1]-> Int *[r] Unit
             foo c =
-                (recv @Int c, unit)
+                (recv[Int] c, unit)
         in
         unit
         "#;
@@ -246,7 +246,7 @@ mod typechecker_tests {
         let
             foo : ?Int -[m u 1]-> Int *[l] Unit
             foo c =
-                (7, recv @Int c)
+                (7, recv[Int] c)
         in
         unit
         "#;
@@ -269,7 +269,7 @@ mod typechecker_tests {
         assert_eq!(chan_name_r.val, "c");
 
         let src = r#"
-            (7, recv @Int c)
+            (7, recv[Int] c)
         "#;
 
         let res = typecheck(src, false);
@@ -399,7 +399,7 @@ mod typechecker_tests {
         let src = r#"
             (\c.
             let c1 = select bar c in
-            send @Int 42 c1) : +{ foo: ?Int; ?String, bar: !Int } -[m u 1]-> ?String
+            send[Int] 42 c1) : +{ foo: ?Int; ?String, bar: !Int } -[m u 1]-> ?String
         "#;
 
         let res = typecheck(src, false);
@@ -407,10 +407,10 @@ mod typechecker_tests {
 
         let src = r#"
             (\c.
-            let c1, c2 = lsplit !Int c in
-            send @Int 42 c1;
+            let c1, c2 = lsplit[!Int] c in
+            send[Int] 42 c1;
             let c3 = select bar c2 in
-            send @Int 42 c3) : !Int;+{ foo: ?Int; ?String, bar: !Int } -[m u 1]-> ?String
+            send[Int] 42 c3) : !Int;+{ foo: ?Int; ?String, bar: !Int } -[m u 1]-> ?String
         "#;
 
         let res = typecheck(src, false);
@@ -430,8 +430,8 @@ mod typechecker_tests {
         let src = r#"
             (\c.
             case branch c {
-                foo c1 -> { recv @Int c1 }
-                bar c2 -> { send @Int 42 c2; 42 }
+                foo c1 -> { recv[Int] c1 }
+                bar c2 -> { send[Int] 42 c2; 42 }
             }) : &{ foo: ?Int, bar: !Int } -[m u 1]-> Int
         "#;
 
@@ -441,7 +441,7 @@ mod typechecker_tests {
         let src = r#"
             (\c.
             case branch c {
-                foo c1 -> { recv @Int c1 }
+                foo c1 -> { recv[Int] c1 }
             }) : &{ foo: ?Int, bar: !Int } -[m u 1]-> Int
         "#;
 
@@ -455,9 +455,9 @@ mod typechecker_tests {
         let src = r#"
             (\c.
             case branch c {
-                foo c1 -> { recv @Int c1 }
+                foo c1 -> { recv[Int] c1 }
 
-                bar c2 -> { send @Int 42 c2; 42 }
+                bar c2 -> { send[Int] 42 c2; 42 }
             }) : &{ foo: ?Int } -[m u 1]-> Int
         "#;
 
@@ -631,13 +631,13 @@ mod typechecker_tests {
             let
                 foo : !String; ?Int -[m u 1]-> Int
                 foo c =
-                    let cin, cout = rsplit !String c in
+                    let cin, cout = rsplit[!String] c in
                     fork (\x.
-                        let cout1, cout2 = lsplit Acq cout in
+                        let cout1, cout2 = lsplit[Acq] cout in
                         acquire cout1;
-                        recv @Int cout2);
-                    let cin1, cin2 = lsplit !String cin in
-                    send @String "hello" cin1;
+                        recv[Int] cout2);
+                    let cin1, cin2 = lsplit[!String] cin in
+                    send[String] "hello" cin1;
                     drop cin2
             in
             unit
@@ -653,10 +653,10 @@ mod typechecker_tests {
             let
                 foo : !String; ?Int -[m u 1]-> Int
                 foo c =
-                    let c1, c2 = lsplit !String c in
+                    let c1, c2 = lsplit[!String] c in
                     fork (\x.
-                        send @String "hello" c1);
-                    recv @Int c2
+                        send[String] "hello" c1);
+                    recv[Int] c2
             in
             unit
         "#;

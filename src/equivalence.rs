@@ -204,16 +204,16 @@ fn convert_type_impl(ty: &Type, defs: &mut Definitions) -> FreestType {
         Type::Bool => FreestType::Bool,
         Type::String => FreestType::String,
         Type::Forall {
-            id,
-            kind,
-            qualifications,
-            ty,
+            id: _,
+            kind: _,
+            qualifications: _,
+            ty: _,
         } => todo!(),
         Type::Exists {
-            id,
-            kind,
-            qualifications,
-            ty,
+            id: _,
+            kind: _,
+            qualifications: _,
+            ty: _,
         } => todo!(),
     }
 }

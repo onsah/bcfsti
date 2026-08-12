@@ -145,9 +145,13 @@ peg::parser! {
         pub rule qual() -> Qualification
             = tok(QMbl) ty:stype() { Qualification::Mobile(ty) }
 
+        pub rule quals() -> Vec<Qualification>
+            = tok(Period) q:qual() { vec![q] }
+
         pub rule quant() -> Quantification
-            = tok(BracketL) id:sid() tok(Colon) t:skind() tok(BracketR) tok(Comma) q:qual()
-                { todo!() }
+            = tok(BracketL) id:sid() tok(Colon) kind:skind() tok(BracketR) qs:quals()?
+                { Quantification { id, kind, qualifications: qs.unwrap_or(Vec::new()) } }
+        pub rule squant() -> Spanned<Quantification> = spanned(<quant()>)
 
         // Expressions
 
@@ -163,7 +167,7 @@ peg::parser! {
         pub rule expr_lam() -> Expr
             = tok(Lambda) x:sid() tok(Period) e:sexpr_lam()
               { Expr::Abs(x, Box::new(e)) }
-            / tok(Rec) tok(TypeKw) x:sid() tok(Equals) t:ssession() tok(In) e:sexpr_lam()
+            / tok(Rec) tok(TypeKw) x:sid() squant()? tok(Equals) t:ssession() tok(In) e:sexpr_lam()
               { Expr::TypeDef(x, t, Box::new(e), true) }
             / tok(TypeKw) x:sid() tok(Equals) t:ssession() tok(In) e:sexpr_lam()
               { Expr::TypeDef(x, t, Box::new(e), false) }
@@ -175,7 +179,7 @@ peg::parser! {
               { Expr::LetPair(x, y, Box::new(e1), Box::new(e2)) }
             / tok(Let) x:sid() tok(Equals) e1:sexpr_ann() tok(In) e2:sexpr_lam()
               { Expr::Let(x, Box::new(e1), Box::new(e2)) }
-            / tok(Let) x:sid() tok(Colon) t:stype() c:sclause() tok(In) e:sexpr_lam()
+            / tok(Let) x:sid() squant()? tok(Colon) t:stype() c:sclause() tok(In) e:sexpr_lam()
               { Expr::LetDecl(x, t, Box::new(c), Box::new(e)) }
             / tok(If) e:sexpr_lam() tok(Then) e1:sexpr_lam() tok(Else) e2:sexpr_lam()
               { Expr::If(Box::new(e), Box::new(e1), Box::new(e2)) }
@@ -240,9 +244,9 @@ peg::parser! {
 
         #[cache_left_rec]
         pub rule expr_app() -> Expr
-            = tok(New) s:ssession() { Expr::New(s) }
-            / tok(Send) tok(At) ty:stype() e1:sexpr_atom() e2:sexpr_atom() { Expr::Send(ty, Box::new(e1), Box::new(e2)) }
-            / tok(Recv) tok(At) ty:stype() e:sexpr_atom() { Expr::Recv(ty, Box::new(e)) }
+            = tok(New) tok(BracketL) s:ssession() tok(BracketR) { Expr::New(s) }
+            / tok(Send) tok(BracketL) ty:stype() tok(BracketR) e1:sexpr_atom() e2:sexpr_atom() { Expr::Send(ty, Box::new(e1), Box::new(e2)) }
+            / tok(Recv) tok(BracketL) ty:stype() tok(BracketR) e:sexpr_atom() { Expr::Recv(ty, Box::new(e)) }
             / tok(Discard) e:sexpr_atom() { Expr::Discard(Box::new(e)) }
             / tok(Drop) e:sexpr_atom() { Expr::BorrowEnd(SessionOp::Send, Box::new(e)) }
             / tok(Acquire) e:sexpr_atom() { Expr::BorrowEnd(SessionOp::Recv, Box::new(e)) }
@@ -254,9 +258,10 @@ peg::parser! {
             / tok(Fork) e:sexpr_atom() { Expr::Fork(Box::new(e)) }
             / tok(ToStr) e:sexpr_atom() { Expr::Op1(Op1::ToStr, Box::new(e)) }
             / tok(Print) e:sexpr_atom() { Expr::Op1(Op1::Print, Box::new(e)) }
-            / tok(LSplit) s:ssession() e:sexpr_atom() { Expr::LSplit(s, Box::new(e)) }
-            / tok(RSplit) s:ssession() e:sexpr_atom() { Expr::RSplit(s, Box::new(e)) }
+            / tok(LSplit) tok(BracketL) s:ssession() tok(BracketR) e:sexpr_atom() { Expr::LSplit(s, Box::new(e)) }
+            / tok(RSplit) tok(BracketL) s:ssession() tok(BracketR) e:sexpr_atom() { Expr::RSplit(s, Box::new(e)) }
             / e1:sexpr_app() e2:sexpr_atom() { Expr::App(Box::new(e1), Box::new(e2)) }
+            / e1:sexpr_app() tok(BracketL) ty:stype() tok(BracketR) { Expr::TyApp(Box::new(e1), ty) }
             / e:expr_atom() { e }
         pub rule sexpr_app() -> SExpr = spanned(<expr_app()>)
 
@@ -407,5 +412,100 @@ mod tests {
                 assert!(false)
             }
         }
+    }
+
+    #[test]
+    fn parse_type_universal_id() {
+        let src = r#"
+            let
+                id[T: Type] : T -[m u 1]-> T
+                id x = x
+            in
+            unit
+        "#;
+        let toks = lexer::lex(&src).unwrap();
+        let mut toks = lexer_offside::process_indent(toks, |_| false, |_| false);
+        toks.toks = toks
+            .toks
+            .into_iter()
+            .filter(|t| t.val != Braced::Token(Token::NewLine))
+            .collect::<Vec<_>>();
+
+        let res = parser::parse(&toks);
+        dbg!(&res);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn parse_type_universal_session() {
+        let src = r#"
+            let
+                recvTwo[T: Type]. mbl T : ?T;?T -[m u 1]-> Unit
+                recvTwo c =
+                    let c1, c2 = lsplit[?T] c in
+                    let t1 = recv[T] c1 in
+                    let t2 = recv[T] c2 in
+                    unit
+            in
+            unit
+        "#;
+        let toks = lexer::lex(&src).unwrap();
+        let mut toks = lexer_offside::process_indent(toks, |_| false, |_| false);
+        toks.toks = toks
+            .toks
+            .into_iter()
+            .filter(|t| t.val != Braced::Token(Token::NewLine))
+            .collect::<Vec<_>>();
+
+        let res = parser::parse(&toks);
+        dbg!(&res);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn parse_type_universal_session_recursion() {
+        let src = r#"
+            let
+                recvInfinite[T: Type]. mbl T : (mu X. ?T; X) -[m u 1]-> Unit
+                recvInfinite c =
+                    let c1, c2 = lsplit[?T] c in
+                    let t1 = recv[T] c1 in
+                    recvInfinite[T] c2
+            in
+            unit
+        "#;
+        let toks = lexer::lex(&src).unwrap();
+        let mut toks = lexer_offside::process_indent(toks, |_| false, |_| false);
+        toks.toks = toks
+            .toks
+            .into_iter()
+            .filter(|t| t.val != Braced::Token(Token::NewLine))
+            .collect::<Vec<_>>();
+
+        let res = parser::parse(&toks);
+        dbg!(&res);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn parse_type_universal_double() {
+        let src = r#"
+            let
+                double[T: Type] : (T -[m u 1]-> T) -[m u 1]-> (T -[m u 1]-> T)
+                double f = \x. f (f x)
+            in
+            unit
+        "#;
+        let toks = lexer::lex(&src).unwrap();
+        let mut toks = lexer_offside::process_indent(toks, |_| false, |_| false);
+        toks.toks = toks
+            .toks
+            .into_iter()
+            .filter(|t| t.val != Braced::Token(Token::NewLine))
+            .collect::<Vec<_>>();
+
+        let res = parser::parse(&toks);
+        dbg!(&res);
+        assert!(res.is_ok());
     }
 }

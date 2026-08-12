@@ -1,11 +1,11 @@
-let cs, cr = new !Int in
-let cs1, cs2 = lsplit Acq cs in
+let cs, cr = new[!Int] in
+let cs1, cs2 = lsplit[Acq] cs in
 acquire cs1;
-let cs3, cs4 = lsplit !Int cs2 in
-send @Int 5 cs3;
+let cs3, cs4 = lsplit[!Int] cs2 in
+send[Int] 5 cs3;
 close cs4;
-let cr1, cr2 = lsplit Acq cr in
+let cr1, cr2 = lsplit[Acq] cr in
 acquire cr1;
-let cr3, cr4 = lsplit ?Int cr2 in
-let x = recv @Int cr3 in
+let cr3, cr4 = lsplit[?Int] cr2 in
+let x = recv[Int] cr3 in
 wait cr4

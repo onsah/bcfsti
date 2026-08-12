@@ -4,13 +4,13 @@ let
     renderMsgArea : HtmlChannel -[m u 1]-> Unit
     renderMsgArea c =
         let c1 = select text c in
-        send @String "Message Area" c1
+        send[String] "Message Area" c1
 in
 let
     renderUserRest : ChildrenChannel; Close -[m u 1]-> Unit
     renderUserRest c =
         let c1 = select child c in
-        let html, children = lsplit HtmlChannel c1 in
+        let html, children = lsplit[HtmlChannel] c1 in
         renderMsgArea html;
         let c2 = select done (children : ChildrenChannel; Close) in
         close c2
@@ -19,25 +19,25 @@ let
     renderUserProfile : HtmlChannel; Return -[m u 1]-> Unit
     renderUserProfile c =
         let c1 = select text c in
-        let c2, c3 = lsplit !String c1 in
-        send @String "User Profile" c2;
+        let c2, c3 = lsplit[!String] c1 in
+        send[String] "User Profile" c2;
         drop c3
 in
 let
     renderUser : HtmlChannel; Close -[m u 1]-> Unit
     renderUser c =
         let cElem = select elem c in
-        let cStr, cChildren = lsplit !String cElem in
-        send @String "div" cStr;
+        let cStr, cChildren = lsplit[!String] cElem in
+        send[String] "div" cStr;
         let cChild = select child (cChildren : ChildrenChannel; Close) in
-        let cHtml, cChildrenRemote = rsplit HtmlChannel cChild in
-        let cSkip, cHtmlRemote = rsplit Skip cHtml in
+        let cHtml, cChildrenRemote = rsplit[HtmlChannel] cChild in
+        let cSkip, cHtmlRemote = rsplit[Skip] cHtml in
         drop cSkip;
         fork (\x.
-            let cAcq, cHtml2 = lsplit Acq cHtmlRemote in
+            let cAcq, cHtml2 = lsplit[Acq] cHtmlRemote in
             acquire cAcq;
             renderUserProfile cHtml2);
-        let cAcq, cChildren2 = lsplit Acq cChildrenRemote in
+        let cAcq, cChildren2 = lsplit[Acq] cChildrenRemote in
         acquire cAcq;
         renderUserRest cChildren2
 in

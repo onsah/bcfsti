@@ -53,6 +53,7 @@ pub type SSessionOp = Spanned<SessionOp>;
 
 pub type UVarId = usize;
 pub type PVarId = Label;
+pub type SPVarId = Spanned<PVarId>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Session {
@@ -227,9 +228,9 @@ pub type SType = Spanned<Type>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Quantification {
-    id: PVarId,
-    kind: Kind,
-    qualifications: Vec<Qualification>,
+    pub id: SPVarId,
+    pub kind: SKind,
+    pub qualifications: Vec<Qualification>,
 }
 
 impl Type {
@@ -466,6 +467,8 @@ pub enum Expr {
     Op2(Op2, Box<SExpr>, Box<SExpr>),
 
     If(Box<SExpr>, Box<SExpr>, Box<SExpr>),
+
+    TyApp(Box<SExpr>, SType),
 }
 pub type SExpr = Spanned<Expr>;
 
@@ -727,6 +730,7 @@ impl Expr {
             }
             Expr::TypeDef(_, _, body, _) => body.free_vars(),
             Expr::Discard(e) => e.free_vars(),
+            Expr::TyApp(e, _) => e.free_vars(),
         }
     }
 }

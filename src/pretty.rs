@@ -415,6 +415,12 @@ impl Pretty<UserState> for Expr {
                 p.pp("discard ");
                 p.pp_arg(R, e);
             }),
+            Expr::TyApp(e, ty) => {
+                p.pp(e);
+                p.pp("[");
+                p.pp(ty);
+                p.pp("]")
+            }
         }
     }
 }

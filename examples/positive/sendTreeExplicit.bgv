@@ -6,9 +6,9 @@ let
             discard (select leaf c)
         else
             let c1 = select node c in
-            let c2, c3 = lsplit !Int c1 in
-            send @Int 42 c2;
-            let c4, c5 = lsplit TreeChannel c3 in
+            let c2, c3 = lsplit[!Int] c1 in
+            send[Int] 42 c2;
+            let c4, c5 = lsplit[TreeChannel] c3 in
             sendTree c4;
             sendTree c5
 in

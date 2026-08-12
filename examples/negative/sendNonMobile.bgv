@@ -1,9 +1,9 @@
 let
     foo : !String; ?Int -[m u 1]-> Int
     foo c =
-        let c1, c2 = lsplit !String c in
+        let c1, c2 = lsplit[!String] c in
         fork (\x.
-            send @String "hello" c1);
-        recv @Int c2
+            send[String] "hello" c1);
+        recv[Int] c2
 in
 unit

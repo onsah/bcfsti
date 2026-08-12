@@ -857,6 +857,7 @@ impl TypeChecker {
             Expr::TypeDef(_, _, _, _) => {
                 unreachable!("type abbreviations are expanded before type checking")
             }
+            Expr::TyApp(e, ty) => todo!(),
         }
     }
 

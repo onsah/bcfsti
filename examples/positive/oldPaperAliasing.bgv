@@ -8,8 +8,8 @@ let
   forward : ?Int *[l] !Int -[m u 1]-> Unit
   forward pair =
     let c, d = pair in
-    let y = recv @Int c in
-    let snd = (\x. send @Int x d) : Int -[s p 1]-> Unit
+    let y = recv[Int] c in
+    let snd = (\x. send[Int] x d) : Int -[s p 1]-> Unit
     in
     snd y
 in
@@ -18,7 +18,7 @@ in
 let
   example : ?Int; !Int -[m u 1]-> Unit
   example c =
-    let cRecv, cSend = lsplit ?Int c in
+    let cRecv, cSend = lsplit[?Int] c in
     forward (cRecv, cSend)
 in
 unit
