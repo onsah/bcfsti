@@ -225,7 +225,7 @@ pub fn expand_type(ty: &Type, env: &AliasEnv, bound: &HashSet<Id>) -> Result<Typ
             qualifications,
             ty,
         } => expand_type(ty, env, bound).map(|ty| Type::Forall {
-            id: *id,
+            id: id.clone(),
             kind: *kind,
             qualifications: qualifications.clone(),
             ty: Box::new(fake_span(ty)),
@@ -236,7 +236,7 @@ pub fn expand_type(ty: &Type, env: &AliasEnv, bound: &HashSet<Id>) -> Result<Typ
             qualifications,
             ty,
         } => expand_type(ty, env, bound).map(|ty| Type::Exists {
-            id: *id,
+            id: id.clone(),
             kind: *kind,
             qualifications: qualifications.clone(),
             ty: Box::new(fake_span(ty)),

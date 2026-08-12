@@ -52,7 +52,7 @@ pub enum SessionOp {
 pub type SSessionOp = Spanned<SessionOp>;
 
 pub type UVarId = usize;
-pub type PVarId = usize;
+pub type PVarId = Label;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Session {
@@ -138,7 +138,7 @@ impl Session {
             Session::Mu(_, body) => body.poly_variables(),
             Session::Var(_) => Box::new(iter::empty()),
             Session::UVar(_) => Box::new(iter::empty()),
-            Session::PVar { id, .. } => Box::new(iter::once(*id)),
+            Session::PVar { id, .. } => Box::new(iter::once(id.clone())),
         }
     }
 
@@ -225,6 +225,13 @@ pub enum Type {
 }
 pub type SType = Spanned<Type>;
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Quantification {
+    id: PVarId,
+    kind: Kind,
+    qualifications: Vec<Qualification>,
+}
+
 impl Type {
     /// Closed type means it has no unification variables.
     pub fn is_closed(&self) -> bool {
@@ -268,7 +275,7 @@ impl Type {
         &'a self,
     ) -> Box<dyn Iterator<Item = PVarId> + 'a> {
         match self {
-            Type::Chan(Session::PVar { id, .. }) => Box::new(iter::once(*id)),
+            Type::Chan(Session::PVar { id, .. }) => Box::new(iter::once(id.clone())),
             Type::Prod { first, second, .. } => Box::new(
                 first
                     .poly_variables_under_prod_and_variant()
@@ -393,6 +400,7 @@ pub enum Kind {
     Type,
     Session,
 }
+pub type SKind = Spanned<Kind>;
 
 impl Kind {
     pub fn is_subkind_of(&self, other: &Kind) -> bool {
@@ -407,13 +415,13 @@ impl Kind {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Qualification {
-    Unr(Type),
-    Mobile(Type),
-    Bounded(Session),
-    New(Session),
-    Dualable(Session),
-    NonSkip(Session),
-    Equiv(Type, Type),
+    Unr(SType),
+    Mobile(SType),
+    Bounded(SSession),
+    New(SSession),
+    Dualable(SSession),
+    NonSkip(SSession),
+    Equiv(SType, SType),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

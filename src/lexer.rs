@@ -122,6 +122,16 @@ pub enum Token<'a> {
     #[token("branch")]
     Branch,
 
+    // Kinds
+    #[token("Session")]
+    KSession,
+    #[token("Type")]
+    KType,
+
+    // Qualifications
+    #[token("mbl")]
+    QMbl,
+
     // Operators
     #[token(";")]
     Semicolon,
@@ -328,6 +338,9 @@ impl<'a> Token<'a> {
             Token::AcqT => "Acq",
             Token::Skip => "Skip",
             Token::Discard => "discard",
+            Token::KSession => "Session",
+            Token::KType => "Type",
+            Token::QMbl => "mbl",
         }
     }
 }

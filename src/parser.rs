@@ -134,6 +134,21 @@ peg::parser! {
             / tok(Lt) cs:((l:sid() tok(Colon) t:stype() { (l , t) }) ** tok(Comma)) tok(Comma)? tok(Gt) { Type::Variant(cs) }
         pub rule stype_atom() -> SType = spanned(<type_atom()>)
 
+        // Kinds
+        pub rule kind() -> Kind
+            = tok(KSession) { Kind::Session }
+            / tok(KType) { Kind::Type }
+        pub rule skind() -> SKind = spanned(<kind()>)
+
+        // Quantification
+
+        pub rule qual() -> Qualification
+            = tok(QMbl) ty:stype() { Qualification::Mobile(ty) }
+
+        pub rule quant() -> Quantification
+            = tok(BracketL) id:sid() tok(Colon) t:skind() tok(BracketR) tok(Comma) q:qual()
+                { todo!() }
+
         // Expressions
 
         pub rule expr() -> Expr = e:expr_ann() { e }
