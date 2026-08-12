@@ -102,8 +102,13 @@ peg::parser! {
             / tok(ParenL) s:session() tok(ParenR) { s }
         pub rule ssession() -> SSession = spanned(<session()>)
 
-        pub rule type_() -> Type = t:type_arrow() { t }
+        pub rule type_() -> Type = t:type_quantify() { t }
         pub rule stype() -> SType = spanned(<type_()>)
+
+        pub rule type_quantify() -> Type
+            = tok(QAll) q:quant() tok(DoubleArrow) t:stype()
+              { Type::Forall { id: q.id, kind: q.kind, ty: Box::new(t), qualifications: q.qualifications } }
+            / t:type_arrow() { t }
 
         #[cache_left_rec]
         pub rule type_arrow() -> Type
@@ -493,6 +498,50 @@ mod tests {
             let
                 double[T: Type] : (T -[m u 1]-> T) -[m u 1]-> (T -[m u 1]-> T)
                 double f = \x. f (f x)
+            in
+            unit
+        "#;
+        let toks = lexer::lex(&src).unwrap();
+        let mut toks = lexer_offside::process_indent(toks, |_| false, |_| false);
+        toks.toks = toks
+            .toks
+            .into_iter()
+            .filter(|t| t.val != Braced::Token(Token::NewLine))
+            .collect::<Vec<_>>();
+
+        let res = parser::parse(&toks);
+        dbg!(&res);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn parse_type_universal_ty_abs() {
+        let src = r#"
+            let
+                selfApp : (\/ [T : Type] => T -[m u 1]-> T) -[m u 1]-> (\/ [T : Type] => T -[m u 1]-> T)
+                selfApp x = x [\/ [T : Type] => T -[m u 1]-> T] x
+            in
+            unit
+        "#;
+        let toks = lexer::lex(&src).unwrap();
+        let mut toks = lexer_offside::process_indent(toks, |_| false, |_| false);
+        toks.toks = toks
+            .toks
+            .into_iter()
+            .filter(|t| t.val != Braced::Token(Token::NewLine))
+            .collect::<Vec<_>>();
+
+        let res = parser::parse(&toks);
+        dbg!(&res);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn parse_type_universal_ty_abs_qualification() {
+        let src = r#"
+            let
+                selfApp : (\/ [T : Type]. mbl T => T -[m u 1]-> T) -[m u 1]-> (\/ [T : Type]. mbl T => T -[m u 1]-> T)
+                selfApp x = x [\/ [T : Type]. mbl T => T -[m u 1]-> T] x
             in
             unit
         "#;

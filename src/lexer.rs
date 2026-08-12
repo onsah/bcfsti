@@ -128,6 +128,10 @@ pub enum Token<'a> {
     #[token("Type")]
     KType,
 
+    // Quantifications
+    #[token("\\/")]
+    QAll,
+
     // Qualifications
     #[token("mbl")]
     QMbl,
@@ -341,6 +345,7 @@ impl<'a> Token<'a> {
             Token::KSession => "Session",
             Token::KType => "Type",
             Token::QMbl => "mbl",
+            Token::QAll => "∀",
         }
     }
 }

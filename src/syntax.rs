@@ -193,14 +193,14 @@ impl Session {
 pub enum Type {
     // Quantifiers
     Forall {
-        id: PVarId,
-        kind: Kind,
+        id: SPVarId,
+        kind: SKind,
         qualifications: Vec<Qualification>,
         ty: Box<SType>,
     },
     Exists {
-        id: PVarId,
-        kind: Kind,
+        id: SPVarId,
+        kind: SKind,
         qualifications: Vec<Qualification>,
         ty: Box<SType>,
     },
@@ -294,11 +294,11 @@ impl Type {
             | Type::Chan(_) => Box::new(iter::empty()),
             Type::Forall { id, ty, .. } => Box::new(
                 ty.poly_variables_under_prod_and_variant()
-                    .filter(move |id1| id != id1),
+                    .filter(move |id1| id.as_str() != id1.as_str()),
             ),
             Type::Exists { id, ty, .. } => Box::new(
                 ty.poly_variables_under_prod_and_variant()
-                    .filter(move |id1| id != id1),
+                    .filter(move |id1| id.as_str() != id1.as_str()),
             ),
         }
     }
