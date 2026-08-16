@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::context::Ctx;
-use crate::syntax::{Id, Kind, PVarId, Qualification, Session, SessionOp, Type};
+use crate::syntax::{Id, Kind, Mult, PVarId, Qualification, Session, SessionOp, Type};
 use crate::util::pretty::{Pretty, PrettyEnv, pretty_def};
 use crate::util::span::fake_span;
 
@@ -68,12 +68,13 @@ impl TypeCtx {
         })
     }
 
-    fn unr(&self, ty: &Type) -> bool {
+    pub fn unr(&self, ty: &Type) -> bool {
         self.or_assumed(
             || Qualification::Unr(fake_span(ty.clone())),
             match ty {
                 // Q-Unr-Atom
-                Type::Unit | Type::Arr { .. } => true,
+                Type::Unit | Type::Int | Type::Bool | Type::String => true,
+                Type::Arr { mult, .. } => mult.val == Mult::Unr,
                 // Q-Unr-Prod
                 Type::Prod { first, second, .. } => self.unr(first) && self.unr(second),
                 // Q-Unr-Variant

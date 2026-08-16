@@ -112,19 +112,19 @@ impl Ctx {
         ctx.flatmap_binds_mut(f);
         ctx
     }
-    pub fn is_unr(&self) -> bool {
+    pub fn is_unr(&self, ty_ctx: &TypeCtx) -> bool {
         let mut unr = true;
-        self.map_binds(&mut |_x, t| unr = unr && t.is_unr());
+        self.map_binds(&mut |_x, t| unr = unr && ty_ctx.unr(t));
         unr
     }
     /// ```
     /// let (leftover_ctx, ty) = ctx.lookup_ord_pure(x)
     /// ```
-    pub fn lookup_ord_pure(&self, x: &Id) -> Option<(Ctx, SType)> {
+    pub fn lookup_ord_pure(&self, ty_ctx: &TypeCtx, x: &Id) -> Option<(Ctx, SType)> {
         let mut c = self.clone();
-        c.lookup_ord(x).map(|t| (c, t))
+        c.lookup_ord(ty_ctx, x).map(|t| (c, t))
     }
-    pub fn lookup_ord(&mut self, x: &Id) -> Option<SType> {
+    pub fn lookup_ord(&mut self, ty_ctx: &TypeCtx, x: &Id) -> Option<SType> {
         match self {
             Ctx::Empty => None,
             Ctx::Bind(y, t) if x == &y.val => {
@@ -137,9 +137,9 @@ impl Ctx {
                 }
             }
             Ctx::Bind(_y, _t) => None,
-            Ctx::Join(c1, c2, o) => c1.lookup_ord(x).or_else(|| {
-                if c1.is_unr() || *o == JoinOrd::Unordered {
-                    c2.lookup_ord(x)
+            Ctx::Join(c1, c2, o) => c1.lookup_ord(ty_ctx, x).or_else(|| {
+                if c1.is_unr(ty_ctx) || *o == JoinOrd::Unordered {
+                    c2.lookup_ord(ty_ctx, x)
                 } else {
                     None
                 }
@@ -163,10 +163,10 @@ impl Ctx {
         });
         res
     }
-    pub fn lin_vars(&self) -> HashSet<Id> {
+    pub fn lin_vars(&self, ty_ctx: &TypeCtx) -> HashSet<Id> {
         let mut res = HashSet::new();
         self.map_binds(&mut |x, t| {
-            if !t.is_unr() {
+            if !ty_ctx.unr(t) {
                 res.insert(x.clone());
             }
         });
@@ -186,19 +186,19 @@ impl Ctx {
         });
         res
     }
-    pub fn to_sem(&self) -> SemCtx {
+    pub fn to_sem(&self, ty_ctx: &TypeCtx) -> SemCtx {
         match self {
             Ctx::Empty => SemCtx::empty(),
-            Ctx::Bind(x, t) => SemCtx::bind(x.val.clone(), t.val.clone()),
-            Ctx::Join(c1, c2, o) => c1.to_sem().join(&c2.to_sem(), *o),
+            Ctx::Bind(x, t) => SemCtx::bind(x.val.clone(), t.val.clone(), ty_ctx),
+            Ctx::Join(c1, c2, o) => c1.to_sem(ty_ctx).join(&c2.to_sem(ty_ctx), *o),
         }
     }
-    pub fn is_splittable(&self, xs: &HashSet<Id>) -> bool {
-        let sem = self.to_sem();
+    pub fn is_splittable(&self, ty_ctx: &TypeCtx, xs: &HashSet<Id>) -> bool {
+        let sem = self.to_sem(ty_ctx);
         let (binds_xs, binds_not_xs) = self
             .binds()
             .into_iter()
-            .filter(|(_, t)| !t.is_unr())
+            .filter(|(_, t)| !ty_ctx.unr(t))
             .map(|(x, t)| (x, TypeSemEq(t)))
             .partition::<HashSet<_>, _>(|(x, _)| xs.contains(x));
         for b1 in &binds_xs {
@@ -214,7 +214,7 @@ impl Ctx {
         }
         true
     }
-    pub fn split(&self, xs: &HashSet<Id>) -> Option<(CtxCtx, Ctx)> {
+    pub fn split(&self, ty_ctx: &TypeCtx, xs: &HashSet<Id>) -> Option<(CtxCtx, Ctx)> {
         if xs.len() == 0 {
             return Some((
                 CtxCtx::JoinR(
@@ -244,17 +244,19 @@ impl Ctx {
             }
             Ctx::Join(c1, c2, o) => {
                 if xs.is_disjoint(&c1.vars()) {
-                    let (cc, c) = c2.split(xs)?;
+                    let (cc, c) = c2.split(ty_ctx, xs)?;
                     return Some((CtxCtxS::JoinR(c1.clone(), cc, *o), c));
                 } else if xs.is_disjoint(&c2.vars()) {
-                    let (cc, c) = c1.split(xs)?;
+                    let (cc, c) = c1.split(ty_ctx, xs)?;
                     return Some((CtxCtxS::JoinL(cc, c2.clone(), *o), c));
                 }
-                let (cc1, c1) = c1.split(xs)?;
-                let (cc2, c2) = c2.split(xs)?;
+                let (cc1, c1) = c1.split(ty_ctx, xs)?;
+                let (cc2, c2) = c2.split(ty_ctx, xs)?;
                 match o {
-                    Ordered if !c1.is_unr() && !c2.is_unr() => {
-                        if let (Some(c1x), Some(c2x)) = (cc1.pull_right(), cc2.pull_left()) {
+                    Ordered if !c1.is_unr(ty_ctx) && !c2.is_unr(ty_ctx) => {
+                        if let (Some(c1x), Some(c2x)) =
+                            (cc1.pull_right(ty_ctx), cc2.pull_left(ty_ctx))
+                        {
                             Some((
                                 JoinR(c1x, JoinL(Hole, c2x, Ordered), Ordered),
                                 Join(c1, c2, Ordered),
@@ -264,28 +266,36 @@ impl Ctx {
                         }
                     }
                     _ => {
-                        if let (Some(c1x), Some(c2x)) = (cc1.pull_par(), cc2.pull_par()) {
+                        if let (Some(c1x), Some(c2x)) = (cc1.pull_par(ty_ctx), cc2.pull_par(ty_ctx))
+                        {
                             Some((
                                 JoinR(c1x, JoinL(CtxCtxS::Hole, c2x, Unordered), Unordered),
                                 Join(c1, c2, Unordered),
                             ))
-                        } else if let (Some(c1x), Some(c2x)) = (cc1.pull_right(), cc2.pull_right())
+                        } else if let (Some(c1x), Some(c2x)) =
+                            (cc1.pull_right(ty_ctx), cc2.pull_right(ty_ctx))
                         {
                             Some((
                                 JoinR(Join(c1x, c2x, Unordered), CtxCtxS::Hole, Ordered),
                                 Join(c1, c2, Unordered),
                             ))
-                        } else if let (Some(c1x), Some(c2x)) = (cc1.pull_left(), cc2.pull_left()) {
+                        } else if let (Some(c1x), Some(c2x)) =
+                            (cc1.pull_left(ty_ctx), cc2.pull_left(ty_ctx))
+                        {
                             Some((
                                 JoinL(CtxCtxS::Hole, Join(c1x, c2x, Unordered), Ordered),
                                 Join(c1, c2, Unordered),
                             ))
-                        } else if let (Some(c1x), Some(c2x)) = (cc1.pull_left(), cc2.pull_right()) {
+                        } else if let (Some(c1x), Some(c2x)) =
+                            (cc1.pull_left(ty_ctx), cc2.pull_right(ty_ctx))
+                        {
                             Some((
                                 JoinR(c2x, JoinL(CtxCtxS::Hole, c1x, Ordered), Ordered),
                                 Join(c1, c2, Ordered),
                             ))
-                        } else if let (Some(c1x), Some(c2x)) = (cc1.pull_right(), cc2.pull_left()) {
+                        } else if let (Some(c1x), Some(c2x)) =
+                            (cc1.pull_right(ty_ctx), cc2.pull_left(ty_ctx))
+                        {
                             Some((
                                 JoinR(c1x, JoinL(CtxCtxS::Hole, c2x, Ordered), Ordered),
                                 Join(c2, c1, Ordered),
@@ -317,8 +327,8 @@ impl Ctx {
             },
         }
     }
-    pub fn is_subctx_of(&self, other: &Self) -> bool {
-        self.to_sem().is_subctx_of(&other.to_sem())
+    pub fn is_subctx_of(&self, ty_ctx: &TypeCtx, other: &Self) -> bool {
+        self.to_sem(ty_ctx).is_subctx_of(&other.to_sem(ty_ctx))
     }
 
     /// Returns Ok(()) if the context is mobile, otherwise returns Err(x) where x is a variable that is not mobile.
@@ -389,85 +399,87 @@ impl CtxCtx {
             CtxCtx::JoinR(c1, cc2, o) => Ctx::Join(c1.clone(), Box::new(cc2.fill(c)), o.clone()),
         }
     }
-    pub fn is_left(&self) -> bool {
+    pub fn is_left(&self, ty_ctx: &TypeCtx) -> bool {
         match self {
             CtxCtx::Hole => true,
-            CtxCtx::JoinL(cc1, _c2, _o) => cc1.is_left(),
-            CtxCtx::JoinR(c1, cc2, o) => cc2.is_left() && (*o == JoinOrd::Unordered || c1.is_unr()),
+            CtxCtx::JoinL(cc1, _c2, _o) => cc1.is_left(ty_ctx),
+            CtxCtx::JoinR(c1, cc2, o) => {
+                cc2.is_left(ty_ctx) && (*o == JoinOrd::Unordered || c1.is_unr(ty_ctx))
+            }
         }
     }
 
-    pub fn is_right(&self) -> bool {
+    pub fn is_right(&self, ty_ctx: &TypeCtx) -> bool {
         match self {
             CtxCtx::Hole => true,
             CtxCtx::JoinL(cc1, c2, o) => {
-                cc1.is_right() && (*o == JoinOrd::Unordered || c2.is_unr())
+                cc1.is_right(ty_ctx) && (*o == JoinOrd::Unordered || c2.is_unr(ty_ctx))
             }
-            CtxCtx::JoinR(_c1, cc2, _o) => cc2.is_right(),
+            CtxCtx::JoinR(_c1, cc2, _o) => cc2.is_right(ty_ctx),
         }
     }
 
-    fn pull_left_(&self) -> Option<Ctx> {
+    fn pull_left_(&self, ty_ctx: &TypeCtx) -> Option<Ctx> {
         match self {
             CtxCtx::Hole => Some(Ctx::Empty),
             CtxCtx::JoinL(cc, c, o) => {
-                let c2 = cc.pull_left()?;
+                let c2 = cc.pull_left(ty_ctx)?;
                 Some(CtxS::Join(c2, c, *o))
             }
             CtxCtx::JoinR(c, cc, o) => {
-                let c2 = cc.pull_left()?;
+                let c2 = cc.pull_left(ty_ctx)?;
                 Some(CtxS::Join(c2, c, *o))
             }
         }
     }
 
-    pub fn pull_left(&self) -> Option<Ctx> {
-        if self.is_left() {
-            self.pull_left_()
+    pub fn pull_left(&self, ty_ctx: &TypeCtx) -> Option<Ctx> {
+        if self.is_left(ty_ctx) {
+            self.pull_left_(ty_ctx)
         } else {
             None
         }
     }
 
-    fn pull_right_(&self) -> Option<Ctx> {
+    fn pull_right_(&self, ty_ctx: &TypeCtx) -> Option<Ctx> {
         match self {
             CtxCtx::Hole => Some(Ctx::Empty),
             CtxCtx::JoinL(cc, c, o) => {
-                let c2 = cc.pull_right()?;
+                let c2 = cc.pull_right(ty_ctx)?;
                 Some(CtxS::Join(c, c2, *o))
             }
             CtxCtx::JoinR(c, cc, o) => {
-                let c2 = cc.pull_right()?;
+                let c2 = cc.pull_right(ty_ctx)?;
                 Some(CtxS::Join(c, c2, *o))
             }
         }
     }
 
-    pub fn pull_right(&self) -> Option<Ctx> {
-        if self.is_right() {
-            self.pull_right_()
+    pub fn pull_right(&self, ty_ctx: &TypeCtx) -> Option<Ctx> {
+        if self.is_right(ty_ctx) {
+            self.pull_right_(ty_ctx)
         } else {
             None
         }
     }
 
-    fn pull_par_(&self) -> Option<Ctx> {
+    fn pull_par_(&self, ty_ctx: &TypeCtx) -> Option<Ctx> {
         match self {
             CtxCtx::Hole => Some(Ctx::Empty),
             CtxCtx::JoinL(cc, c, _o) => {
-                let c2 = cc.pull_par()?;
+                let c2 = cc.pull_par(ty_ctx)?;
                 Some(CtxS::Join(c, c2, JoinOrd::Unordered))
             }
             CtxCtx::JoinR(c, cc, _o) => {
-                let c2 = cc.pull_par()?;
+                let c2 = cc.pull_par(ty_ctx)?;
                 Some(CtxS::Join(c, c2, JoinOrd::Unordered))
             }
         }
     }
 
-    pub fn pull_par(&self) -> Option<Ctx> {
-        if self.is_left() && self.is_right() {
-            self.pull_par_()
+    pub fn pull_par(&self, ty_ctx: &TypeCtx) -> Option<Ctx> {
+        if self.is_left(ty_ctx) && self.is_right(ty_ctx) {
+            self.pull_par_(ty_ctx)
         } else {
             None
         }
@@ -519,9 +531,9 @@ impl SemCtx {
             unr: HashSet::new(),
         }
     }
-    pub fn bind(x: Id, t: Type) -> Self {
+    pub fn bind(x: Id, t: Type, ty_ctx: &TypeCtx) -> Self {
         let mut c = Self::empty();
-        if t.is_unr() {
+        if ty_ctx.unr(&t) {
             c.unr.insert((x, TypeSemEq(t)));
         } else {
             c.ord = Graph::singleton((x, TypeSemEq(t)));

@@ -5,6 +5,7 @@ use crate::{
     lexer::LexerError,
     syntax::SType,
     type_checker::TypeError,
+    type_context::TypeCtx,
     util::{pretty::pretty_def, span::Span},
 };
 use ariadne::{ColorGenerator, IndexType, Label, Report, ReportKind, Source};
@@ -114,6 +115,7 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
         path: src_path.to_string(),
         data: src.to_string(),
     };
+    let ty_ctx = TypeCtx::empty();
 
     match e {
         IErr::Lexer(e) => {
@@ -368,7 +370,7 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
             TypeError::LeftOverCtx(e, ctx) => {
                 let mut xs = HashSet::new();
                 ctx.map_binds(&mut |x, t| {
-                    if !t.is_unr() {
+                    if !ty_ctx.unr(t) {
                         xs.insert(x.clone());
                     }
                 });
@@ -718,7 +720,7 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
             ),
         },
         IErr::Constraint(ConstraintSolutionError::AssignmentNotMobile { expr, id, ctx }) => {
-            let (_, ty) = ctx.lookup_ord_pure(&id).unwrap();
+            let (_, ty) = ctx.lookup_ord_pure(&ty_ctx, &id).unwrap();
             report(
                 &src,
                 expr.span.clone(),

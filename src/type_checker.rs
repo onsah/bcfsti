@@ -93,7 +93,7 @@ impl TypeChecker {
         // println!("Ctx: {}", pretty_context_notype(&ctx.simplify()));
         match &e.val {
             Expr::Const(c) => {
-                assert_unr_ctx(e, ctx)?;
+                assert_unr_ctx(e, ctx, ty_ctx)?;
                 let ty = match c {
                     crate::syntax::Const::Unit => Type::Unit,
                     crate::syntax::Const::Int(_) => Type::Int,
@@ -103,9 +103,9 @@ impl TypeChecker {
 
                 Ok((fake_span(ty), Constraints::empty(), Eff::No))
             }
-            Expr::Var(x) => match ctx.lookup_ord_pure(x) {
+            Expr::Var(x) => match ctx.lookup_ord_pure(ty_ctx, x) {
                 Some((ctx, ty)) => {
-                    assert_unr_ctx(e, &ctx)?;
+                    assert_unr_ctx(e, &ctx, ty_ctx)?;
                     let ty = self.expand_type(&ty)?;
                     let ty = self.normalise(ty);
                     Ok((ty, Constraints::empty(), Eff::No))
@@ -113,7 +113,7 @@ impl TypeChecker {
                 None => Err(TypeError::UndefinedVariable(x.clone())),
             },
             Expr::New(sess_type) => {
-                if !ctx.is_unr() {
+                if !ctx.is_unr(ty_ctx) {
                     return Err(TypeError::LeftOverCtx(e.clone(), ctx.clone()));
                 }
                 let sess_type = Spanned::new(
@@ -156,7 +156,7 @@ impl TypeChecker {
                         JoinOrd::Ordered,
                     );
 
-                    if !ctx.is_subctx_of(&res_ctx) {
+                    if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
                             e.clone(),
                             res_ctx.clone(),
@@ -211,7 +211,7 @@ impl TypeChecker {
                         JoinOrd::Ordered,
                     );
 
-                    if !ctx.is_subctx_of(&res_ctx) {
+                    if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
                             e.clone(),
                             ctx.clone(),
@@ -253,7 +253,7 @@ impl TypeChecker {
                         JoinOrd::Unordered,
                     );
 
-                    if !ctx.is_subctx_of(&res_ctx) {
+                    if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
                             e.clone(),
                             ctx.clone(),
@@ -276,7 +276,7 @@ impl TypeChecker {
                 )));
                 let (chan_cs, _) = self.check(&chan_ctx, ty_ctx, chan, &expected_chan_ty)?;
 
-                if !ctx.is_subctx_of(&chan_ctx) {
+                if !ctx.is_subctx_of(&ty_ctx, &chan_ctx) {
                     return Err(TypeError::CtxSplitFailed(
                         e.clone(),
                         ctx.clone(),
@@ -289,7 +289,7 @@ impl TypeChecker {
             Expr::Fork(func) => {
                 let body_ctx = ctx.restrict(&func.free_vars());
 
-                if !ctx.is_subctx_of(&body_ctx) {
+                if !ctx.is_subctx_of(&ty_ctx, &body_ctx) {
                     return Err(TypeError::CtxSplitFailed(
                         e.clone(),
                         ctx.clone(),
@@ -310,7 +310,7 @@ impl TypeChecker {
             }
             Expr::Discard(chan) => {
                 let chan_ctx = ctx.restrict(&chan.free_vars());
-                if !ctx.is_subctx_of(&chan_ctx) {
+                if !ctx.is_subctx_of(&ty_ctx, &chan_ctx) {
                     return Err(TypeError::CtxSplitFailed(
                         e.clone(),
                         ctx.clone(),
@@ -329,7 +329,7 @@ impl TypeChecker {
             }
             Expr::BorrowEnd(op, chan) => {
                 let chan_ctx = ctx.restrict(&chan.free_vars());
-                if !ctx.is_subctx_of(&chan_ctx) {
+                if !ctx.is_subctx_of(&ty_ctx, &chan_ctx) {
                     return Err(TypeError::CtxSplitFailed(
                         e.clone(),
                         ctx.clone(),
@@ -344,7 +344,7 @@ impl TypeChecker {
             }
             Expr::End(op, chan) => {
                 let chan_ctx = ctx.restrict(&chan.free_vars());
-                if !ctx.is_subctx_of(&chan_ctx) {
+                if !ctx.is_subctx_of(&ty_ctx, &chan_ctx) {
                     return Err(TypeError::CtxSplitFailed(
                         e.clone(),
                         ctx.clone(),
@@ -359,7 +359,7 @@ impl TypeChecker {
             }
             Expr::LSplit(prefix_session, chan) => {
                 let chan_ctx = &ctx.restrict(&chan.free_vars());
-                if !ctx.is_subctx_of(&chan_ctx) {
+                if !ctx.is_subctx_of(&ty_ctx, &chan_ctx) {
                     return Err(TypeError::CtxSplitFailed(
                         e.clone(),
                         ctx.clone(),
@@ -383,7 +383,7 @@ impl TypeChecker {
             }
             Expr::RSplit(prefix_session, chan) => {
                 let chan_ctx = &ctx.restrict(&chan.free_vars());
-                if !ctx.is_subctx_of(&chan_ctx) {
+                if !ctx.is_subctx_of(&ty_ctx, &chan_ctx) {
                     return Err(TypeError::CtxSplitFailed(
                         e.clone(),
                         ctx.clone(),
@@ -433,7 +433,7 @@ impl TypeChecker {
                 {
                     let res_ctx = ext(mult.val, abs_ctx.clone(), arg_ctx.clone());
 
-                    if !ctx.is_subctx_of(&res_ctx) {
+                    if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
                             e.clone(),
                             ctx.clone(),
@@ -482,7 +482,7 @@ impl TypeChecker {
                         JoinOrd::Ordered,
                     );
 
-                    if !ctx.is_subctx_of(&res_ctx) {
+                    if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
                             e.clone(),
                             ctx.clone(),
@@ -543,7 +543,7 @@ impl TypeChecker {
                         JoinOrd::Ordered,
                     );
 
-                    if !ctx.is_subctx_of(&res_ctx) {
+                    if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
                             e.clone(),
                             ctx.clone(),
@@ -609,7 +609,7 @@ impl TypeChecker {
                             Box::new(case_ctx.clone()),
                             JoinOrd::Ordered,
                         );
-                        if !ctx.is_subctx_of(&res_ctx) {
+                    if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                             return Err(TypeError::CtxSplitFailed(
                                 e.clone(),
                                 ctx.clone(),
@@ -654,7 +654,7 @@ impl TypeChecker {
             Expr::Select(label, chan_expr) => {
                 let chan_ctx = ctx.restrict(&chan_expr.free_vars());
 
-                if !ctx.is_subctx_of(&chan_ctx) {
+                if !ctx.is_subctx_of(&ty_ctx, &chan_ctx) {
                     return Err(TypeError::CtxSplitFailed(
                         e.clone(),
                         ctx.clone(),
@@ -704,7 +704,7 @@ impl TypeChecker {
             Expr::Branch(chan_expr) => {
                 let chan_ctx = ctx.restrict(&chan_expr.free_vars());
 
-                if !ctx.is_subctx_of(&chan_ctx) {
+                if !ctx.is_subctx_of(&ty_ctx, &chan_ctx) {
                     return Err(TypeError::CtxSplitFailed(
                         e.clone(),
                         ctx.clone(),
@@ -782,7 +782,7 @@ impl TypeChecker {
                         JoinOrd::Unordered,
                     );
 
-                    if !ctx.is_subctx_of(&res_ctx) {
+                    if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
                             e.clone(),
                             ctx.clone(),
@@ -856,7 +856,7 @@ impl TypeChecker {
                         JoinOrd::Unordered,
                     );
 
-                    if !ctx.is_subctx_of(&res_ctx) {
+                    if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
                             e.clone(),
                             ctx.clone(),
@@ -872,7 +872,7 @@ impl TypeChecker {
                         JoinOrd::Unordered,
                     );
 
-                    if !ctx.is_subctx_of(&res_ctx) {
+                    if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
                             e.clone(),
                             ctx.clone(),
@@ -933,7 +933,7 @@ impl TypeChecker {
                 }
 
                 if mult.val == Mult::Unr {
-                    if !ctx.is_unr() {
+                    if !ctx.is_unr(ty_ctx) {
                         return Err(TypeError::CtxNotUnr(e.clone(), ctx.clone()));
                     }
                     if mob.val != Mob::Mobile {
@@ -999,7 +999,7 @@ impl TypeChecker {
                 {
                     let res_ctx = ext(mult.val, first_ctx, second_ctx);
 
-                    if !ctx.is_subctx_of(&res_ctx) {
+                    if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
                             e.clone(),
                             ctx.clone(),
@@ -1230,8 +1230,8 @@ fn is_valid_for_new(s: &Session) -> bool {
     }
 }
 
-fn assert_unr_ctx(e: &SExpr, ctx: &Ctx) -> Result<(), TypeError> {
-    if ctx.is_unr() {
+fn assert_unr_ctx(e: &SExpr, ctx: &Ctx, ty_ctx: &TypeCtx) -> Result<(), TypeError> {
+    if ctx.is_unr(ty_ctx) {
         Ok(())
     } else {
         Err(TypeError::LeftOverCtx(e.clone(), ctx.clone()))
