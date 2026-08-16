@@ -1,7 +1,9 @@
 use crate::{
     syntax::{
-        Clause, Const, Eff, Expr, Mob, Mult, Op1, Op2, Pattern, SMult, Session, SessionOp, Type,
+        Clause, Const, Eff, Expr, Kind, Mob, Mult, Op1, Op2, Pattern, Qualification,
+        Quantification, SMult, Session, SessionOp, Type,
     },
+    type_context::TypeCtx,
     util::{
         pretty::{Assoc, Pretty, PrettyEnv},
         span::Spanned,
@@ -388,10 +390,13 @@ impl Pretty<UserState> for Expr {
                 p.pp_arg(L, prefix);
                 p.pp_arg(R, expr);
             }
-            Expr::LetDecl(x, t, c, e) => {
+            Expr::LetDecl(x, t, q, c, e) => {
                 p.pp("let");
                 p.block(|p| {
                     p.pp(x);
+                    if let Some(q) = q {
+                        p.pp(q);
+                    }
                     p.pp(" : ");
                     p.pp(t);
                     p.pp("\n");
@@ -453,6 +458,65 @@ impl Pretty<UserState> for Pattern {
                 p.pp(p2);
                 p.pp(")");
             }
+        }
+    }
+}
+
+impl Pretty<UserState> for Kind {
+    fn pp(&self, p: &mut PrettyEnv<UserState>) {
+        match self {
+            Kind::Type => p.pp("Type"),
+            Kind::Session => p.pp("Session"),
+        }
+    }
+}
+
+impl Pretty<UserState> for Qualification {
+    fn pp(&self, p: &mut PrettyEnv<UserState>) {
+        match self {
+            Qualification::Mobile(ty) => {
+                p.pp("mob ");
+                p.pp(ty)
+            }
+            Qualification::Unr(ty) => {
+                p.pp("unr ");
+                p.pp(ty)
+            }
+            Qualification::Bounded(ty) => {
+                p.pp("bnd ");
+                p.pp(ty)
+            }
+            Qualification::New(ty) => {
+                p.pp("new ");
+                p.pp(ty)
+            }
+            Qualification::Dualable(ty) => {
+                p.pp("dualable ");
+                p.pp(ty)
+            }
+            Qualification::NonSkip(ty) => {
+                p.pp("nonskip ");
+                p.pp(ty)
+            }
+            Qualification::Equiv(ty1, ty2) => {
+                p.pp(ty1);
+                p.pp(" ≃ ");
+                p.pp(ty2);
+            }
+        }
+    }
+}
+
+impl Pretty<UserState> for Quantification {
+    fn pp(&self, p: &mut PrettyEnv<UserState>) {
+        p.pp("[");
+        p.pp(&self.id);
+        p.pp(" : ");
+        p.pp(&self.kind);
+        p.pp("]");
+        if !self.qualifications.is_empty() {
+            p.pp(".");
+            p.pp_sep(" ∧ ", &self.qualifications);
         }
     }
 }

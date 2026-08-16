@@ -5,12 +5,15 @@ use crate::{
     context::{Ctx, JoinOrd, ext},
     session_type,
     syntax::{
-        Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, SEff, SExpr, SId, SMult, SPattern, SSession,
-        SType, Session, SessionOp, Type,
+        Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, SEff, SExpr, SId, SMult, SPattern,
+        SQuantification, SSession, SType, Session, SessionOp, Type,
     },
     type_alias::{AliasEnv, expand_session, expand_stype},
     type_context::TypeCtx,
-    util::span::{Spanned, fake_span},
+    util::{
+        pretty::pretty_def,
+        span::{Spanned, fake_span},
+    },
 };
 
 #[derive(Debug, Clone)]
@@ -59,6 +62,7 @@ pub enum TypeError {
     SessionTypeOnlySkips(SSession),
     SessionTypeNotMobileInContext(SExpr, Ctx, SId),
     UndefinedAlias(SId),
+    QualificationNotWellFormed(TypeCtx, SQuantification),
 }
 
 pub fn infer_type(e: &SExpr, alias_env: AliasEnv) -> Result<(SType, Constraints, Eff), TypeError> {
@@ -501,7 +505,34 @@ impl TypeChecker {
 
                 Ok((body_ty, var_cs.join(body_cs), Eff::lub(var_eff, body_eff)))
             }
-            Expr::LetDecl(id, expected_ty, clause, body) => {
+            Expr::LetDecl(id, expected_ty, quant, clause, body) => {
+                if !ty_ctx.unr_ctx(ctx) {
+                    return Err(TypeError::CtxNotUnr(e.clone(), ctx.clone()));
+                }
+
+                let ty_ctx = if let Some(quant) = quant {
+                    let ty_ctx = ty_ctx.extend_var(quant.id.val.clone(), quant.kind.val);
+                    dbg!(pretty_def(&ty_ctx));
+                    if !ty_ctx.is_well_formed(quant.val.qualifications.iter()) {
+                        return Err(TypeError::QualificationNotWellFormed(
+                            ty_ctx.clone(),
+                            quant.clone(),
+                        ));
+                    }
+
+                    if ctx.vars().contains(&quant.val.id.val) {
+                        return Err(TypeError::Shadowing(e.clone(), quant.val.id.clone()));
+                    }
+
+                    ty_ctx.extend(
+                        quant.id.val.clone(),
+                        quant.kind.val,
+                        quant.qualifications.clone(),
+                    )
+                } else {
+                    ty_ctx.clone()
+                };
+
                 let decl_ctx = ctx.restrict(&clause.free_vars());
                 let body_ctx = ctx.restrict(&body.free_vars());
 
@@ -531,14 +562,14 @@ impl TypeChecker {
                         decl_ctx,
                         Ctx::Bind(id.clone(), expected_ty.clone()),
                     );
-                    self.check(&decl_ctx, ty_ctx, &clause_expr, &expected_ty)?
+                    self.check(&decl_ctx, &ty_ctx, &clause_expr, &expected_ty)?
                 };
 
                 let (body_ty, body_cs, body_eff) = {
                     let var_ctx = Ctx::Bind(id.clone(), expected_ty.clone());
                     let body_ctx =
                         Ctx::Join(Box::new(var_ctx), Box::new(body_ctx), JoinOrd::Ordered);
-                    self.infer(&body_ctx, ty_ctx, body)?
+                    self.infer(&body_ctx, &ty_ctx, body)?
                 };
 
                 Ok((

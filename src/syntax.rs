@@ -232,6 +232,7 @@ pub struct Quantification {
     pub kind: SKind,
     pub qualifications: Vec<Qualification>,
 }
+pub type SQuantification = Spanned<Quantification>;
 
 impl Type {
     /// Closed type means it has no unification variables.
@@ -450,7 +451,13 @@ pub enum Expr {
     Pair(Box<SExpr>, Box<SExpr>),
 
     Let(SId, Box<SExpr>, Box<SExpr>),
-    LetDecl(SId, SType, Box<SClause>, Box<SExpr>),
+    LetDecl(
+        SId,
+        SType,
+        Option<SQuantification>,
+        Box<SClause>,
+        Box<SExpr>,
+    ),
     LetPair(SId, SId, Box<SExpr>, Box<SExpr>),
 
     TypeDef(SId, SSession, Box<SExpr>, bool),
@@ -725,7 +732,7 @@ impl Expr {
             Expr::Branch(e) => e.free_vars(),
             Expr::LSplit(_, e) => e.free_vars(),
             Expr::RSplit(_, e) => e.free_vars(),
-            Expr::LetDecl(id, _, clause, body) => {
+            Expr::LetDecl(id, _, _, clause, body) => {
                 union(clause.body.free_vars(), without(body.free_vars(), &id.val))
             }
             Expr::TypeDef(_, _, body, _) => body.free_vars(),

@@ -704,6 +704,18 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     )],
                 );
             }
+            TypeError::QualificationNotWellFormed(type_ctx, quantification) => report(
+                &src,
+                quantification.span.clone(),
+                "Type Error",
+                [label(
+                    quantification.span,
+                    format!(
+                        "Quantification is not well formed under {}",
+                        pretty_def(&type_ctx)
+                    ),
+                )],
+            ),
         },
         IErr::Constraint(ConstraintSolutionError::AssignmentNotMobile { expr, id, ctx }) => {
             let (_, ty) = ctx.lookup_ord_pure(&id).unwrap();

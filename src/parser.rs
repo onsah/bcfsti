@@ -184,8 +184,8 @@ peg::parser! {
               { Expr::LetPair(x, y, Box::new(e1), Box::new(e2)) }
             / tok(Let) x:sid() tok(Equals) e1:sexpr_ann() tok(In) e2:sexpr_lam()
               { Expr::Let(x, Box::new(e1), Box::new(e2)) }
-            / tok(Let) x:sid() squant()? tok(Colon) t:stype() c:sclause() tok(In) e:sexpr_lam()
-              { Expr::LetDecl(x, t, Box::new(c), Box::new(e)) }
+            / tok(Let) x:sid() q:squant()? tok(Colon) t:stype() c:sclause() tok(In) e:sexpr_lam()
+              { Expr::LetDecl(x, t, q, Box::new(c), Box::new(e)) }
             / tok(If) e:sexpr_lam() tok(Then) e1:sexpr_lam() tok(Else) e2:sexpr_lam()
               { Expr::If(Box::new(e), Box::new(e1), Box::new(e2)) }
             / e1:sexpr_or() tok(Semicolon) e2:sexpr_lam()
