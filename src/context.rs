@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
 use crate::syntax::{Id, Mult, SId, SType, Type, TypeSemEq};
+use crate::type_context::TypeCtx;
 use crate::util::boxed::Boxed;
 use crate::util::graph::Graph;
 use crate::util::pretty::{Pretty, PrettyEnv};
@@ -321,19 +322,19 @@ impl Ctx {
     }
 
     /// Returns Ok(()) if the context is mobile, otherwise returns Err(x) where x is a variable that is not mobile.
-    pub fn is_mobile(&self) -> Result<(), SId> {
+    pub fn is_mobile(&self, ty_ctx: &TypeCtx) -> Result<(), SId> {
         match self {
             Ctx::Empty => Ok(()),
             Ctx::Bind(var, ty) => {
-                if ty.val.is_mobile() {
+                if ty_ctx.mobile(&ty.val) {
                     Ok(())
                 } else {
                     Err(var.clone())
                 }
             }
             Ctx::Join(ctx1, ctx2, _) => {
-                ctx1.is_mobile()?;
-                ctx2.is_mobile()
+                ctx1.is_mobile(ty_ctx)?;
+                ctx2.is_mobile(ty_ctx)
             }
         }
     }

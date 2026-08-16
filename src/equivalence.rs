@@ -215,6 +215,7 @@ fn convert_type_impl(ty: &Type, defs: &mut Definitions) -> FreestType {
             qualifications: _,
             ty: _,
         } => todo!(),
+        Type::PVar { .. } => todo!(),
     }
 }
 

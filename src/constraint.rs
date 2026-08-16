@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     context::Ctx,
     syntax::{SExpr, SId, SType, Session, Type, UVarId},
+    type_context::TypeCtx,
     util::span::{Spanned, fake_span},
 };
 
@@ -85,6 +86,14 @@ impl Constraints {
     /// Solve the constraints by propagating assignments to unification variables until a fixed point is reached.
     /// If there is still no solution for some unification variables, `Skip` is substituted instead.
     pub fn solve(self) -> Result<Constraints, ConstraintSolutionError> {
+        self.solve_with_type_ctx(&TypeCtx::empty())
+    }
+
+    /// Solve the constraints with a type context for checking mobility.
+    pub fn solve_with_type_ctx(
+        self,
+        ty_ctx: &TypeCtx,
+    ) -> Result<Constraints, ConstraintSolutionError> {
         let (assignments, equivalences) = self.equivalences.solve();
 
         let unsolved_vars = equivalences.unsolved_variables();
@@ -94,7 +103,7 @@ impl Constraints {
             });
         }
 
-        self.mobilities.check(&assignments)?;
+        self.mobilities.check(ty_ctx, &assignments)?;
         Ok(Constraints {
             equivalences,
             mobilities: Mobilities::new(),
@@ -337,12 +346,16 @@ impl Mobilities {
         self.0.push((expr, ids, ctx));
     }
 
-    fn check(mut self, assignments: &Assignments) -> Result<(), ConstraintSolutionError> {
+    fn check(
+        mut self,
+        ty_ctx: &TypeCtx,
+        assignments: &Assignments,
+    ) -> Result<(), ConstraintSolutionError> {
         for (expr, ids, ctx) in self.0.iter_mut() {
             subst_ctx(ctx, &assignments);
             let binds = ctx.binds();
             for id in ids.iter() {
-                if !binds.get(&id.val).unwrap().is_mobile() {
+                if !ty_ctx.mobile(binds.get(&id.val).unwrap()) {
                     return Err(ConstraintSolutionError::AssignmentNotMobile {
                         expr: expr.clone(),
                         id: id.clone(),
@@ -411,6 +424,7 @@ fn subst_type(ty: SType, assignments: &Assignments) -> SType {
                 .collect(),
         ),
         Type::Unit => Type::Unit,
+        Type::PVar { id, dual } => Type::PVar { id, dual },
     };
     Spanned::new(val, span)
 }

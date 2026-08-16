@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::context::Ctx;
 use crate::syntax::{Id, Kind, PVarId, Qualification, Session, SessionOp, Type};
-use crate::util::pretty::{Pretty, PrettyEnv};
+use crate::util::pretty::{Pretty, PrettyEnv, pretty_def};
 use crate::util::span::fake_span;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -90,7 +90,7 @@ impl TypeCtx {
         )
     }
 
-    fn mobile(&self, ty: &Type) -> bool {
+    pub fn mobile(&self, ty: &Type) -> bool {
         self.or_assumed(
             || Qualification::Mobile(fake_span(ty.clone())),
             match ty {
@@ -104,11 +104,11 @@ impl TypeCtx {
                     .map(|(_, ty)| &ty.val)
                     .all(|ty| self.unr(ty)),
                 // Q-Mbl-Acq
-                // TODO: Check weak head normal form for the semicolon
-                Type::Chan(Session::Semi { first, second })
-                    if first.val == Session::BorrowEnd(SessionOp::Recv) =>
-                {
-                    self.bounded(second)
+                Type::Chan(session @ Session::Semi { .. }) => {
+                    let Session::Semi { first, second } = session.normalise() else {
+                        unreachable!()
+                    };
+                    first.val == Session::BorrowEnd(SessionOp::Recv) && self.bounded(&second)
                 }
                 // Q-Mbl-Conv
                 Type::Chan(Session::PVar { id, .. }) => self
@@ -133,11 +133,12 @@ impl TypeCtx {
         self.or_assumed(
             || Qualification::Bounded(fake_span(session.clone())),
             match session {
-                Session::Skip | Session::End(_) => true,
+                Session::End(_) | Session::BorrowEnd(SessionOp::Send) => true,
                 Session::Semi { first, second } => {
                     (self.bounded(first) && second.is_only_skips()) || self.bounded(second)
                 }
                 Session::Mu(_, session) => self.bounded(session),
+                Session::Var(_) => true,
                 Session::Choice(_, branches) => branches.iter().all(|(_, s)| self.bounded(s)),
                 Session::PVar { id, .. } => self
                     .qualifications
@@ -318,11 +319,17 @@ impl TypeCtx {
                     && new_ctx.check_kind(ty, Kind::Type))
                 .then_some(Kind::Type)
             }
+            Type::PVar { id, .. } => {
+                dbg!(id);
+                Some(Kind::Type)
+            }
         }
     }
 
     fn check_kind_inner(&self, ty: &Type, kind: Kind) -> bool {
-        self.infer_kind(ty)
+        dbg!(ty);
+        dbg!(&self.vars);
+        dbg!(self.infer_kind(ty))
             .map(|kind1| kind1.is_subkind_of(&kind))
             .unwrap_or(false)
     }

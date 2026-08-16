@@ -231,7 +231,7 @@ impl TypeChecker {
                 ))
             }
             Expr::Send(ty, val, chan) => {
-                if !ty.is_mobile() {
+                if !ty_ctx.mobile(&ty.val) {
                     return Err(TypeError::AbsNotMobile(e.clone(), ty.clone()));
                 }
 
@@ -265,7 +265,7 @@ impl TypeChecker {
                 Ok((fake_span(Type::Unit), val_cs.join(chan_cs), Eff::Yes))
             }
             Expr::Recv(ty, chan) => {
-                if !ty.is_mobile() {
+                if !ty_ctx.mobile(&ty.val) {
                     return Err(TypeError::AbsNotMobile(e.clone(), ty.clone()));
                 }
 
@@ -929,7 +929,7 @@ impl TypeChecker {
 
                 let mut ctx_cs = Constraints::empty();
                 if mob.val == Mob::Mobile {
-                    check_mobility(e, ctx, &mut ctx_cs)?;
+                    check_mobility(e, ctx, ty_ctx, &mut ctx_cs)?;
                 }
 
                 if mult.val == Mult::Unr {
@@ -1209,6 +1209,7 @@ impl TypeChecker {
                 qualifications,
                 ty,
             } => todo!("Remove this method"),
+            Type::PVar { .. } => Ok(()),
         }
     }
 }
@@ -1225,7 +1226,7 @@ fn is_valid_for_new(s: &Session) -> bool {
         Session::Var(_) => true,
         Session::UVar(_) => false,
         Session::End(_) | Session::BorrowEnd(_) => false,
-        Session::PVar { .. } => todo!(),
+        Session::PVar { .. } => true,
     }
 }
 
@@ -1237,13 +1238,13 @@ fn assert_unr_ctx(e: &SExpr, ctx: &Ctx) -> Result<(), TypeError> {
     }
 }
 
-fn check_mobility(expr: &SExpr, ctx: &Ctx, cs: &mut Constraints) -> Result<(), TypeError> {
+fn check_mobility(expr: &SExpr, ctx: &Ctx, ty_ctx: &TypeCtx, cs: &mut Constraints) -> Result<(), TypeError> {
     // If we can't ensure that the type is mobile
     // we add a constraint that the type must be mobile
     // to later check that the solution satisfies mobility requirements.
     let mut non_mobile_ids = HashSet::new();
     for (id, ty) in ctx.binds_spanned() {
-        if !ty.is_mobile() {
+        if !ty_ctx.mobile(&ty) {
             if !ty.is_closed() {
                 non_mobile_ids.insert(id.clone());
             } else {

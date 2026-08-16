@@ -38,6 +38,8 @@ peg::parser! {
         pub rule id() -> IdS = quiet!{[Tok(Id(x))] { x.to_owned() }} / expected!("identifier")
         pub rule sid() -> SId = spanned(<id()>)
 
+        pub rule polyid() -> PVarId = tok(Quote) id:id() { id }
+
         pub rule tok(t: Token<'a>) -> () = quiet!{[Tok(t2) if t == t2] { () }} / expected!(t.to_str())
 
         // Constants
@@ -99,6 +101,7 @@ peg::parser! {
               { Session::Mu(x, Box::new(s)) }
             / x:sid()
               { Session::Var(x) }
+            / id:polyid() { Session::PVar { id, dual: false } }
             / tok(ParenL) s:session() tok(ParenR) { s }
         pub rule ssession() -> SSession = spanned(<session()>)
 
@@ -135,6 +138,7 @@ peg::parser! {
             / tok(BoolT) { Type::Bool }
             / tok(StringT) { Type::String }
             / tok(ParenL) t:type_() tok(ParenR) { t }
+            / id:polyid() { Type::PVar { id, dual: false } }
             / tok(Chan)? s:ssession() { Type::Chan(s.val) }
             / tok(Lt) cs:((l:sid() tok(Colon) t:stype() { (l , t) }) ** tok(Comma)) tok(Comma)? tok(Gt) { Type::Variant(cs) }
         pub rule stype_atom() -> SType = spanned(<type_atom()>)

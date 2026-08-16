@@ -103,6 +103,14 @@ impl Pretty<UserState> for Type {
                 p.pp("∃ ");
                 todo!()
             }
+            Type::PVar { id, dual } => {
+                p.pp("(");
+                p.pp(id);
+                if *dual {
+                    p.pp("^");
+                }
+                p.pp(")");
+            }
         }
     }
 }
@@ -159,7 +167,14 @@ impl Pretty<UserState> for Session {
                 p.pp(&id.to_string());
                 p.pp(")");
             }
-            Session::PVar { .. } => todo!(),
+            Session::PVar { id, dual } => {
+                p.pp("(");
+                p.pp(id);
+                if *dual {
+                    p.pp("^");
+                }
+                p.pp(")");
+            }
         }
     }
 }

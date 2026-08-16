@@ -211,6 +211,8 @@ pub enum Token<'a> {
     ToStr,
     #[token("print")]
     Print,
+    #[token("'")]
+    Quote,
 
     // Positive Int
     #[regex(r"[0-9]+", |lex| lex.slice().parse().map_err(|_| LexingError::Int))]
@@ -222,7 +224,7 @@ pub enum Token<'a> {
 
     // String
     #[regex(r#""(\\"|[^"])*""#, |lex| &lex.slice()[1..lex.slice().len()-1])]
-    #[regex(r#"'(\\'|[^'])*'"#, |lex| &lex.slice()[1..lex.slice().len()-1])]
+    // #[regex(r#"'(\\'|[^'])*'"#, |lex| &lex.slice()[1..lex.slice().len()-1])]
     #[regex(r"'''(\\'|[^']|'[^']|''[^'])*'''", |lex| &lex.slice()[3..lex.slice().len()-3])]
     Str(&'a str),
 
@@ -346,6 +348,7 @@ impl<'a> Token<'a> {
             Token::KType => "Type",
             Token::QMbl => "mbl",
             Token::QAll => "∀",
+            Token::Quote => "'",
         }
     }
 }

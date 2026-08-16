@@ -143,15 +143,6 @@ impl Session {
         }
     }
 
-    fn is_mobile(&self) -> bool {
-        let this = &self;
-        if let Session::Semi { first, second } = this.normalise() {
-            matches!(first.val, Session::ACQ) && second.is_bounded()
-        } else {
-            false
-        }
-    }
-
     fn is_bounded(&self) -> bool {
         match self {
             Session::Semi { first, second } => {
@@ -204,6 +195,10 @@ pub enum Type {
         qualifications: Vec<Qualification>,
         ty: Box<SType>,
     },
+    PVar {
+        id: PVarId,
+        dual: bool,
+    },
     // Session Types
     Chan(Session),
     Arr {
@@ -245,6 +240,7 @@ impl Type {
             Type::Unit | Type::Int | Type::Bool | Type::String => true,
             Type::Forall { ty, .. } => ty.is_closed(),
             Type::Exists { ty, .. } => ty.is_closed(),
+            Type::PVar { .. } => true,
         }
     }
 
@@ -266,11 +262,31 @@ impl Type {
             Type::Unit | Type::Int | Type::Bool | Type::String => HashSet::new(),
             Type::Forall { ty, .. } => ty.unification_variables(),
             Type::Exists { ty, .. } => ty.unification_variables(),
+            Type::PVar { .. } => HashSet::new(),
         }
     }
 
     pub fn poly_variables<'a>(&'a self) -> Box<dyn Iterator<Item = PVarId> + 'a> {
-        todo!()
+        match self {
+            Type::Chan(session) => session.poly_variables(),
+            Type::Arr { param, ret, .. } => {
+                Box::new(param.poly_variables().chain(ret.poly_variables()))
+            }
+            Type::Prod { first, second, .. } => {
+                Box::new(first.poly_variables().chain(second.poly_variables()))
+            }
+            Type::Variant(cs) => Box::new(cs.iter().flat_map(|(_, t)| t.poly_variables())),
+            Type::Unit | Type::Int | Type::Bool | Type::String => Box::new(iter::empty()),
+            Type::Forall { id, ty, .. } => Box::new(
+                ty.poly_variables()
+                    .filter(move |id1| id.as_str() != id1.as_str()),
+            ),
+            Type::Exists { id, ty, .. } => Box::new(
+                ty.poly_variables()
+                    .filter(move |id1| id.as_str() != id1.as_str()),
+            ),
+            Type::PVar { id, .. } => Box::new(iter::once(id.clone())),
+        }
     }
 
     pub fn poly_variables_under_prod_and_variant<'a>(
@@ -301,6 +317,7 @@ impl Type {
                 ty.poly_variables_under_prod_and_variant()
                     .filter(move |id1| id.as_str() != id1.as_str()),
             ),
+            Type::PVar { id, .. } => Box::new(iter::once(id.clone())),
         }
     }
 
@@ -308,28 +325,6 @@ impl Type {
         match self {
             Type::Chan(session) => Type::Chan(session.normalise()),
             _ => self.clone(),
-        }
-    }
-
-    pub fn is_mobile(&self) -> bool {
-        match self {
-            Type::Chan(session) => session.is_mobile(),
-            Type::Arr { mob, .. } => mob.val == Mob::Mobile,
-            Type::Prod { first, second, .. } => first.is_mobile() && second.is_mobile(),
-            Type::Variant(cases) => cases.iter().all(|(_, ty)| ty.is_mobile()),
-            Type::Unit | Type::Int | Type::Bool | Type::String => true,
-            Type::Forall {
-                id,
-                kind,
-                qualifications,
-                ty,
-            } => todo!("delete this function"),
-            Type::Exists {
-                id,
-                kind,
-                qualifications,
-                ty,
-            } => todo!("delete this function"),
         }
     }
 }
@@ -806,6 +801,16 @@ impl Type {
             (Type::Int, Type::Int) => true,
             (Type::Bool, Type::Bool) => true,
             (Type::String, Type::String) => true,
+            (
+                Type::PVar {
+                    id: id1,
+                    dual: dual1,
+                },
+                Type::PVar {
+                    id: id2,
+                    dual: dual2,
+                },
+            ) => id1 == id2 && dual1 == dual2,
             _ => false,
         }
     }
@@ -825,6 +830,7 @@ impl Type {
             Type::String => true,
             Type::Forall { .. } => todo!("Delete this function"),
             Type::Exists { .. } => todo!("Delete this function"),
+            Type::PVar { .. } => todo!("Delete this function"),
         }
     }
 
