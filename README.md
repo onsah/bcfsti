@@ -82,6 +82,7 @@ t ::= t '-[' m ';'? d ';'? E ']->' t(function type)
     | 'Int'                         (64bit signed integer type)
     | 'Bool'                        (boolean t type)
     | 'String'                      (unicode string type)
+    | '\'' x                        (polymorphic type variable)
 
 Session Types
 s ::=  s ';' s                      (sequential composition)
@@ -96,6 +97,7 @@ s ::=  s ';' s                      (sequential composition)
      | '+{' (l ':' s ',')* '}'      (internal choice type)
      | 'mu' x '.' s                 (recursive session type)
      | x                            (session variable)
+     | '\'' x                       (polymorphic session variable)
      | '(' s ')'                    (parenthesized session type)
 
 Expressions

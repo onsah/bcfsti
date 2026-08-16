@@ -104,12 +104,11 @@ impl Pretty<UserState> for Type {
                 todo!()
             }
             Type::PVar { id, dual } => {
-                p.pp("(");
+                p.pp("'");
                 p.pp(id);
                 if *dual {
                     p.pp("^");
                 }
-                p.pp(")");
             }
         }
     }

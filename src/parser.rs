@@ -151,14 +151,21 @@ peg::parser! {
 
         // Quantification
 
+
         pub rule qual() -> Qualification
             = tok(QMbl) ty:stype() { Qualification::Mobile(ty) }
+            / tok(Unr) ty:stype() { Qualification::Unr(ty) }
 
         pub rule quals() -> Vec<Qualification>
-            = tok(Period) q:qual() { vec![q] }
+            = q:qual() tok(Caret) qs:quals() { let mut v = vec![q]; v.extend(qs); v }
+            / q:qual() { vec![q] }
+
+        pub rule qual_clause() -> Vec<Qualification>
+            = tok(Period) qs:quals() { qs }
+
 
         pub rule quant() -> Quantification
-            = tok(BracketL) id:sid() tok(Colon) kind:skind() tok(BracketR) qs:quals()?
+            = tok(BracketL) id:sid() tok(Colon) kind:skind() tok(BracketR) qs:qual_clause()?
                 { Quantification { id, kind, qualifications: qs.unwrap_or(Vec::new()) } }
         pub rule squant() -> Spanned<Quantification> = spanned(<quant()>)
 
@@ -441,7 +448,6 @@ mod tests {
             .collect::<Vec<_>>();
 
         let res = parser::parse(&toks);
-        dbg!(&res);
         assert!(res.is_ok());
     }
 
@@ -467,7 +473,6 @@ mod tests {
             .collect::<Vec<_>>();
 
         let res = parser::parse(&toks);
-        dbg!(&res);
         assert!(res.is_ok());
     }
 
@@ -492,7 +497,6 @@ mod tests {
             .collect::<Vec<_>>();
 
         let res = parser::parse(&toks);
-        dbg!(&res);
         assert!(res.is_ok());
     }
 
@@ -514,7 +518,6 @@ mod tests {
             .collect::<Vec<_>>();
 
         let res = parser::parse(&toks);
-        dbg!(&res);
         assert!(res.is_ok());
     }
 
@@ -536,7 +539,6 @@ mod tests {
             .collect::<Vec<_>>();
 
         let res = parser::parse(&toks);
-        dbg!(&res);
         assert!(res.is_ok());
     }
 
@@ -558,7 +560,6 @@ mod tests {
             .collect::<Vec<_>>();
 
         let res = parser::parse(&toks);
-        dbg!(&res);
         assert!(res.is_ok());
     }
 }

@@ -1,0 +1,9 @@
+let
+    recvTwo[a: Type]. mbl 'a ^ unr 'a : ?'a;?'a -[m u 1]-> Unit
+    recvTwo c =
+        let c1, c2 = lsplit[?'a] c in
+        let t1 = recv['a] c1 in
+        let t2 = recv['a] c2 in
+        unit
+in
+unit

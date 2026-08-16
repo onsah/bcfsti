@@ -512,7 +512,6 @@ impl TypeChecker {
 
                 let ty_ctx = if let Some(quant) = quant {
                     let ty_ctx = ty_ctx.extend_var(quant.id.val.clone(), quant.kind.val);
-                    dbg!(pretty_def(&ty_ctx));
                     if !ty_ctx.is_well_formed(quant.val.qualifications.iter()) {
                         return Err(TypeError::QualificationNotWellFormed(
                             ty_ctx.clone(),
@@ -1238,7 +1237,12 @@ fn assert_unr_ctx(e: &SExpr, ctx: &Ctx, ty_ctx: &TypeCtx) -> Result<(), TypeErro
     }
 }
 
-fn check_mobility(expr: &SExpr, ctx: &Ctx, ty_ctx: &TypeCtx, cs: &mut Constraints) -> Result<(), TypeError> {
+fn check_mobility(
+    expr: &SExpr,
+    ctx: &Ctx,
+    ty_ctx: &TypeCtx,
+    cs: &mut Constraints,
+) -> Result<(), TypeError> {
     // If we can't ensure that the type is mobile
     // we add a constraint that the type must be mobile
     // to later check that the solution satisfies mobility requirements.

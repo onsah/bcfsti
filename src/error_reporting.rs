@@ -323,10 +323,7 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     "Type Error",
                     [label(
                         e.span,
-                        format!(
-                            "This unrestricted lambda abstraction is not mobile {}",
-                            pretty_def(&ty)
-                        ),
+                        format!("Type {} is not mobile", pretty_def(&ty)),
                     )],
                 );
             }
@@ -747,7 +744,6 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
             );
         }
         IErr::Equivalence { ty1, ty2, reason } => {
-            dbg!();
             report(
                 &src,
                 0..1,

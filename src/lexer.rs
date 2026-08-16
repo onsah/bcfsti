@@ -213,6 +213,8 @@ pub enum Token<'a> {
     Print,
     #[token("'")]
     Quote,
+    #[token("^")]
+    Caret,
 
     // Positive Int
     #[regex(r"[0-9]+", |lex| lex.slice().parse().map_err(|_| LexingError::Int))]
@@ -349,6 +351,7 @@ impl<'a> Token<'a> {
             Token::QMbl => "mbl",
             Token::QAll => "∀",
             Token::Quote => "'",
+            Token::Caret => "^",
         }
     }
 }

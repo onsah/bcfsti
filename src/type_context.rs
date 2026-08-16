@@ -320,17 +320,13 @@ impl TypeCtx {
                     && new_ctx.check_kind(ty, Kind::Type))
                 .then_some(Kind::Type)
             }
-            Type::PVar { id, .. } => {
-                dbg!(id);
-                Some(Kind::Type)
-            }
+            // TODO: Check from the context
+            Type::PVar { .. } => Some(Kind::Type),
         }
     }
 
     fn check_kind_inner(&self, ty: &Type, kind: Kind) -> bool {
-        dbg!(ty);
-        dbg!(&self.vars);
-        dbg!(self.infer_kind(ty))
+        self.infer_kind(ty)
             .map(|kind1| kind1.is_subkind_of(&kind))
             .unwrap_or(false)
     }

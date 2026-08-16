@@ -1,8 +1,0 @@
-let
-    fn : Acq; Skip -[m u 1]-> Unit
-    fn c =
-        let c1, c2 = lsplit Skip c in
-        discard c1;
-        acquire c2
-in
-unit
