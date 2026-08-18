@@ -91,8 +91,14 @@ impl Pretty<UserState> for Type {
                 qualifications,
                 ty,
             } => {
-                p.pp("∀ ");
-                todo!()
+                p.pp("∀ (");
+                p.pp(id);
+                p.pp(": ");
+                p.pp(kind);
+                p.pp("). ");
+                p.pp_sep(" ^ ", qualifications);
+                p.pp(" => ");
+                p.pp(ty);
             }
             Type::Exists {
                 id,
@@ -446,6 +452,14 @@ impl Pretty<UserState> for Expr {
                 p.pp("[");
                 p.pp(ty);
                 p.pp("]")
+            }
+            Expr::TyAbs {
+                quantification,
+                expr,
+            } => {
+                p.pp(quantification);
+                p.pp(" => ");
+                p.pp(expr);
             }
         }
     }

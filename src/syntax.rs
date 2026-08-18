@@ -471,6 +471,10 @@ pub enum Expr {
     If(Box<SExpr>, Box<SExpr>, Box<SExpr>),
 
     TyApp(Box<SExpr>, SType),
+    TyAbs {
+        quantification: SQuantification,
+        expr: Box<SExpr>,
+    },
 }
 pub type SExpr = Spanned<Expr>;
 
@@ -733,6 +737,11 @@ impl Expr {
             Expr::TypeDef(_, _, body, _) => body.free_vars(),
             Expr::Discard(e) => e.free_vars(),
             Expr::TyApp(e, _) => e.free_vars(),
+            Expr::TyAbs {
+                quantification, // TODO: qualification free vars
+                expr,
+                ..
+            } => expr.free_vars(),
         }
     }
 }

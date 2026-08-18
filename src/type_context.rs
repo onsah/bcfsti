@@ -69,7 +69,8 @@ impl TypeCtx {
     }
 
     pub fn unr(&self, ty: &Type) -> bool {
-        self.or_assumed(
+        let (ty_ctx, ty) = Self::non_qualified_type(ty);
+        self.clone().join(ty_ctx).or_assumed(
             || Qualification::Unr(fake_span(ty.clone())),
             match ty {
                 // Q-Unr-Atom
@@ -92,7 +93,8 @@ impl TypeCtx {
     }
 
     pub fn mobile(&self, ty: &Type) -> bool {
-        self.or_assumed(
+        let (ty_ctx, ty) = Self::non_qualified_type(ty);
+        self.clone().join(ty_ctx).or_assumed(
             || Qualification::Mobile(fake_span(ty.clone())),
             match ty {
                 // Q-Mbl-Atom
@@ -128,6 +130,26 @@ impl TypeCtx {
                 _ => false,
             },
         )
+    }
+
+    fn non_qualified_type(ty: &Type) -> (TypeCtx, &Type) {
+        match ty {
+            Type::Forall {
+                id,
+                kind,
+                qualifications,
+                ty,
+            } => {
+                let new_ctx = TypeCtx::empty().extend(
+                    id.val.clone(),
+                    kind.val,
+                    qualifications.iter().cloned(),
+                );
+                let (inner_ctx, inner_ty) = Self::non_qualified_type(ty);
+                (new_ctx.join(inner_ctx), inner_ty)
+            }
+            _ => (TypeCtx::empty(), ty),
+        }
     }
 
     fn bounded(&self, session: &Session) -> bool {
@@ -380,6 +402,7 @@ impl TypeCtx {
         }
     }
 
+    // TODO: Make it return the qualification that isn't well formed
     /// Check if the qualifications are well formed w.r.t. the type context.
     pub fn is_well_formed<'a>(
         &'a self,
@@ -404,6 +427,17 @@ impl TypeCtx {
         })
     }
 
+    pub fn join(self, other: TypeCtx) -> TypeCtx {
+        let mut new_vars = self.vars;
+        new_vars.extend(other.vars);
+        let mut new_qualifications = self.qualifications;
+        new_qualifications.extend(other.qualifications);
+        TypeCtx {
+            vars: new_vars,
+            qualifications: new_qualifications,
+        }
+    }
+
     pub fn extend_var(&self, id: PVarId, kind: Kind) -> TypeCtx {
         let mut new_vars = self.vars.clone();
         new_vars.insert(id, kind);
@@ -413,15 +447,23 @@ impl TypeCtx {
         }
     }
 
+    pub fn extend_qualifications(
+        &self,
+        qualifications: impl IntoIterator<Item = Qualification>,
+    ) -> TypeCtx {
+        let mut new_ctx = self.clone();
+        new_ctx.qualifications.extend(qualifications);
+        new_ctx
+    }
+
     pub fn extend(
         &self,
         id: PVarId,
         kind: Kind,
         qualifications: impl IntoIterator<Item = Qualification>,
     ) -> TypeCtx {
-        let mut new_ctx = self.extend_var(id, kind);
-        new_ctx.qualifications.extend(qualifications);
-        new_ctx
+        self.extend_var(id, kind)
+            .extend_qualifications(qualifications)
     }
 }
 

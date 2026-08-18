@@ -5,8 +5,8 @@ use crate::{
     context::{Ctx, JoinOrd, ext},
     session_type,
     syntax::{
-        Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, SEff, SExpr, SId, SMult, SPattern,
-        SQuantification, SSession, SType, Session, SessionOp, Type,
+        Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, Quantification, SEff, SExpr, SId, SMult,
+        SPattern, SQuantification, SSession, SType, Session, SessionOp, Type,
     },
     type_alias::{AliasEnv, expand_session, expand_stype},
     type_context::TypeCtx,
@@ -480,38 +480,66 @@ impl TypeChecker {
                 Ok((body_ty, var_cs.join(body_cs), Eff::lub(var_eff, body_eff)))
             }
             Expr::LetDecl(id, var_ty, quant, clause, body) => {
-                match quant {
-                    Some(_) => todo!(),
-                    None => {
-                        if let Type::Arr { mult, .. } = &var_ty.val
-                            && mult.val != Mult::Unr
-                        {
-                            return Err(TypeError::RecursiveFunctionMustBeUnrestricted(
-                                var_ty.clone(),
-                                id.clone(),
-                            ));
+                let (var_ty, var_body) = {
+                    // Desugar clause to an abstraction
+                    let var_expr = Spanned::new(
+                        Expr::Abs(clause.var_id.clone(), Box::new(clause.body.clone())),
+                        clause.span.clone(),
+                    );
+                    // TODO: Extract into a function
+                    match quant {
+                        Some(quant) => {
+                            let var_ty = Spanned::new(
+                                Type::Forall {
+                                    id: quant.id.clone(),
+                                    kind: quant.kind.clone(),
+                                    qualifications: quant.qualifications.clone(),
+                                    ty: Box::new(var_ty.clone()),
+                                },
+                                quant.span.clone(),
+                            );
+
+                            let var_body = Spanned::new(
+                                Expr::TyAbs {
+                                    quantification: fake_span(Quantification {
+                                        id: quant.id.clone(),
+                                        kind: quant.kind.clone(),
+                                        qualifications: quant.qualifications.clone(),
+                                    }),
+                                    expr: Box::new(var_expr),
+                                },
+                                clause.span.clone(),
+                            );
+
+                            (var_ty, var_body)
                         }
-
-                        // Add the function to the context
-                        let var_ctx = ctx.restrict(&clause.body.free_vars());
-                        let (var_cs, var_eff) = {
-                            let var_ctx = ext(
-                                Mult::Unr,
-                                var_ctx.clone(),
-                                Ctx::Bind(id.clone(), var_ty.clone()),
-                            );
-                            let var_expr = Spanned::new(
-                                Expr::Abs(clause.var_id.clone(), Box::new(clause.body.clone())),
-                                e.span.clone(),
-                            );
-                            self.check(&var_ctx, ty_ctx, &var_expr, var_ty)?
-                        };
-
-                        let (ty, let_cs, let_eff) = self
-                            .infer_let_body(ctx, ty_ctx, e, id, &var_ctx, var_ty, var_eff, body)?;
-                        Ok((ty, var_cs.join(let_cs), Eff::lub(var_eff, let_eff)))
+                        None => (var_ty.clone(), var_expr),
                     }
+                };
+
+                if let Type::Arr { mult, .. } = &var_ty.val
+                    && mult.val != Mult::Unr
+                {
+                    return Err(TypeError::RecursiveFunctionMustBeUnrestricted(
+                        var_ty.clone(),
+                        id.clone(),
+                    ));
                 }
+
+                // Add the function to the context
+                let var_ctx = ctx.restrict(&clause.body.free_vars());
+                let (var_cs, var_eff) = {
+                    let var_ctx = ext(
+                        Mult::Unr,
+                        var_ctx.clone(),
+                        Ctx::Bind(id.clone(), var_ty.clone()),
+                    );
+                    self.check(&var_ctx, ty_ctx, &var_body, &var_ty)?
+                };
+
+                let (ty, let_cs, let_eff) =
+                    self.infer_let_body(ctx, ty_ctx, e, id, &var_ctx, &var_ty, var_eff, body)?;
+                Ok((ty, var_cs.join(let_cs), Eff::lub(var_eff, let_eff)))
             }
             Expr::CaseSum(expr, cases) => {
                 let expr_ctx = ctx.restrict(&expr.free_vars());
@@ -835,6 +863,7 @@ impl TypeChecker {
                 unreachable!("type abbreviations are expanded before type checking")
             }
             Expr::TyApp(e, ty) => todo!(),
+            Expr::TyAbs { .. } => Err(TypeError::TypeAnnotationMissing(e.clone())),
         }
     }
 
@@ -1014,6 +1043,63 @@ impl TypeChecker {
                     self.check(&ctx.restrict(&expr.free_vars()), ty_ctx, expr, actual_ty)?;
 
                 Ok((expr_cs, expr_eff))
+            }
+            Expr::TyAbs {
+                quantification,
+                expr,
+            } => {
+                // TODO: Ensure expr is value
+                let Quantification {
+                    id,
+                    kind,
+                    qualifications,
+                } = quantification.val.clone();
+                let ty_ctx = ty_ctx.extend_var(id.val.clone(), kind.val);
+                if !ty_ctx.is_well_formed(qualifications.iter()) {
+                    return Err(TypeError::QualificationNotWellFormed(
+                        ty_ctx,
+                        quantification.clone(),
+                    ));
+                }
+
+                if ctx.vars().contains(&id.val) {
+                    return Err(TypeError::Shadowing(e.clone(), id.clone()));
+                }
+
+                let Type::Forall {
+                    id: expected_id,
+                    kind: expected_kind,
+                    qualifications: expected_qualifications,
+                    ty: expr_ty,
+                } = &expected_ty.val
+                else {
+                    return Err(TypeError::Mismatch(
+                        e.clone(),
+                        Err(format!("forall type")),
+                        expected_ty.clone(),
+                    ));
+                };
+
+                if id.val != expected_id.val
+                    || kind.val != expected_kind.val
+                    || &qualifications != expected_qualifications
+                {
+                    return Err(TypeError::Mismatch(
+                        e.clone(),
+                        Err(format!(
+                            "Forall with quantification {}",
+                            pretty_def(Quantification {
+                                id,
+                                kind,
+                                qualifications
+                            })
+                        )),
+                        expected_ty.clone(),
+                    ));
+                }
+
+                let ty_ctx = ty_ctx.extend_qualifications(qualifications);
+                self.check(&ctx, &ty_ctx, expr, expr_ty)
             }
             _ => {
                 let (inferred_ty, mut cs, eff) = self.infer(ctx, ty_ctx, e)?;
