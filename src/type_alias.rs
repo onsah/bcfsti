@@ -66,7 +66,7 @@ pub fn check_shadowing(e: &SExpr, alias_env: &AliasEnv) -> Result<(), TypeError>
             check_shadowing(spanned, alias_env)?;
             check_shadowing(spanned1, alias_env)
         }
-        Expr::Let(_, spanned1, spanned2) => {
+        Expr::Let(_, spanned1, spanned2, _) => {
             check_shadowing(spanned1, alias_env)?;
             check_shadowing(spanned2, alias_env)
         }

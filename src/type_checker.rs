@@ -12,7 +12,7 @@ use crate::{
     type_context::TypeCtx,
     util::{
         pretty::pretty_def,
-        span::{Spanned, fake_span},
+        span::{Span, Spanned, fake_span},
     },
 };
 
@@ -52,6 +52,7 @@ pub enum TypeError {
     VariantEmpty(SExpr),
     VariantDuplicateLabel(SExpr, SType, Label),
     RecursiveNonFunctionBinding(SExpr, SId),
+    RecursiveFunctionMustBeUnrestricted(SType, SId),
     WfNonContractive(SSession, SId),
     WfEmptyChoice(SSession),
     WfEmptyVariant(SType),
@@ -467,115 +468,49 @@ impl TypeChecker {
                     Eff::lub(*eff, Eff::lub(abs_eff, arg_eff)),
                 ))
             }
-            Expr::Let(var_id, var_expr, body_expr) => {
-                if ctx.vars().contains(&var_id.val) {
-                    return Err(TypeError::Shadowing(e.clone(), var_id.clone()));
-                }
-
+            Expr::Let(var_id, var_expr, body_expr, _) => {
                 let var_ctx = ctx.restrict(&var_expr.free_vars());
-                let body_ctx = ctx.restrict(&body_expr.free_vars());
-
-                {
-                    let res_ctx = Ctx::Join(
-                        Box::new(var_ctx.clone()),
-                        Box::new(body_ctx.clone()),
-                        JoinOrd::Ordered,
-                    );
-
-                    if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
-                        return Err(TypeError::CtxSplitFailed(
-                            e.clone(),
-                            ctx.clone(),
-                            res_ctx.clone(),
-                        ));
-                    }
-                }
-
                 let (var_ty, var_cs, var_eff) = self.infer(&var_ctx, ty_ctx, var_expr)?;
 
-                let body_ctx = {
-                    let binding = Ctx::Bind(var_id.clone(), var_ty);
-                    if var_eff == Eff::Yes {
-                        Ctx::Join(Box::new(binding), Box::new(body_ctx), JoinOrd::Ordered)
-                    } else {
-                        Ctx::Join(Box::new(binding), Box::new(body_ctx), JoinOrd::Unordered)
-                    }
-                };
-                let (body_ty, body_cs, body_eff) = self.infer(&body_ctx, ty_ctx, body_expr)?;
+                let (body_ty, body_cs, body_eff) = self.infer_let_body(
+                    ctx, ty_ctx, e, var_id, &var_ctx, &var_ty, var_eff, body_expr,
+                )?;
 
                 Ok((body_ty, var_cs.join(body_cs), Eff::lub(var_eff, body_eff)))
             }
-            Expr::LetDecl(id, expected_ty, quant, clause, body) => {
-                if !ty_ctx.unr_ctx(ctx) {
-                    return Err(TypeError::CtxNotUnr(e.clone(), ctx.clone()));
-                }
+            Expr::LetDecl(id, var_ty, quant, clause, body) => {
+                match quant {
+                    Some(_) => todo!(),
+                    None => {
+                        if let Type::Arr { mult, .. } = &var_ty.val
+                            && mult.val != Mult::Unr
+                        {
+                            return Err(TypeError::RecursiveFunctionMustBeUnrestricted(
+                                var_ty.clone(),
+                                id.clone(),
+                            ));
+                        }
 
-                let ty_ctx = if let Some(quant) = quant {
-                    let ty_ctx = ty_ctx.extend_var(quant.id.val.clone(), quant.kind.val);
-                    if !ty_ctx.is_well_formed(quant.val.qualifications.iter()) {
-                        return Err(TypeError::QualificationNotWellFormed(
-                            ty_ctx.clone(),
-                            quant.clone(),
-                        ));
-                    }
+                        // Add the function to the context
+                        let var_ctx = ctx.restrict(&clause.body.free_vars());
+                        let (var_cs, var_eff) = {
+                            let var_ctx = ext(
+                                Mult::Unr,
+                                var_ctx.clone(),
+                                Ctx::Bind(id.clone(), var_ty.clone()),
+                            );
+                            let var_expr = fake_span(Expr::Abs(
+                                clause.var_id.clone(),
+                                Box::new(clause.body.clone()),
+                            ));
+                            self.check(&var_ctx, ty_ctx, &var_expr, var_ty)?
+                        };
 
-                    if ctx.vars().contains(&quant.val.id.val) {
-                        return Err(TypeError::Shadowing(e.clone(), quant.val.id.clone()));
-                    }
-
-                    ty_ctx.extend(
-                        quant.id.val.clone(),
-                        quant.kind.val,
-                        quant.qualifications.clone(),
-                    )
-                } else {
-                    ty_ctx.clone()
-                };
-
-                let decl_ctx = ctx.restrict(&clause.free_vars());
-                let body_ctx = ctx.restrict(&body.free_vars());
-
-                {
-                    let res_ctx = Ctx::Join(
-                        Box::new(decl_ctx.clone()),
-                        Box::new(body_ctx.clone()),
-                        JoinOrd::Ordered,
-                    );
-
-                    if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
-                        return Err(TypeError::CtxSplitFailed(
-                            e.clone(),
-                            ctx.clone(),
-                            res_ctx.clone(),
-                        ));
+                        let (ty, let_cs, let_eff) = self
+                            .infer_let_body(ctx, ty_ctx, e, id, &var_ctx, var_ty, var_eff, body)?;
+                        Ok((ty, var_cs.join(let_cs), Eff::lub(var_eff, let_eff)))
                     }
                 }
-
-                let (clause_cs, clause_eff) = {
-                    let clause_expr = fake_span(Expr::Abs(
-                        clause.var_id.clone(),
-                        Box::new(clause.body.clone()),
-                    ));
-                    let decl_ctx = ext(
-                        Mult::Unr,
-                        decl_ctx,
-                        Ctx::Bind(id.clone(), expected_ty.clone()),
-                    );
-                    self.check(&decl_ctx, &ty_ctx, &clause_expr, &expected_ty)?
-                };
-
-                let (body_ty, body_cs, body_eff) = {
-                    let var_ctx = Ctx::Bind(id.clone(), expected_ty.clone());
-                    let body_ctx =
-                        Ctx::Join(Box::new(var_ctx), Box::new(body_ctx), JoinOrd::Ordered);
-                    self.infer(&body_ctx, &ty_ctx, body)?
-                };
-
-                Ok((
-                    body_ty,
-                    clause_cs.join(body_cs),
-                    Eff::lub(clause_eff, body_eff),
-                ))
             }
             Expr::CaseSum(expr, cases) => {
                 let expr_ctx = ctx.restrict(&expr.free_vars());
@@ -900,6 +835,53 @@ impl TypeChecker {
             }
             Expr::TyApp(e, ty) => todo!(),
         }
+    }
+
+    /// Given an already type-checked variable, check the body
+    fn infer_let_body(
+        &mut self,
+        ctx: &Ctx,
+        ty_ctx: &TypeCtx,
+        expr: &SExpr,
+        var_id: &SId,
+        var_ctx: &Ctx,
+        var_ty: &SType,
+        var_eff: Eff,
+        body_expr: &SExpr,
+    ) -> Result<(SType, Constraints, Eff), TypeError> {
+        if ctx.vars().contains(&var_id.val) {
+            return Err(TypeError::Shadowing(expr.clone(), var_id.clone()));
+        }
+
+        let body_ctx = ctx.restrict(&body_expr.free_vars());
+
+        {
+            let res_ctx = Ctx::Join(
+                Box::new(var_ctx.clone()),
+                Box::new(body_ctx.clone()),
+                JoinOrd::Ordered,
+            );
+
+            if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
+                return Err(TypeError::CtxSplitFailed(
+                    expr.clone(),
+                    ctx.clone(),
+                    res_ctx.clone(),
+                ));
+            }
+        }
+
+        let body_ctx = {
+            let binding = Ctx::Bind(var_id.clone(), var_ty.clone());
+            if var_eff == Eff::Yes {
+                Ctx::Join(Box::new(binding), Box::new(body_ctx), JoinOrd::Ordered)
+            } else {
+                Ctx::Join(Box::new(binding), Box::new(body_ctx), JoinOrd::Unordered)
+            }
+        };
+        let (body_ty, body_cs, body_eff) = self.infer(&body_ctx, ty_ctx, body_expr)?;
+
+        Ok((body_ty, body_cs, body_eff))
     }
 
     fn check(

@@ -445,7 +445,7 @@ pub enum Expr {
     Seq(Box<SExpr>, Box<SExpr>),
     Pair(Box<SExpr>, Box<SExpr>),
 
-    Let(SId, Box<SExpr>, Box<SExpr>),
+    Let(SId, Box<SExpr>, Box<SExpr>, Option<SType>),
     LetDecl(
         SId,
         SType,
@@ -706,7 +706,7 @@ impl Expr {
                 union(e1.free_vars(), without(without(e2.free_vars(), y), x))
             }
             Expr::Ann(e, _t) => e.free_vars(),
-            Expr::Let(x, e1, e2) => union(e1.free_vars(), without(e2.free_vars(), x)),
+            Expr::Let(x, e1, e2, _) => union(e1.free_vars(), without(e2.free_vars(), x)),
             Expr::Seq(e1, e2) => union(e1.free_vars(), e2.free_vars()),
             Expr::Inj(_l, e) => e.free_vars(),
             Expr::CaseSum(e, cs) => {

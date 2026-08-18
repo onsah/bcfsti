@@ -715,6 +715,19 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     ),
                 )],
             ),
+            TypeError::RecursiveFunctionMustBeUnrestricted(ty, id) => report(
+                &src,
+                id.span.clone(),
+                "Type Error",
+                [label(
+                    id.span.clone(),
+                    format!(
+                        "Recursive function {} must have an unrestricted function type, but has type {}",
+                        pretty_def(&id),
+                        pretty_def(&ty.val)
+                    ),
+                )],
+            ),
         },
         IErr::Constraint(ConstraintSolutionError::AssignmentNotMobile { expr, id, ctx }) => {
             let (_, ty) = ctx.lookup_ord_pure(&ty_ctx, &id).unwrap();

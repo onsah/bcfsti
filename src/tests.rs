@@ -25,12 +25,12 @@ mod typechecker_tests {
 
     use crate::{
         constraint::Constraints,
-        error_reporting::IErr,
+        error_reporting::{IErr, report_error},
         session_type,
         syntax::{Eff, Expr, Mult, Session, Type},
         type_checker::TypeError,
         typecheck,
-        util::span::fake_span,
+        util::{pretty::pretty_def, span::fake_span},
     };
 
     #[test]
@@ -144,6 +144,13 @@ mod typechecker_tests {
         let Ok((_, _, _, constraints, _)) = res else {
             unreachable!()
         };
+        for c in constraints.iter() {
+            println!("{} = {}", pretty_def(&c.0), pretty_def(&c.1));
+        }
+        println!("====================");
+        for c in expected_constraints.iter() {
+            println!("{} = {}", pretty_def(&c.0), pretty_def(&c.1));
+        }
         assert_eq!(constraints, expected_constraints);
     }
 

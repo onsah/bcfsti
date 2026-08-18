@@ -305,9 +305,16 @@ impl Pretty<UserState> for Expr {
                 p.pp(" in\n");
                 p.pp(e2);
             }),
-            Expr::Let(x, e1, e2) => p.infix(1, R, |p| {
+            Expr::Let(x, e1, e2, rec) => p.infix(1, R, |p| {
                 p.pp("let ");
-                p.pp(x);
+                if let Some(ty) = rec {
+                    p.pp("rec ");
+                    p.pp(x);
+                    p.pp(" : ");
+                    p.pp(ty);
+                } else {
+                    p.pp(x);
+                }
                 p.pp(" = ");
                 p.pp_prec(0, e1);
                 p.pp(" in\n");
