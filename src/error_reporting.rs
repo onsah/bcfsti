@@ -728,6 +728,19 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     ),
                 )],
             ),
+            TypeError::UnrArrMustBeMobile(ty, mob) => report(
+                &src,
+                ty.span.clone(),
+                "Type Error",
+                [label(
+                    ty.span.clone(),
+                    format!(
+                        "Unrestricted function type {} must be mobile, but it's {}",
+                        pretty_def(&ty.val),
+                        pretty_def(mob)
+                    ),
+                )],
+            ),
         },
         IErr::Constraint(ConstraintSolutionError::AssignmentNotMobile { expr, id, ctx }) => {
             let (_, ty) = ctx.lookup_ord_pure(&ty_ctx, &id).unwrap();

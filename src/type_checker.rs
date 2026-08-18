@@ -36,6 +36,7 @@ pub enum TypeError {
     Shadowing(SExpr, SId),
     CtxNotUnr(SExpr, Ctx),
     AbsNotMobile(SExpr, SType),
+    UnrArrMustBeMobile(SType, Mob),
     SeqDropsOrd(SExpr, SType),
     LeftOverVar(SExpr, SId, SSession, Option<Session>),
     LeftOverCtx(SExpr, Ctx),
@@ -499,10 +500,10 @@ impl TypeChecker {
                                 var_ctx.clone(),
                                 Ctx::Bind(id.clone(), var_ty.clone()),
                             );
-                            let var_expr = fake_span(Expr::Abs(
-                                clause.var_id.clone(),
-                                Box::new(clause.body.clone()),
-                            ));
+                            let var_expr = Spanned::new(
+                                Expr::Abs(clause.var_id.clone(), Box::new(clause.body.clone())),
+                                e.span.clone(),
+                            );
                             self.check(&var_ctx, ty_ctx, &var_expr, var_ty)?
                         };
 
@@ -918,7 +919,7 @@ impl TypeChecker {
                         return Err(TypeError::CtxNotUnr(e.clone(), ctx.clone()));
                     }
                     if mob.val != Mob::Mobile {
-                        return Err(TypeError::AbsNotMobile(e.clone(), expected_ty.clone()));
+                        return Err(TypeError::UnrArrMustBeMobile(expected_ty.clone(), mob.val));
                     }
                 }
 

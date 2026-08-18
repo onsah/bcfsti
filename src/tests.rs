@@ -682,6 +682,16 @@ mod typechecker_tests {
         };
         assert_eq!(id, fake_span("c1".to_owned()))
     }
+
+    #[test]
+    fn unr_func_must_be_mobile() {
+        let src = r#"
+            (\x. x) : (Int -[m u 0]-> Int) -[s u 0]-> Int
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::UnrArrMustBeMobile(_, _,))));
+    }
 }
 
 #[test]
