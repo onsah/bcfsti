@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::context::Ctx;
-use crate::syntax::{Id, Kind, Mult, PVarId, Qualification, Session, SessionOp, Type};
+use crate::syntax::{
+    Id, Kind, Mult, PVarId, Qualification, Quantification, Session, SessionOp, Type,
+};
 use crate::util::pretty::{Pretty, PrettyEnv, pretty_def};
 use crate::util::span::fake_span;
 
@@ -117,14 +119,12 @@ impl TypeCtx {
                 Type::Chan(Session::PVar { id, .. }) => self
                     .equivalent_types_pv(id.clone())
                     .any(|ty| self.mobile(ty)),
-                Type::Forall {
-                    id,
-                    kind,
-                    qualifications,
-                    ty,
-                } => {
-                    let new_ctx =
-                        self.extend(id.val.clone(), kind.val, qualifications.iter().cloned());
+                Type::Forall { quantification, ty } => {
+                    let new_ctx = self.extend(
+                        quantification.id.val.clone(),
+                        quantification.kind.val,
+                        quantification.qualifications.iter().cloned(),
+                    );
                     new_ctx.mobile(ty)
                 }
                 _ => false,
@@ -134,16 +134,11 @@ impl TypeCtx {
 
     fn non_qualified_type(ty: &Type) -> (TypeCtx, &Type) {
         match ty {
-            Type::Forall {
-                id,
-                kind,
-                qualifications,
-                ty,
-            } => {
+            Type::Forall { quantification, ty } => {
                 let new_ctx = TypeCtx::empty().extend(
-                    id.val.clone(),
-                    kind.val,
-                    qualifications.iter().cloned(),
+                    quantification.id.val.clone(),
+                    quantification.kind.val,
+                    quantification.qualifications.iter().cloned(),
                 );
                 let (inner_ctx, inner_ty) = Self::non_qualified_type(ty);
                 (new_ctx.join(inner_ctx), inner_ty)
@@ -320,25 +315,23 @@ impl TypeCtx {
             Type::Arr { param, ret, .. } => (self.infer_kind_inner(param).is_some()
                 && self.infer_kind_inner(ret).is_some())
             .then_some(Kind::Type),
-            Type::Forall {
-                id,
-                kind,
-                qualifications,
-                ty,
-            } => {
-                let new_ctx = self.extend(id.val.clone(), kind.val, qualifications.iter().cloned());
-                (new_ctx.is_well_formed(qualifications.iter())
+            Type::Forall { quantification, ty } => {
+                let new_ctx = self.extend(
+                    quantification.id.val.clone(),
+                    quantification.kind.val,
+                    quantification.qualifications.iter().cloned(),
+                );
+                (new_ctx.is_well_formed(quantification.qualifications.iter())
                     && new_ctx.check_kind(ty, Kind::Type))
                 .then_some(Kind::Type)
             }
-            Type::Exists {
-                id,
-                kind,
-                qualifications,
-                ty,
-            } => {
-                let new_ctx = self.extend(id.val.clone(), kind.val, qualifications.iter().cloned());
-                (new_ctx.is_well_formed(qualifications.iter())
+            Type::Exists { quantification, ty } => {
+                let new_ctx = self.extend(
+                    quantification.id.val.clone(),
+                    quantification.kind.val,
+                    quantification.qualifications.iter().cloned(),
+                );
+                (new_ctx.is_well_formed(quantification.qualifications.iter())
                     && new_ctx.check_kind(ty, Kind::Type))
                 .then_some(Kind::Type)
             }
@@ -785,9 +778,11 @@ mod tests {
     fn forall_with_well_formed_body() {
         // forall (a: Session). Unit
         let ty = Type::Forall {
-            id: fake_span("a".to_string()),
-            kind: fake_span(Kind::Session),
-            qualifications: vec![],
+            quantification: fake_span(Quantification {
+                id: fake_span("a".to_string()),
+                kind: fake_span(Kind::Session),
+                qualifications: vec![],
+            }),
             ty: Box::new(fake_span(Type::Unit)),
         };
         assert!(ctx(&[]).is_well_formed([Qualification::Unr(fake_span(ty))].iter()));
@@ -797,9 +792,11 @@ mod tests {
     fn forall_with_free_pvar_in_body_not_well_formed() {
         // forall (a: Session). <b> where b is not bound by the forall
         let ty = Type::Forall {
-            id: fake_span("a".to_string()),
-            kind: fake_span(Kind::Session),
-            qualifications: vec![],
+            quantification: fake_span(Quantification {
+                id: fake_span("a".to_string()),
+                kind: fake_span(Kind::Session),
+                qualifications: vec![],
+            }),
             ty: Box::new(fake_span(pvar_chan("b".to_string()))),
         };
         assert!(!ctx(&[]).is_well_formed([Qualification::Unr(fake_span(ty))].iter()));
@@ -809,9 +806,11 @@ mod tests {
     fn forall_using_bound_pvar_in_body_is_well_formed() {
         // forall (a: Session). <a> - the bound pvar a is used in the body
         let ty = Type::Forall {
-            id: fake_span("a".to_string()),
-            kind: fake_span(Kind::Session),
-            qualifications: vec![],
+            quantification: fake_span(Quantification {
+                id: fake_span("a".to_string()),
+                kind: fake_span(Kind::Session),
+                qualifications: vec![],
+            }),
             ty: Box::new(fake_span(pvar_chan("a".to_string()))),
         };
         assert!(ctx(&[]).is_well_formed([Qualification::Unr(fake_span(ty))].iter()));

@@ -109,8 +109,8 @@ peg::parser! {
         pub rule stype() -> SType = spanned(<type_()>)
 
         pub rule type_quantify() -> Type
-            = tok(QAll) q:quant() tok(DoubleArrow) t:stype()
-              { Type::Forall { id: q.id, kind: q.kind, ty: Box::new(t), qualifications: q.qualifications } }
+            = tok(QAll) q:squant() tok(DoubleArrow) t:stype()
+              { Type::Forall { quantification: q, ty: Box::new(t) } }
             / t:type_arrow() { t }
 
         #[cache_left_rec]

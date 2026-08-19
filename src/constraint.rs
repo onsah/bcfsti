@@ -372,25 +372,17 @@ fn subst_type(ty: SType, assignments: &Assignments) -> SType {
     let span = ty.span.clone();
     let val = match ty.val {
         Type::Forall {
-            id,
-            kind,
-            qualifications,
+            quantification,
             ty,
         } => Type::Forall {
-            id,
-            kind,
-            qualifications,
+            quantification,
             ty: Box::new(subst_type(*ty, assignments)),
         },
         Type::Exists {
-            id,
-            kind,
-            qualifications,
+            quantification,
             ty,
         } => Type::Exists {
-            id,
-            kind,
-            qualifications,
+            quantification,
             ty: Box::new(subst_type(*ty, assignments)),
         },
         Type::Chan(session) => Type::Chan(subst_session(session, assignments)),

@@ -226,25 +226,17 @@ pub fn expand_type(ty: &Type, env: &AliasEnv, bound: &HashSet<Id>) -> Result<Typ
         Type::Bool => Ok(Type::Bool),
         Type::String => Ok(Type::String),
         Type::Forall {
-            id,
-            kind,
-            qualifications,
+            quantification,
             ty,
         } => expand_type(ty, env, bound).map(|ty| Type::Forall {
-            id: id.clone(),
-            kind: kind.clone(),
-            qualifications: qualifications.clone(),
+            quantification: quantification.clone(),
             ty: Box::new(fake_span(ty)),
         }),
         Type::Exists {
-            id,
-            kind,
-            qualifications,
+            quantification,
             ty,
         } => expand_type(ty, env, bound).map(|ty| Type::Exists {
-            id: id.clone(),
-            kind: kind.clone(),
-            qualifications: qualifications.clone(),
+            quantification: quantification.clone(),
             ty: Box::new(fake_span(ty)),
         }),
         Type::PVar { id, dual } => Ok(Type::PVar {

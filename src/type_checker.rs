@@ -482,7 +482,7 @@ impl TypeChecker {
             Expr::LetDecl(id, var_ty, quant, clause, body) => {
                 let (var_ty, var_body) = {
                     // Desugar clause to an abstraction
-                    let var_expr = Spanned::new(
+                    let var_body = Spanned::new(
                         Expr::Abs(clause.var_id.clone(), Box::new(clause.body.clone())),
                         clause.span.clone(),
                     );
@@ -491,9 +491,7 @@ impl TypeChecker {
                         Some(quant) => {
                             let var_ty = Spanned::new(
                                 Type::Forall {
-                                    id: quant.id.clone(),
-                                    kind: quant.kind.clone(),
-                                    qualifications: quant.qualifications.clone(),
+                                    quantification: quant.clone(),
                                     ty: Box::new(var_ty.clone()),
                                 },
                                 quant.span.clone(),
@@ -501,19 +499,15 @@ impl TypeChecker {
 
                             let var_body = Spanned::new(
                                 Expr::TyAbs {
-                                    quantification: fake_span(Quantification {
-                                        id: quant.id.clone(),
-                                        kind: quant.kind.clone(),
-                                        qualifications: quant.qualifications.clone(),
-                                    }),
-                                    expr: Box::new(var_expr),
+                                    quantification: quant.clone(),
+                                    expr: Box::new(var_body),
                                 },
                                 clause.span.clone(),
                             );
 
                             (var_ty, var_body)
                         }
-                        None => (var_ty.clone(), var_expr),
+                        None => (var_ty.clone(), var_body),
                     }
                 };
 
@@ -1067,9 +1061,7 @@ impl TypeChecker {
                 }
 
                 let Type::Forall {
-                    id: expected_id,
-                    kind: expected_kind,
-                    qualifications: expected_qualifications,
+                    quantification: expected_quantification,
                     ty: expr_ty,
                 } = &expected_ty.val
                 else {
@@ -1080,9 +1072,9 @@ impl TypeChecker {
                     ));
                 };
 
-                if id.val != expected_id.val
-                    || kind.val != expected_kind.val
-                    || &qualifications != expected_qualifications
+                if id.val != expected_quantification.id.val
+                    || kind.val != expected_quantification.kind.val
+                    || &qualifications != &expected_quantification.qualifications
                 {
                     return Err(TypeError::Mismatch(
                         e.clone(),
@@ -1266,15 +1258,11 @@ impl TypeChecker {
             Type::Bool => Ok(()),
             Type::String => Ok(()),
             Type::Forall {
-                id,
-                kind,
-                qualifications,
+                quantification,
                 ty,
             } => todo!("Remove this method"),
             Type::Exists {
-                id,
-                kind,
-                qualifications,
+                quantification,
                 ty,
             } => todo!("Remove this method"),
             Type::PVar { .. } => Ok(()),

@@ -85,27 +85,12 @@ impl Pretty<UserState> for Type {
             Type::Int => p.pp("Int"),
             Type::Bool => p.pp("Bool"),
             Type::String => p.pp("String"),
-            Type::Forall {
-                id,
-                kind,
-                qualifications,
-                ty,
-            } => {
-                p.pp("∀ (");
-                p.pp(id);
-                p.pp(": ");
-                p.pp(kind);
-                p.pp("). ");
-                p.pp_sep(" ^ ", qualifications);
+            Type::Forall { quantification, ty } => {
+                p.pp(quantification);
                 p.pp(" => ");
                 p.pp(ty);
             }
-            Type::Exists {
-                id,
-                kind,
-                qualifications,
-                ty,
-            } => {
+            Type::Exists { quantification, ty } => {
                 p.pp("∃ ");
                 todo!()
             }

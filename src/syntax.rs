@@ -184,15 +184,11 @@ impl Session {
 pub enum Type {
     // Quantifiers
     Forall {
-        id: SPVarId,
-        kind: SKind,
-        qualifications: Vec<Qualification>,
+        quantification: SQuantification,
         ty: Box<SType>,
     },
     Exists {
-        id: SPVarId,
-        kind: SKind,
-        qualifications: Vec<Qualification>,
+        quantification: SQuantification,
         ty: Box<SType>,
     },
     PVar {
@@ -277,13 +273,13 @@ impl Type {
             }
             Type::Variant(cs) => Box::new(cs.iter().flat_map(|(_, t)| t.poly_variables())),
             Type::Unit | Type::Int | Type::Bool | Type::String => Box::new(iter::empty()),
-            Type::Forall { id, ty, .. } => Box::new(
+            Type::Forall { quantification, ty } => Box::new(
                 ty.poly_variables()
-                    .filter(move |id1| id.as_str() != id1.as_str()),
+                    .filter(move |id1| quantification.id.as_str() != id1.as_str()),
             ),
-            Type::Exists { id, ty, .. } => Box::new(
+            Type::Exists { quantification, ty } => Box::new(
                 ty.poly_variables()
-                    .filter(move |id1| id.as_str() != id1.as_str()),
+                    .filter(move |id1| quantification.id.as_str() != id1.as_str()),
             ),
             Type::PVar { id, .. } => Box::new(iter::once(id.clone())),
         }
@@ -309,13 +305,13 @@ impl Type {
             | Type::String
             | Type::Arr { .. }
             | Type::Chan(_) => Box::new(iter::empty()),
-            Type::Forall { id, ty, .. } => Box::new(
+            Type::Forall { quantification, ty } => Box::new(
                 ty.poly_variables_under_prod_and_variant()
-                    .filter(move |id1| id.as_str() != id1.as_str()),
+                    .filter(move |id1| quantification.id.as_str() != id1.as_str()),
             ),
-            Type::Exists { id, ty, .. } => Box::new(
+            Type::Exists { quantification, ty } => Box::new(
                 ty.poly_variables_under_prod_and_variant()
-                    .filter(move |id1| id.as_str() != id1.as_str()),
+                    .filter(move |id1| quantification.id.as_str() != id1.as_str()),
             ),
             Type::PVar { id, .. } => Box::new(iter::once(id.clone())),
         }
