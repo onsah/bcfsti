@@ -5,8 +5,8 @@ use crate::{
     context::{Ctx, JoinOrd, ext},
     session_type,
     syntax::{
-        Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, Quantification, QuantificationType, SEff, SExpr, SId, SMult,
-        SPattern, SQuantification, SSession, SType, Session, SessionOp, Type,
+        Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, Quantification, QuantificationType, SEff, SExpr,
+        SId, SMult, SPattern, SQuantification, SSession, SType, Session, SessionOp, Type,
     },
     type_alias::{AliasEnv, expand_session, expand_stype},
     type_context::TypeCtx,
@@ -486,30 +486,7 @@ impl TypeChecker {
                         Expr::Abs(clause.var_id.clone(), Box::new(clause.body.clone())),
                         clause.span.clone(),
                     );
-                    // TODO: Extract into a function
-                    match quant {
-                        Some(quant) => {
-                            let var_ty = Spanned::new(
-                                Type::Abstraction {
-                                    typ: QuantificationType::Universal,
-                                    quantification: quant.clone(),
-                                    ty: Box::new(var_ty.clone()),
-                                },
-                                quant.span.clone(),
-                            );
-
-                            let var_body = Spanned::new(
-                                Expr::TyAbs {
-                                    quantification: quant.clone(),
-                                    expr: Box::new(var_body),
-                                },
-                                clause.span.clone(),
-                            );
-
-                            (var_ty, var_body)
-                        }
-                        None => (var_ty.clone(), var_body),
-                    }
+                    Self::desugar_quantification(quant.clone(), var_ty.clone(), var_body)
                 };
 
                 if let Type::Arr { mult, .. } = &var_ty.val
@@ -859,6 +836,36 @@ impl TypeChecker {
             }
             Expr::TyApp(e, ty) => todo!(),
             Expr::TyAbs { .. } => Err(TypeError::TypeAnnotationMissing(e.clone())),
+        }
+    }
+
+    fn desugar_quantification(
+        quantification: Option<SQuantification>,
+        ty: SType,
+        expr: SExpr,
+    ) -> (SType, SExpr) {
+        match quantification {
+            Some(quantification) => {
+                let var_ty = Spanned::new(
+                    Type::Abstraction {
+                        typ: QuantificationType::Universal,
+                        quantification: quantification.clone(),
+                        ty: Box::new(ty.clone()),
+                    },
+                    quantification.span.clone(),
+                );
+
+                let var_body = Spanned::new(
+                    Expr::TyAbs {
+                        quantification: quantification.clone(),
+                        expr: Box::new(expr),
+                    },
+                    quantification.span.clone(),
+                );
+
+                (var_ty, var_body)
+            }
+            None => (ty, expr),
         }
     }
 
