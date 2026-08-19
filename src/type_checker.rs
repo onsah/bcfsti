@@ -5,8 +5,9 @@ use crate::{
     context::{Ctx, JoinOrd, ext},
     session_type,
     syntax::{
-        Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, Quantification, QuantificationType, SEff, SExpr,
-        SId, SMult, SPattern, SQuantification, SSession, SType, Session, SessionOp, Type,
+        Eff, Expr, Id, Kind, Label, Mob, Mult, Op1, Op2, Qualification, Quantification,
+        QuantificationType, SEff, SExpr, SId, SMult, SPVarId, SPattern, SQualification,
+        SQuantification, SSession, SType, Session, SessionOp, Type,
     },
     type_alias::{AliasEnv, expand_session, expand_stype},
     type_context::TypeCtx,
@@ -65,6 +66,9 @@ pub enum TypeError {
     SessionTypeNotMobileInContext(SExpr, Ctx, SId),
     UndefinedAlias(SId),
     QualificationNotWellFormed(TypeCtx, SQuantification),
+    KindMismatch(SType, Kind, TypeCtx),
+    QualificationNotSatisfied(TypeCtx, SQualification),
+    UndefinedPVar(SPVarId),
 }
 
 pub fn infer_type(e: &SExpr, alias_env: AliasEnv) -> Result<(SType, Constraints, Eff), TypeError> {
@@ -73,7 +77,7 @@ pub fn infer_type(e: &SExpr, alias_env: AliasEnv) -> Result<(SType, Constraints,
         alias_env,
     };
     let (t, cs, eff) = checker.infer(&Ctx::Empty, &TypeCtx::empty(), e)?;
-    if t.is_ord() {
+    if !TypeCtx::empty().unr(&t) {
         return Err(TypeError::MainReturnsOrd(e.clone(), t.clone()));
     }
     Ok((t, cs, eff))
@@ -834,9 +838,49 @@ impl TypeChecker {
             Expr::TypeDef(_, _, _, _) => {
                 unreachable!("type abbreviations are expanded before type checking")
             }
-            Expr::TyApp(e, ty) => todo!(),
+            Expr::TyApp(expr, ty) => {
+                let (expr_ty, expr_cs, expr_eff) = self.infer(ctx, ty_ctx, expr)?;
+
+                let Type::Abstraction {
+                    typ: QuantificationType::Universal,
+                    quantification,
+                    ty: abs_ty,
+                } = &expr_ty.val
+                else {
+                    return Err(TypeError::Mismatch(
+                        *expr.clone(),
+                        Err("Universal type abstraction".to_owned()),
+                        expr_ty,
+                    ));
+                };
+
+                let kind = quantification.kind.val;
+                if !ty_ctx.check_kind(ty, kind) {
+                    return Err(TypeError::KindMismatch(ty.clone(), kind, ty_ctx.clone()));
+                }
+
+                Self::check_qualifications(ty_ctx, quantification.qualifications.iter())?;
+
+                let app_ty = fake_span(abs_ty.subst_poly(&quantification.id.val, ty));
+                Ok((app_ty, expr_cs, expr_eff))
+            }
             Expr::TyAbs { .. } => Err(TypeError::TypeAnnotationMissing(e.clone())),
         }
+    }
+
+    fn check_qualifications<'a>(
+        ty_ctx: &TypeCtx,
+        qualifications: impl Iterator<Item = &'a SQualification>,
+    ) -> Result<(), TypeError> {
+        for qualification in qualifications {
+            if !ty_ctx.entails(qualification) {
+                return Err(TypeError::QualificationNotSatisfied(
+                    ty_ctx.clone(),
+                    qualification.clone(),
+                ));
+            }
+        }
+        Ok(())
     }
 
     fn desugar_quantification(
@@ -1057,7 +1101,7 @@ impl TypeChecker {
                     qualifications,
                 } = quantification.val.clone();
                 let ty_ctx = ty_ctx.extend_var(id.val.clone(), kind.val);
-                if !ty_ctx.is_well_formed(qualifications.iter()) {
+                if !ty_ctx.is_well_formed(qualifications.iter().map(|q| &q.val)) {
                     return Err(TypeError::QualificationNotWellFormed(
                         ty_ctx,
                         quantification.clone(),
@@ -1099,7 +1143,8 @@ impl TypeChecker {
                     ));
                 }
 
-                let ty_ctx = ty_ctx.extend_qualifications(qualifications);
+                let ty_ctx =
+                    ty_ctx.extend_qualifications(qualifications.into_iter().map(|q| q.val));
                 self.check(&ctx, &ty_ctx, expr, expr_ty)
             }
             _ => {

@@ -166,7 +166,7 @@ peg::parser! {
 
         pub rule quant() -> Quantification
             = tok(BracketL) id:sid() tok(Colon) kind:skind() tok(BracketR) qs:qual_clause()?
-                { Quantification { id, kind, qualifications: qs.unwrap_or(Vec::new()) } }
+                { Quantification { id, kind, qualifications: qs.unwrap_or(Vec::new()).into_iter().map(fake_span).collect() } }
         pub rule squant() -> Spanned<Quantification> = spanned(<quant()>)
 
         // Expressions

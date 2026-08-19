@@ -2,15 +2,16 @@ use std::collections::{HashMap, HashSet};
 
 use crate::context::Ctx;
 use crate::syntax::{
-    Id, Kind, Mult, PVarId, Qualification, Quantification, QuantificationType, Session, SessionOp, Type,
+    Id, Kind, Mult, PVarId, Qualification, Quantification, QuantificationType, Session, SessionOp,
+    Type,
 };
 use crate::util::pretty::{Pretty, PrettyEnv, pretty_def};
 use crate::util::span::fake_span;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypeCtx {
-    vars: HashMap<PVarId, Kind>,
-    qualifications: Vec<Qualification>,
+    pub(crate) vars: HashMap<PVarId, Kind>,
+    pub(crate) qualifications: Vec<Qualification>,
 }
 
 impl TypeCtx {
@@ -119,11 +120,13 @@ impl TypeCtx {
                 Type::Chan(Session::PVar { id, .. }) => self
                     .equivalent_types_pv(id.clone())
                     .any(|ty| self.mobile(ty)),
-                Type::Abstraction { quantification, ty, .. } => {
+                Type::Abstraction {
+                    quantification, ty, ..
+                } => {
                     let new_ctx = self.extend(
                         quantification.id.val.clone(),
                         quantification.kind.val,
-                        quantification.qualifications.iter().cloned(),
+                        quantification.qualifications.iter().map(|q| q.val.clone()),
                     );
                     new_ctx.mobile(ty)
                 }
@@ -134,11 +137,13 @@ impl TypeCtx {
 
     fn non_qualified_type(ty: &Type) -> (TypeCtx, &Type) {
         match ty {
-            Type::Abstraction { quantification, ty, .. } => {
+            Type::Abstraction {
+                quantification, ty, ..
+            } => {
                 let new_ctx = TypeCtx::empty().extend(
                     quantification.id.val.clone(),
                     quantification.kind.val,
-                    quantification.qualifications.iter().cloned(),
+                    quantification.qualifications.iter().map(|q| q.val.clone()),
                 );
                 let (inner_ctx, inner_ty) = Self::non_qualified_type(ty);
                 (new_ctx.join(inner_ctx), inner_ty)
@@ -315,13 +320,15 @@ impl TypeCtx {
             Type::Arr { param, ret, .. } => (self.infer_kind_inner(param).is_some()
                 && self.infer_kind_inner(ret).is_some())
             .then_some(Kind::Type),
-            Type::Abstraction { quantification, ty, .. } => {
+            Type::Abstraction {
+                quantification, ty, ..
+            } => {
                 let new_ctx = self.extend(
                     quantification.id.val.clone(),
                     quantification.kind.val,
-                    quantification.qualifications.iter().cloned(),
+                    quantification.qualifications.iter().map(|q| q.val.clone()),
                 );
-                (new_ctx.is_well_formed(quantification.qualifications.iter())
+                (new_ctx.is_well_formed(quantification.qualifications.iter().map(|q| &q.val))
                     && new_ctx.check_kind(ty, Kind::Type))
                 .then_some(Kind::Type)
             }

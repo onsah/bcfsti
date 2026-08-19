@@ -224,7 +224,7 @@ pub type SType = Spanned<Type>;
 pub struct Quantification {
     pub id: SPVarId,
     pub kind: SKind,
-    pub qualifications: Vec<Qualification>,
+    pub qualifications: Vec<SQualification>,
 }
 pub type SQuantification = Spanned<Quantification>;
 
@@ -274,7 +274,9 @@ impl Type {
             }
             Type::Variant(cs) => Box::new(cs.iter().flat_map(|(_, t)| t.poly_variables())),
             Type::Unit | Type::Int | Type::Bool | Type::String => Box::new(iter::empty()),
-            Type::Abstraction { quantification, ty, .. } => Box::new(
+            Type::Abstraction {
+                quantification, ty, ..
+            } => Box::new(
                 ty.poly_variables()
                     .filter(move |id1| quantification.id.as_str() != id1.as_str()),
             ),
@@ -302,7 +304,9 @@ impl Type {
             | Type::String
             | Type::Arr { .. }
             | Type::Chan(_) => Box::new(iter::empty()),
-            Type::Abstraction { quantification, ty, .. } => Box::new(
+            Type::Abstraction {
+                quantification, ty, ..
+            } => Box::new(
                 ty.poly_variables_under_prod_and_variant()
                     .filter(move |id1| quantification.id.as_str() != id1.as_str()),
             ),
@@ -315,6 +319,68 @@ impl Type {
             Type::Chan(session) => Type::Chan(session.normalise()),
             _ => self.clone(),
         }
+    }
+
+    pub fn subst_poly(&self, var_id: &PVarId, ty: &SType) -> Type {
+        match self {
+            Type::PVar { id, dual } => {
+                if id == var_id {
+                    let ty = ty.val.clone();
+                    if *dual { ty.dual() } else { ty }
+                } else {
+                    self.clone()
+                }
+            }
+            Type::Abstraction {
+                typ,
+                quantification,
+                ty,
+            } => {
+                if &quantification.id.val != var_id {
+                    Type::Abstraction {
+                        typ: *typ,
+                        quantification: quantification.clone(),
+                        ty: Box::new(fake_span(ty.val.subst_poly(var_id, ty))),
+                    }
+                } else {
+                    panic!("Polymorphic variable shadowing is not allowed.")
+                }
+            }
+            Type::Chan(session) => Type::Chan(session.subst_poly(var_id, ty)),
+            Type::Arr {
+                mob,
+                mult,
+                eff,
+                param,
+                ret,
+            } => Type::Arr {
+                mob: mob.clone(),
+                mult: mult.clone(),
+                eff: eff.clone(),
+                param: Box::new(fake_span(param.val.subst_poly(var_id, ty))),
+                ret: Box::new(fake_span(ret.val.subst_poly(var_id, ty))),
+            },
+            Type::Prod {
+                mult,
+                first,
+                second,
+            } => Type::Prod {
+                mult: mult.clone(),
+                first: Box::new(fake_span(first.val.subst_poly(var_id, ty))),
+                second: Box::new(fake_span(second.val.subst_poly(var_id, ty))),
+            },
+            Type::Variant(items) => Type::Variant(
+                items
+                    .iter()
+                    .map(|(label, ty)| (label.clone(), fake_span(ty.val.subst_poly(var_id, ty))))
+                    .collect(),
+            ),
+            Type::Unit | Type::Int | Type::Bool | Type::String => self.clone(),
+        }
+    }
+
+    fn dual(&self) -> Self {
+        todo!()
     }
 }
 
@@ -409,6 +475,7 @@ pub enum Qualification {
     NonSkip(SSession),
     Equiv(SType, SType),
 }
+pub type SQualification = Spanned<Qualification>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Expr {
@@ -531,15 +598,15 @@ impl Session {
                     .collect();
                 Session::Choice(op.clone(), cs2)
             }
-            Session::End(op) => Session::End(op.clone()),
-            Session::BorrowEnd(_) => self.clone(),
-            Session::Skip => Session::Skip,
             Session::Semi { first, second } => Self::Semi {
                 first: Box::new(fake_span(first.subst(x, s_new))),
                 second: Box::new(fake_span(second.subst(x, s_new))),
             },
-            Session::UVar(var) => Session::UVar(*var),
-            Session::PVar { .. } => todo!(),
+            Session::End(_)
+            | Session::BorrowEnd(_)
+            | Session::Skip
+            | Session::UVar(_)
+            | Session::PVar { .. } => self.clone(),
         }
     }
     fn unfold(&self, x: &SId) -> Self {
@@ -613,7 +680,10 @@ impl Session {
                 second: Box::new(fake_span(second.dual())),
             },
             Session::UVar(_) => unreachable!(),
-            Session::PVar { .. } => todo!(),
+            Session::PVar { id, dual } => Session::PVar {
+                id: id.clone(),
+                dual: !dual,
+            },
         }
     }
 
@@ -665,6 +735,49 @@ impl Session {
                 normalised_body.subst(&var.val, &recursive_type)
             }
             _ => self.clone(),
+        }
+    }
+}
+
+impl Session {
+    fn subst_poly(&self, var_id: &PVarId, ty: &SType) -> Session {
+        match self {
+            Session::PVar { id, dual } => {
+                if id == var_id {
+                    let ty = ty.val.clone();
+                    let Type::Chan(session) = ty else {
+                        panic!("Polymorphic variable substitution must be a session type.");
+                    };
+                    if *dual { session.dual() } else { session }
+                } else {
+                    self.clone()
+                }
+            }
+            Session::Semi { first, second } => Session::Semi {
+                first: Box::new(fake_span(first.val.subst_poly(var_id, ty))),
+                second: Box::new(fake_span(second.val.subst_poly(var_id, ty))),
+            },
+            Session::Op(session_op, payload) => Session::Op(
+                session_op.clone(),
+                Box::new(fake_span(payload.val.subst_poly(var_id, ty))),
+            ),
+            Session::Choice(session_op, items) => Session::Choice(
+                session_op.clone(),
+                items
+                    .iter()
+                    .map(|(label, s)| (label.clone(), fake_span(s.val.subst_poly(var_id, ty))))
+                    .collect(),
+            ),
+            // Recursion variables are separate than polymorphic variables, so we don't substitute them.
+            Session::Mu(id, body) => Session::Mu(
+                id.clone(),
+                Box::new(fake_span(body.val.subst_poly(var_id, ty))),
+            ),
+            Session::Skip
+            | Session::End(_)
+            | Session::BorrowEnd(_)
+            | Session::Var(_)
+            | Session::UVar(_) => self.clone(),
         }
     }
 }

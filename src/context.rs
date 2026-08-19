@@ -128,7 +128,7 @@ impl Ctx {
         match self {
             Ctx::Empty => None,
             Ctx::Bind(y, t) if x == &y.val => {
-                if t.is_ord() {
+                if !ty_ctx.unr(t) {
                     let t = t.clone();
                     *self = Ctx::Empty;
                     Some(t)

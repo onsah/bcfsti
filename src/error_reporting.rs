@@ -741,6 +741,9 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     ),
                 )],
             ),
+            TypeError::KindMismatch(spanned, kind, type_ctx) => todo!(),
+            TypeError::QualificationNotSatisfied(type_ctx, qualification) => todo!(),
+            TypeError::UndefinedPVar(spanned) => todo!(),
         },
         IErr::Constraint(ConstraintSolutionError::AssignmentNotMobile { expr, id, ctx }) => {
             let (_, ty) = ctx.lookup_ord_pure(&ty_ctx, &id).unwrap();

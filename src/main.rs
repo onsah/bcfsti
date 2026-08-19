@@ -5,6 +5,7 @@ pub mod equivalence;
 pub mod error_reporting;
 pub mod freest;
 pub mod fresh_var;
+pub mod kinding;
 pub mod lexer;
 pub mod parser;
 pub mod pretty;
