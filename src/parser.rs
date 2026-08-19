@@ -110,7 +110,7 @@ peg::parser! {
 
         pub rule type_quantify() -> Type
             = tok(QAll) q:squant() tok(DoubleArrow) t:stype()
-              { Type::Forall { quantification: q, ty: Box::new(t) } }
+              { Type::Abstraction { typ: QuantificationType::Universal, quantification: q, ty: Box::new(t) } }
             / t:type_arrow() { t }
 
         #[cache_left_rec]

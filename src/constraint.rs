@@ -371,17 +371,12 @@ impl Mobilities {
 fn subst_type(ty: SType, assignments: &Assignments) -> SType {
     let span = ty.span.clone();
     let val = match ty.val {
-        Type::Forall {
+        Type::Abstraction {
+            typ,
             quantification,
             ty,
-        } => Type::Forall {
-            quantification,
-            ty: Box::new(subst_type(*ty, assignments)),
-        },
-        Type::Exists {
-            quantification,
-            ty,
-        } => Type::Exists {
+        } => Type::Abstraction {
+            typ,
             quantification,
             ty: Box::new(subst_type(*ty, assignments)),
         },

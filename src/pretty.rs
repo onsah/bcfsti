@@ -1,9 +1,8 @@
 use crate::{
     syntax::{
         Clause, Const, Eff, Expr, Kind, Mob, Mult, Op1, Op2, Pattern, Qualification,
-        Quantification, SMult, Session, SessionOp, Type,
+        Quantification, QuantificationType, SMult, Session, SessionOp, Type,
     },
-    type_context::TypeCtx,
     util::{
         pretty::{Assoc, Pretty, PrettyEnv},
         span::Spanned,
@@ -85,15 +84,24 @@ impl Pretty<UserState> for Type {
             Type::Int => p.pp("Int"),
             Type::Bool => p.pp("Bool"),
             Type::String => p.pp("String"),
-            Type::Forall { quantification, ty } => {
-                p.pp(quantification);
-                p.pp(" => ");
-                p.pp(ty);
-            }
-            Type::Exists { quantification, ty } => {
-                p.pp("∃ ");
-                todo!()
-            }
+            Type::Abstraction {
+                typ,
+                quantification,
+                ty,
+            } => match typ {
+                QuantificationType::Universal => {
+                    p.pp("∀ ");
+                    p.pp(quantification);
+                    p.pp(" => ");
+                    p.pp(ty);
+                }
+                QuantificationType::Existential => {
+                    p.pp("∃ ");
+                    p.pp(quantification);
+                    p.pp(" => ");
+                    p.pp(ty);
+                }
+            },
             Type::PVar { id, dual } => {
                 p.pp("'");
                 p.pp(id);

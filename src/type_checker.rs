@@ -5,7 +5,7 @@ use crate::{
     context::{Ctx, JoinOrd, ext},
     session_type,
     syntax::{
-        Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, Quantification, SEff, SExpr, SId, SMult,
+        Eff, Expr, Id, Label, Mob, Mult, Op1, Op2, Quantification, QuantificationType, SEff, SExpr, SId, SMult,
         SPattern, SQuantification, SSession, SType, Session, SessionOp, Type,
     },
     type_alias::{AliasEnv, expand_session, expand_stype},
@@ -490,7 +490,8 @@ impl TypeChecker {
                     match quant {
                         Some(quant) => {
                             let var_ty = Spanned::new(
-                                Type::Forall {
+                                Type::Abstraction {
+                                    typ: QuantificationType::Universal,
                                     quantification: quant.clone(),
                                     ty: Box::new(var_ty.clone()),
                                 },
@@ -1060,7 +1061,8 @@ impl TypeChecker {
                     return Err(TypeError::Shadowing(e.clone(), id.clone()));
                 }
 
-                let Type::Forall {
+                let Type::Abstraction {
+                    typ: QuantificationType::Universal,
                     quantification: expected_quantification,
                     ty: expr_ty,
                 } = &expected_ty.val
@@ -1257,14 +1259,7 @@ impl TypeChecker {
             Type::Int => Ok(()),
             Type::Bool => Ok(()),
             Type::String => Ok(()),
-            Type::Forall {
-                quantification,
-                ty,
-            } => todo!("Remove this method"),
-            Type::Exists {
-                quantification,
-                ty,
-            } => todo!("Remove this method"),
+            Type::Abstraction { .. } => todo!("Remove this method"),
             Type::PVar { .. } => Ok(()),
         }
     }

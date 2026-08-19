@@ -203,14 +203,7 @@ fn convert_type_impl(ty: &Type, defs: &mut Definitions) -> FreestType {
         Type::Int => FreestType::Int,
         Type::Bool => FreestType::Bool,
         Type::String => FreestType::String,
-        Type::Forall {
-            quantification: _,
-            ty: _,
-        } => todo!(),
-        Type::Exists {
-            quantification: _,
-            ty: _,
-        } => todo!(),
+        Type::Abstraction { .. } => todo!(),
         Type::PVar { .. } => todo!(),
     }
 }

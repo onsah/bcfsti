@@ -180,14 +180,17 @@ impl Session {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum QuantificationType {
+    Universal,
+    Existential,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Type {
     // Quantifiers
-    Forall {
-        quantification: SQuantification,
-        ty: Box<SType>,
-    },
-    Exists {
+    Abstraction {
+        typ: QuantificationType,
         quantification: SQuantification,
         ty: Box<SType>,
     },
@@ -234,8 +237,7 @@ impl Type {
             Type::Prod { first, second, .. } => first.is_closed() && second.is_closed(),
             Type::Variant(cs) => cs.iter().all(|(_, t)| t.is_closed()),
             Type::Unit | Type::Int | Type::Bool | Type::String => true,
-            Type::Forall { ty, .. } => ty.is_closed(),
-            Type::Exists { ty, .. } => ty.is_closed(),
+            Type::Abstraction { ty, .. } => ty.is_closed(),
             Type::PVar { .. } => true,
         }
     }
@@ -256,8 +258,7 @@ impl Type {
                 .flat_map(|(_, t)| t.unification_variables())
                 .collect(),
             Type::Unit | Type::Int | Type::Bool | Type::String => HashSet::new(),
-            Type::Forall { ty, .. } => ty.unification_variables(),
-            Type::Exists { ty, .. } => ty.unification_variables(),
+            Type::Abstraction { ty, .. } => ty.unification_variables(),
             Type::PVar { .. } => HashSet::new(),
         }
     }
@@ -273,11 +274,7 @@ impl Type {
             }
             Type::Variant(cs) => Box::new(cs.iter().flat_map(|(_, t)| t.poly_variables())),
             Type::Unit | Type::Int | Type::Bool | Type::String => Box::new(iter::empty()),
-            Type::Forall { quantification, ty } => Box::new(
-                ty.poly_variables()
-                    .filter(move |id1| quantification.id.as_str() != id1.as_str()),
-            ),
-            Type::Exists { quantification, ty } => Box::new(
+            Type::Abstraction { quantification, ty, .. } => Box::new(
                 ty.poly_variables()
                     .filter(move |id1| quantification.id.as_str() != id1.as_str()),
             ),
@@ -305,11 +302,7 @@ impl Type {
             | Type::String
             | Type::Arr { .. }
             | Type::Chan(_) => Box::new(iter::empty()),
-            Type::Forall { quantification, ty } => Box::new(
-                ty.poly_variables_under_prod_and_variant()
-                    .filter(move |id1| quantification.id.as_str() != id1.as_str()),
-            ),
-            Type::Exists { quantification, ty } => Box::new(
+            Type::Abstraction { quantification, ty, .. } => Box::new(
                 ty.poly_variables_under_prod_and_variant()
                     .filter(move |id1| quantification.id.as_str() != id1.as_str()),
             ),
@@ -833,8 +826,7 @@ impl Type {
             Type::Int => true,
             Type::Bool => true,
             Type::String => true,
-            Type::Forall { .. } => todo!("Delete this function"),
-            Type::Exists { .. } => todo!("Delete this function"),
+            Type::Abstraction { .. } => todo!("Delete this function"),
             Type::PVar { .. } => todo!("Delete this function"),
         }
     }
