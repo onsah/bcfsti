@@ -396,6 +396,31 @@ impl SType {
     }
 }
 
+impl Qualification {
+    pub fn subst_poly(&self, var_id: &PVarId, ty: &SType) -> Qualification {
+        match self {
+            Qualification::Unr(t) => Qualification::Unr(fake_span(t.val.subst_poly(var_id, ty))),
+            Qualification::Mobile(t) => {
+                Qualification::Mobile(fake_span(t.val.subst_poly(var_id, ty)))
+            }
+            Qualification::Bounded(s) => {
+                Qualification::Bounded(fake_span(s.val.subst_poly(var_id, ty)))
+            }
+            Qualification::New(s) => Qualification::New(fake_span(s.val.subst_poly(var_id, ty))),
+            Qualification::Dualable(s) => {
+                Qualification::Dualable(fake_span(s.val.subst_poly(var_id, ty)))
+            }
+            Qualification::NonSkip(s) => {
+                Qualification::NonSkip(fake_span(s.val.subst_poly(var_id, ty)))
+            }
+            Qualification::Equiv(t1, t2) => Qualification::Equiv(
+                fake_span(t1.val.subst_poly(var_id, ty)),
+                fake_span(t2.val.subst_poly(var_id, ty)),
+            ),
+        }
+    }
+}
+
 pub type Label = String;
 pub type SLabel = Spanned<Label>;
 
@@ -752,7 +777,7 @@ impl Session {
 }
 
 impl Session {
-    fn subst_poly(&self, var_id: &PVarId, ty: &SType) -> Session {
+    pub fn subst_poly(&self, var_id: &PVarId, ty: &SType) -> Session {
         match self {
             Session::PVar { id, dual } => {
                 if id == var_id {
@@ -934,6 +959,18 @@ impl Type {
                     dual: dual2,
                 },
             ) => id1 == id2 && dual1 == dual2,
+            (
+                Type::Abstraction {
+                    typ: typ1,
+                    quantification: q1,
+                    ty: ty1,
+                },
+                Type::Abstraction {
+                    typ: typ2,
+                    quantification: q2,
+                    ty: ty2,
+                },
+            ) => typ1 == typ2 && q1 == q2 && ty1.sem_eq(ty2),
             _ => false,
         }
     }

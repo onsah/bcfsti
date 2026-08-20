@@ -20,6 +20,14 @@ pub(crate) fn check(ty_ctx: &TypeCtx, ty: &SType, expected: Kind) -> Result<(), 
     state.check(ty, expected)
 }
 
+pub(crate) fn check_qualifications_well_formed<'a>(
+    ty_ctx: &TypeCtx,
+    qualifications: impl Iterator<Item = &'a SQualification>,
+) -> Result<(), TypeError> {
+    let state = KindCheckState::from(ty_ctx.clone());
+    state.check_qualifications_well_formed(qualifications)
+}
+
 #[derive(Clone)]
 struct KindCheckState {
     ty_ctx: TypeCtx,
@@ -127,9 +135,10 @@ impl KindCheckState {
             },
             Session::Var(id) => {
                 if !self.rvars.contains(&id.val) {
-                    todo!()
+                    Err(TypeError::WfSessionNotClosed(session.clone(), id.clone()))
+                } else {
+                    Ok(())
                 }
-                Ok(())
             }
             // We assume unifications variables are well formed
             // therefore we must check well formedness after unification

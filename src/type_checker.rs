@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use crate::{
     constraint::Constraints,
     context::{Ctx, JoinOrd, ext},
-    session_type,
+    kinding, session_type,
     syntax::{
         Eff, Expr, Id, Kind, Label, Mob, Mult, Op1, Op2, PVarId, Qualification, Quantification,
         QuantificationType, SEff, SExpr, SId, SMult, SPVarId, SPattern, SQualification,
@@ -112,7 +112,7 @@ impl TypeChecker {
             Expr::Var(x) => match ctx.lookup_ord_pure(ty_ctx, x) {
                 Some((ctx, ty)) => {
                     assert_unr_ctx(e, &ctx, ty_ctx)?;
-                    let ty = self.expand_type(&ty)?;
+                    let ty = self.expand_type(ty_ctx, &ty)?;
                     let ty = self.normalise(ty);
                     Ok((ty, Constraints::empty(), Eff::No))
                 }
@@ -126,7 +126,7 @@ impl TypeChecker {
                     expand_session(sess_type, &self.alias_env, &HashSet::new())?,
                     sess_type.span.clone(),
                 );
-                self.check_wf_session(&sess_type)?;
+                self.check_wf_session(ty_ctx, &sess_type)?;
 
                 if !is_valid_for_new(&sess_type.val) {
                     return Err(TypeError::TypeNotValidForNew(sess_type.clone()));
@@ -676,7 +676,7 @@ impl TypeChecker {
                 Ok((fake_span(ty), chan_cs, Eff::Yes))
             }
             Expr::Ann(expr, ty) => {
-                let ty = self.expand_type(ty)?;
+                let ty = self.expand_type(ty_ctx, ty)?;
                 let ty = self.normalise(ty);
                 let (expr_cs, expr_eff) =
                     self.check(&ctx.restrict(&expr.free_vars()), ty_ctx, expr, &ty)?;
@@ -854,12 +854,16 @@ impl TypeChecker {
                     ));
                 };
 
-                let kind = quantification.kind.val;
-                if !ty_ctx.check_kind(ty, kind) {
-                    return Err(TypeError::KindMismatch(ty.clone(), kind, ty_ctx.clone()));
-                }
+                kinding::check(ty_ctx, ty, quantification.kind.val)?;
 
-                Self::check_qualifications(ty_ctx, quantification.qualifications.iter())?;
+                let substituted_qualifications: Vec<SQualification> = quantification
+                    .qualifications
+                    .iter()
+                    .map(|q| {
+                        Spanned::new(q.val.subst_poly(&quantification.id.val, ty), q.span.clone())
+                    })
+                    .collect();
+                Self::check_qualifications(ty_ctx, substituted_qualifications.iter())?;
 
                 let app_ty = fake_span(abs_ty.subst_poly(&quantification.id.val, ty));
                 Ok((app_ty, expr_cs, expr_eff))
@@ -1101,7 +1105,9 @@ impl TypeChecker {
                     qualifications,
                 } = quantification.val.clone();
                 let ty_ctx = ty_ctx.extend_var(id.val.clone(), kind.val);
-                if !ty_ctx.is_well_formed(qualifications.iter().map(|q| &q.val)) {
+                if kinding::check_qualifications_well_formed(&ty_ctx, qualifications.iter())
+                    .is_err()
+                {
                     return Err(TypeError::QualificationNotWellFormed(
                         ty_ctx,
                         quantification.clone(),
@@ -1149,8 +1155,8 @@ impl TypeChecker {
             }
             _ => {
                 let (inferred_ty, mut cs, eff) = self.infer(ctx, ty_ctx, e)?;
-                let inferred_ty = self.expand_type(&inferred_ty)?;
-                let expected_ty = self.expand_type(expected_ty)?;
+                let inferred_ty = self.expand_type(ty_ctx, &inferred_ty)?;
+                let expected_ty = self.expand_type(ty_ctx, expected_ty)?;
 
                 if !inferred_ty.sem_eq(&expected_ty) {
                     cs.add(inferred_ty, expected_ty.clone());
@@ -1219,9 +1225,9 @@ impl TypeChecker {
         fake_span(Session::UVar(id))
     }
 
-    fn expand_type(&self, t: &SType) -> Result<SType, TypeError> {
+    fn expand_type(&self, ty_ctx: &TypeCtx, t: &SType) -> Result<SType, TypeError> {
         let expanded = expand_stype(t, &self.alias_env)?;
-        self.check_wf_type(&expanded)?;
+        self.check_wf_type(ty_ctx, &expanded)?;
         Ok(expanded)
     }
 
@@ -1229,7 +1235,12 @@ impl TypeChecker {
         Spanned::new(ty.val.normalise(), ty.span)
     }
 
-    fn check_wf_session_(&self, s: &SSession, vars: &HashSet<Id>) -> Result<(), TypeError> {
+    fn check_wf_session_(
+        &self,
+        ty_ctx: &TypeCtx,
+        s: &SSession,
+        vars: &HashSet<Id>,
+    ) -> Result<(), TypeError> {
         match &s.val {
             Session::Var(x) => {
                 if !vars.contains(&x.val) && !self.alias_env.contains_key(&x.val) {
@@ -1244,7 +1255,7 @@ impl TypeChecker {
                 }
                 let mut vars = vars.clone();
                 vars.insert(x.val.clone());
-                self.check_wf_session_(s1, &vars)?;
+                self.check_wf_session_(ty_ctx, s1, &vars)?;
 
                 if !s1.is_contractive_on(&x) {
                     return Err(TypeError::WfNonContractive(s.clone(), x.clone()));
@@ -1253,12 +1264,12 @@ impl TypeChecker {
                 Ok(())
             }
             Session::Op(_, ty) => {
-                self.check_wf_type(ty)?;
+                self.check_wf_type(ty_ctx, ty)?;
                 Ok(())
             }
             Session::Choice(_op, cs) => {
                 for (_l, s) in cs {
-                    self.check_wf_session_(s, vars)?;
+                    self.check_wf_session_(ty_ctx, s, vars)?;
                 }
                 Ok(())
             }
@@ -1266,8 +1277,8 @@ impl TypeChecker {
             Session::BorrowEnd(_op) => Ok(()),
             Session::Skip => Ok(()),
             Session::Semi { first, second } => {
-                self.check_wf_session_(first, vars)?;
-                self.check_wf_session_(second, vars)?;
+                self.check_wf_session_(ty_ctx, first, vars)?;
+                self.check_wf_session_(ty_ctx, second, vars)?;
                 Ok(())
             }
             Session::UVar(_) => Ok(()),
@@ -1275,18 +1286,19 @@ impl TypeChecker {
         }
     }
 
-    fn check_wf_session(&self, s: &SSession) -> Result<(), TypeError> {
-        self.check_wf_session_(s, &HashSet::new()).map(|_| ())
+    fn check_wf_session(&self, ty_ctx: &TypeCtx, s: &SSession) -> Result<(), TypeError> {
+        self.check_wf_session_(ty_ctx, s, &HashSet::new())
+            .map(|_| ())
     }
 
-    fn check_wf_type(&self, t: &SType) -> Result<(), TypeError> {
+    fn check_wf_type(&self, ty_ctx: &TypeCtx, t: &SType) -> Result<(), TypeError> {
         match &t.val {
-            Type::Chan(s) => self.check_wf_session(&fake_span(s.clone())),
+            Type::Chan(s) => self.check_wf_session(ty_ctx, &fake_span(s.clone())),
             Type::Arr {
                 param: t1, ret: t2, ..
             } => {
-                self.check_wf_type(t1)?;
-                self.check_wf_type(t2)?;
+                self.check_wf_type(ty_ctx, t1)?;
+                self.check_wf_type(ty_ctx, t2)?;
                 Ok(())
             }
             Type::Prod {
@@ -1294,8 +1306,8 @@ impl TypeChecker {
                 second: t2,
                 ..
             } => {
-                self.check_wf_type(t1)?;
-                self.check_wf_type(t2)?;
+                self.check_wf_type(ty_ctx, t1)?;
+                self.check_wf_type(ty_ctx, t2)?;
                 Ok(())
             }
             Type::Variant(cs) => {
@@ -1303,7 +1315,7 @@ impl TypeChecker {
                     return Err(TypeError::WfEmptyVariant(t.clone()));
                 }
                 for (_l, t) in cs {
-                    self.check_wf_type(t)?;
+                    self.check_wf_type(ty_ctx, t)?;
                 }
                 Ok(())
             }
@@ -1311,7 +1323,17 @@ impl TypeChecker {
             Type::Int => Ok(()),
             Type::Bool => Ok(()),
             Type::String => Ok(()),
-            Type::Abstraction { .. } => todo!("Remove this method"),
+            Type::Abstraction {
+                quantification, ty, ..
+            } => {
+                kinding::infer(ty_ctx, t)?;
+                let new_ty_ctx = ty_ctx.extend(
+                    quantification.id.val.clone(),
+                    quantification.kind.val,
+                    quantification.qualifications.iter().map(|q| q.val.clone()),
+                );
+                self.check_wf_type(&new_ty_ctx, ty)
+            }
             Type::PVar { .. } => Ok(()),
         }
     }

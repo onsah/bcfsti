@@ -1,10 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::context::Ctx;
-use crate::syntax::{
-    Id, Kind, Mult, PVarId, Qualification, Quantification, QuantificationType, Session, SessionOp,
-    Type,
-};
+use crate::syntax::{Kind, Mult, PVarId, Qualification, Quantification, Session, SessionOp, Type};
 use crate::util::pretty::{Pretty, PrettyEnv, pretty_def};
 use crate::util::span::fake_span;
 
@@ -292,131 +289,7 @@ impl TypeCtx {
     }
 }
 
-// Kinding and well formedness
 impl TypeCtx {
-    pub(crate) fn infer_kind(&self, ty: &Type) -> Option<Kind> {
-        self.infer_kind_inner(ty)
-    }
-
-    pub(crate) fn check_kind(&self, ty: &Type, kind: Kind) -> bool {
-        self.check_kind_inner(ty, kind)
-    }
-
-    fn infer_kind_inner(&self, ty: &Type) -> Option<Kind> {
-        // HACK: minimal kind inference for the type shapes used in tests.
-        // Channels infer to Session; value types to Type.
-        match ty {
-            Type::Unit | Type::Int | Type::Bool | Type::String => Some(Kind::Type),
-            Type::Chan(session) => self
-                .is_session_well_formed(session, &HashSet::new())
-                .then_some(Kind::Session),
-            Type::Variant(variants) => variants
-                .iter()
-                .all(|(_, ty)| self.infer_kind_inner(&ty.val).is_some())
-                .then_some(Kind::Type),
-            Type::Prod { first, second, .. } => (self.infer_kind_inner(first).is_some()
-                && self.infer_kind_inner(second).is_some())
-            .then_some(Kind::Type),
-            Type::Arr { param, ret, .. } => (self.infer_kind_inner(param).is_some()
-                && self.infer_kind_inner(ret).is_some())
-            .then_some(Kind::Type),
-            Type::Abstraction {
-                quantification, ty, ..
-            } => {
-                let new_ctx = self.extend(
-                    quantification.id.val.clone(),
-                    quantification.kind.val,
-                    quantification.qualifications.iter().map(|q| q.val.clone()),
-                );
-                (new_ctx.is_well_formed(quantification.qualifications.iter().map(|q| &q.val))
-                    && new_ctx.check_kind(ty, Kind::Type))
-                .then_some(Kind::Type)
-            }
-            // TODO: Check from the context
-            Type::PVar { .. } => Some(Kind::Type),
-        }
-    }
-
-    fn check_kind_inner(&self, ty: &Type, kind: Kind) -> bool {
-        self.infer_kind(ty)
-            .map(|kind1| kind1.is_subkind_of(&kind))
-            .unwrap_or(false)
-    }
-
-    fn is_session_well_formed(&self, session: &Session, rvars: &HashSet<Id>) -> bool {
-        match session {
-            Session::Skip | Session::End(_) | Session::BorrowEnd(_) => true,
-            Session::Op(_, ty) => self.check_kind_inner(&ty.val, Kind::Type) && self.mobile(ty),
-            Session::Choice(_, branches) => branches
-                .iter()
-                .all(|(_, branch)| self.is_session_well_formed(branch, rvars)),
-            Session::Semi { first, second } => {
-                self.is_session_well_formed(&first.val, rvars)
-                    && self.is_session_well_formed(&second.val, rvars)
-            }
-            Session::Mu(var, body) => {
-                Self::is_contractive(body, var, &self.vars) && {
-                    // TODO: Optimize by using functional data structures
-                    let mut rvars = rvars.clone();
-                    rvars.insert(var.val.clone());
-                    self.is_session_well_formed(body, &rvars)
-                }
-            }
-            Session::PVar { id, .. } => self.vars.get(id).copied() == Some(Kind::Session),
-            Session::Var(id) => rvars.contains(&id.val) || self.vars.contains_key(&id.val),
-            // We assume unifications variables are well formed
-            // therefore we must check well formedness after unification
-            // variables are solved.
-            Session::UVar(_) => true,
-        }
-    }
-
-    fn is_contractive(session: &Session, on: &Id, pvars: &HashMap<PVarId, Kind>) -> bool {
-        match session {
-            Session::Skip
-            | Session::Op(_, _)
-            | Session::Choice(_, _)
-            | Session::End(_)
-            | Session::BorrowEnd(_) => true,
-            Session::Semi { first, second } => {
-                if first.is_only_skips() {
-                    Self::is_contractive(second, on, pvars)
-                } else {
-                    Self::is_contractive(first, on, pvars)
-                }
-            }
-            Session::Mu(_, body) => Self::is_contractive(body, on, pvars),
-            Session::Var(id) => on != &id.val,
-            Session::PVar { id, .. } => !pvars.contains_key(id),
-            Session::UVar(_) => unreachable!("Should be called after unification!"),
-        }
-    }
-
-    // TODO: Make it return the qualification that isn't well formed
-    /// Check if the qualifications are well formed w.r.t. the type context.
-    pub fn is_well_formed<'a>(
-        &'a self,
-        mut qualifications: impl Iterator<Item = &'a Qualification>,
-    ) -> bool {
-        // QF-Top (empty conjunction) / QF-And (each conjunct well formed)
-        qualifications.all(|q| match q {
-            // QF-Unr, QF-Mobile: T : KVal
-            Qualification::Unr(ty) | Qualification::Mobile(ty) => self.check_kind(ty, Kind::Type),
-            // QF-Bounded, QF-New, QF-Dualable, QF-NonSkip: S : KSess
-            Qualification::Bounded(s)
-            | Qualification::New(s)
-            | Qualification::Dualable(s)
-            | Qualification::NonSkip(s) => {
-                self.check_kind(&Type::Chan(s.val.clone()), Kind::Session)
-            }
-            // QF-Eq: T : K and U : K for the same kind (via inference)
-            Qualification::Equiv(ty1, ty2) => match (self.infer_kind(ty1), self.infer_kind(ty2)) {
-                (Some(k1), Some(k2)) => k1 == k2,
-                _ => false,
-            },
-        })
-    }
-
     pub fn join(self, other: TypeCtx) -> TypeCtx {
         let mut new_vars = self.vars;
         new_vars.extend(other.vars);
