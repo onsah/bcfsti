@@ -5,7 +5,7 @@ use crate::{
     context::{Ctx, JoinOrd, ext},
     session_type,
     syntax::{
-        Eff, Expr, Id, Kind, Label, Mob, Mult, Op1, Op2, Qualification, Quantification,
+        Eff, Expr, Id, Kind, Label, Mob, Mult, Op1, Op2, PVarId, Qualification, Quantification,
         QuantificationType, SEff, SExpr, SId, SMult, SPVarId, SPattern, SQualification,
         SQuantification, SSession, SType, Session, SessionOp, Type,
     },
@@ -17,7 +17,7 @@ use crate::{
     },
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum TypeError {
     UndefinedVariable(SId),
     Mismatch(SExpr, Result<SType, String>, SType),
@@ -68,7 +68,7 @@ pub enum TypeError {
     QualificationNotWellFormed(TypeCtx, SQuantification),
     KindMismatch(SType, Kind, TypeCtx),
     QualificationNotSatisfied(TypeCtx, SQualification),
-    UndefinedPVar(SPVarId),
+    UndefinedPVar(SType, PVarId),
 }
 
 pub fn infer_type(e: &SExpr, alias_env: AliasEnv) -> Result<(SType, Constraints, Eff), TypeError> {

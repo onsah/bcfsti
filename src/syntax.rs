@@ -1,4 +1,4 @@
-use crate::util::span::{Spanned, fake_span};
+use crate::util::span::{Span, Spanned, fake_span};
 use std::{collections::HashSet, hash::Hash, iter};
 
 pub type Id = String;
@@ -177,6 +177,12 @@ impl Session {
             Session::UVar(_) => true,
             Session::PVar { .. } => todo!(),
         }
+    }
+}
+
+impl SSession {
+    pub fn to_type(self) -> SType {
+        Spanned::new(Type::Chan(self.val), self.span)
     }
 }
 
@@ -381,6 +387,12 @@ impl Type {
 
     fn dual(&self) -> Self {
         todo!()
+    }
+}
+
+impl SType {
+    pub fn from_session(session: SSession) -> Self {
+        Spanned::new(Type::Chan(session.val), session.span)
     }
 }
 
