@@ -5,15 +5,16 @@ use crate::{
     context::{Ctx, JoinOrd, ext},
     kinding, session_type,
     syntax::{
-        Eff, Expr, Id, Kind, Label, Mob, Mult, Op1, Op2, PVarId, Qualification, Quantification,
-        QuantificationType, SEff, SExpr, SId, SMult, SPVarId, SPattern, SQualification,
-        SQuantification, SSession, SType, Session, SessionOp, Type,
+        Eff, Expr, Id, Kind, Label, Mob, Mult, Op1, Op2, PVarId, Quantification,
+        QuantificationType, SEff, SExpr, SId, SMult, SPattern, SQualification, SQuantification,
+        SSession, SType, Session, SessionOp, Type,
     },
     type_alias::{AliasEnv, expand_session, expand_stype},
     type_context::TypeCtx,
     util::{
+        boxed::Boxed,
         pretty::pretty_def,
-        span::{Span, Spanned, fake_span},
+        span::{Spanned, fake_span},
     },
 };
 
@@ -156,11 +157,7 @@ impl TypeChecker {
                 let body_ctx = ctx.restrict(&body.free_vars());
 
                 {
-                    let res_ctx = Ctx::Join(
-                        Box::new(expr_ctx.clone()),
-                        Box::new(body_ctx.clone()),
-                        JoinOrd::Ordered,
-                    );
+                    let res_ctx = ctx_join(e, ty_ctx, &expr_ctx, &body_ctx, JoinOrd::Ordered)?;
 
                     if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
@@ -192,11 +189,12 @@ impl TypeChecker {
                         Ctx::Bind(id1.clone(), *first.clone()),
                         Ctx::Bind(id2.clone(), *second.clone()),
                     );
-                    let body_ctx = if expr_eff == Eff::Yes {
-                        Ctx::Join(Box::new(var_ctx), Box::new(body_ctx), JoinOrd::Ordered)
+                    let ord = if expr_eff == Eff::Yes {
+                        JoinOrd::Ordered
                     } else {
-                        Ctx::Join(Box::new(var_ctx), Box::new(body_ctx), JoinOrd::Unordered)
+                        JoinOrd::Unordered
                     };
+                    let body_ctx = ctx_join(e, ty_ctx, &var_ctx, &body_ctx, ord)?;
                     self.infer(&body_ctx, ty_ctx, body)
                 }?;
 
@@ -211,11 +209,7 @@ impl TypeChecker {
                 let e2_ctx = ctx.restrict(&e2.free_vars());
 
                 {
-                    let res_ctx = Ctx::Join(
-                        Box::new(e1_ctx.clone()),
-                        Box::new(e2_ctx.clone()),
-                        JoinOrd::Ordered,
-                    );
+                    let res_ctx = ctx_join(e, ty_ctx, &e1_ctx, &e2_ctx, JoinOrd::Ordered)?;
 
                     if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
@@ -253,11 +247,7 @@ impl TypeChecker {
 
                 // ctx must be a subcontext of unordered join of val_ctx and chan_ctx must
                 {
-                    let res_ctx = Ctx::Join(
-                        Box::new(val_ctx.clone()),
-                        Box::new(chan_ctx.clone()),
-                        JoinOrd::Unordered,
-                    );
+                    let res_ctx = ctx_join(e, ty_ctx, &val_ctx, &chan_ctx, JoinOrd::Unordered)?;
 
                     if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
@@ -437,7 +427,12 @@ impl TypeChecker {
                 };
 
                 {
-                    let res_ctx = ext(mult.val, abs_ctx.clone(), arg_ctx.clone());
+                    let (c1, c2, o) = match mult.val {
+                        Mult::OrdR => (&arg_ctx, &abs_ctx, JoinOrd::Ordered),
+                        Mult::OrdL => (&abs_ctx, &arg_ctx, JoinOrd::Ordered),
+                        Mult::Unr | Mult::Lin => (&abs_ctx, &arg_ctx, JoinOrd::Unordered),
+                    };
+                    let res_ctx = ctx_join(e, ty_ctx, c1, c2, o)?;
 
                     if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
@@ -543,11 +538,8 @@ impl TypeChecker {
                     .map(|(label, var_name, case_expr)| {
                         let case_ctx = ctx.restrict(&case_expr.free_vars());
 
-                        let res_ctx = Ctx::Join(
-                            Box::new(expr_ctx.clone()),
-                            Box::new(case_ctx.clone()),
-                            JoinOrd::Ordered,
-                        );
+                        let res_ctx =
+                            ctx_join(e, ty_ctx, &expr_ctx, &case_ctx, JoinOrd::Ordered)?;
                     if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                             return Err(TypeError::CtxSplitFailed(
                                 e.clone(),
@@ -566,7 +558,13 @@ impl TypeChecker {
                             None
                         }).expect("Bug: set of labels in the variant type must be equal to the set of labels in cases");
 
-                        let case_ctx = Ctx::Join(Box::new(Ctx::Bind(var_name.clone(), case_ty)), Box::new(case_ctx), JoinOrd::Ordered);
+                        let case_ctx = ctx_join(
+                            e,
+                            ty_ctx,
+                            &Ctx::Bind(var_name.clone(), case_ty),
+                            &case_ctx,
+                            JoinOrd::Ordered,
+                        )?;
                         let infer_res = self.infer(&case_ctx, ty_ctx, case_expr)?;
                         Ok((label.val.clone(), infer_res))
                     })
@@ -715,11 +713,7 @@ impl TypeChecker {
                 let (expr2_ty, expr2_cs, expr2_eff) = self.infer(&expr2_ctx, ty_ctx, expr2)?;
 
                 {
-                    let res_ctx = Ctx::Join(
-                        Box::new(expr1_ctx.clone()),
-                        Box::new(expr2_ctx.clone()),
-                        JoinOrd::Unordered,
-                    );
+                    let res_ctx = ctx_join(e, ty_ctx, &expr1_ctx, &expr2_ctx, JoinOrd::Unordered)?;
 
                     if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
@@ -789,11 +783,7 @@ impl TypeChecker {
                 let else_ctx = ctx.restrict(&else_expr.free_vars());
 
                 {
-                    let res_ctx = Ctx::Join(
-                        Box::new(cond_ctx.clone()),
-                        Box::new(then_ctx.clone()),
-                        JoinOrd::Unordered,
-                    );
+                    let res_ctx = ctx_join(e, ty_ctx, &cond_ctx, &then_ctx, JoinOrd::Unordered)?;
 
                     if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
@@ -805,11 +795,7 @@ impl TypeChecker {
                 }
 
                 {
-                    let res_ctx = Ctx::Join(
-                        Box::new(cond_ctx.clone()),
-                        Box::new(else_ctx.clone()),
-                        JoinOrd::Unordered,
-                    );
+                    let res_ctx = ctx_join(e, ty_ctx, &cond_ctx, &else_ctx, JoinOrd::Unordered)?;
 
                     if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
@@ -936,11 +922,7 @@ impl TypeChecker {
         let body_ctx = ctx.restrict(&body_expr.free_vars());
 
         {
-            let res_ctx = Ctx::Join(
-                Box::new(var_ctx.clone()),
-                Box::new(body_ctx.clone()),
-                JoinOrd::Ordered,
-            );
+            let res_ctx = ctx_join(expr, ty_ctx, var_ctx, &body_ctx, JoinOrd::Ordered)?;
 
             if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                 return Err(TypeError::CtxSplitFailed(
@@ -953,11 +935,12 @@ impl TypeChecker {
 
         let body_ctx = {
             let binding = Ctx::Bind(var_id.clone(), var_ty.clone());
-            if var_eff == Eff::Yes {
-                Ctx::Join(Box::new(binding), Box::new(body_ctx), JoinOrd::Ordered)
+            let ord = if var_eff == Eff::Yes {
+                JoinOrd::Ordered
             } else {
-                Ctx::Join(Box::new(binding), Box::new(body_ctx), JoinOrd::Unordered)
-            }
+                JoinOrd::Unordered
+            };
+            ctx_join(expr, ty_ctx, &binding, &body_ctx, ord)?
         };
         let (body_ty, body_cs, body_eff) = self.infer(&body_ctx, ty_ctx, body_expr)?;
 
@@ -1058,7 +1041,12 @@ impl TypeChecker {
                 }
 
                 {
-                    let res_ctx = ext(mult.val, first_ctx, second_ctx);
+                    let (c1, c2, o) = match mult.val {
+                        Mult::OrdR => (&second_ctx, &first_ctx, JoinOrd::Ordered),
+                        Mult::OrdL => (&first_ctx, &second_ctx, JoinOrd::Ordered),
+                        Mult::Unr | Mult::Lin => (&first_ctx, &second_ctx, JoinOrd::Unordered),
+                    };
+                    let res_ctx = ctx_join(e, ty_ctx, c1, c2, o)?;
 
                     if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
@@ -1361,6 +1349,26 @@ fn assert_unr_ctx(e: &SExpr, ctx: &Ctx, ty_ctx: &TypeCtx) -> Result<(), TypeErro
     } else {
         Err(TypeError::LeftOverCtx(e.clone(), ctx.clone()))
     }
+}
+
+fn ctx_join(e: &SExpr, ty_ctx: &TypeCtx, c1: &Ctx, c2: &Ctx, o: JoinOrd) -> Result<Ctx, TypeError> {
+    let binds2 = c2.binds();
+    let mut xs = HashSet::new();
+    for (x, t1) in c1.binds() {
+        if let Some(t2) = binds2.get(&x)
+            && (!ty_ctx.unr(&t1) || !ty_ctx.unr(t2))
+        {
+            xs.insert(x);
+        }
+    }
+    if !xs.is_empty() {
+        return Err(TypeError::CtxCtxSplitFailed(
+            e.clone(),
+            Ctx::Join(c1.boxed(), c2.boxed(), o),
+            xs,
+        ));
+    }
+    Ok(Ctx::Join(c1.boxed(), c2.boxed(), o))
 }
 
 fn check_mobility(

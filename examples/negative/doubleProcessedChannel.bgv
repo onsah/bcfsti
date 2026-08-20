@@ -1,0 +1,7 @@
+let
+    foo : !Int -[m u 1]-> !Int
+    foo c =
+        send[Int] 42 c;
+        c
+in
+unit
