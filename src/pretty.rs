@@ -277,6 +277,7 @@ impl Pretty<UserState> for Expr {
             Expr::Recv(ty, e) => p.infix(10, L, |p| {
                 p.pp("recv @");
                 p.pp_arg(L, ty);
+                p.pp(" ");
                 p.pp_arg(R, e);
             }),
             Expr::End(op, e) => p.infix(10, L, |p| {

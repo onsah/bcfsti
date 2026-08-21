@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::hash::Hash;
 
 use crate::context::Ctx;
 use crate::syntax::{Kind, Mult, PVarId, Qualification, Quantification, Session, SessionOp, Type};
@@ -108,7 +109,8 @@ impl TypeCtx {
                     .all(|ty| self.unr(ty)),
                 // Q-Mbl-Acq
                 Type::Chan(session @ Session::Semi { .. }) => {
-                    let Session::Semi { first, second } = session.normalise() else {
+                    // TODO: Pass alias_env
+                    let Session::Semi { first, second } = session.normalise(&HashMap::new()) else {
                         unreachable!()
                     };
                     first.val == Session::BorrowEnd(SessionOp::Recv) && self.bounded(&second)

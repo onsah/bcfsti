@@ -1,4 +1,7 @@
-use crate::util::span::{Span, Spanned, fake_span};
+use crate::{
+    type_alias::AliasEnv,
+    util::span::{Spanned, fake_span},
+};
 use std::{collections::HashSet, hash::Hash, iter};
 
 pub type Id = String;
@@ -320,9 +323,9 @@ impl Type {
         }
     }
 
-    pub fn normalise(&self) -> Type {
+    pub fn normalise(&self, alias_env: &AliasEnv) -> Type {
         match self {
-            Type::Chan(session) => Type::Chan(session.normalise()),
+            Type::Chan(session) => Type::Chan(session.normalise(alias_env)),
             _ => self.clone(),
         }
     }
@@ -738,13 +741,13 @@ impl Session {
         }
     }
 
-    pub fn normalise(&self) -> Session {
+    pub fn normalise(&self, alias_env: &AliasEnv) -> Session {
         match self {
             Session::Semi { first, second } => {
                 if first.is_only_skips() {
-                    second.val.normalise()
+                    second.val.normalise(alias_env)
                 } else {
-                    let normalised_first = first.val.normalise();
+                    let normalised_first = first.val.normalise(alias_env);
                     match normalised_first {
                         Session::Choice(op, branches) => Session::Choice(
                             op.clone(),
@@ -766,10 +769,16 @@ impl Session {
                 }
             }
             Session::Mu(var, body) => {
-                let normalised_body = body.val.normalise();
+                let normalised_body = body.val.normalise(alias_env);
                 let recursive_type =
                     Session::Mu(var.clone(), Box::new(fake_span(normalised_body.clone())));
                 normalised_body.subst(&var.val, &recursive_type)
+            }
+            Session::Var(id) => {
+                let session = alias_env.get(&id.val).expect(
+                    "Bug: well formed types must have their free recursion variables defined in the alias environment",
+                );
+                session.val.normalise(alias_env)
             }
             _ => self.clone(),
         }

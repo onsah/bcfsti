@@ -9,7 +9,7 @@ use crate::{
         QuantificationType, SEff, SExpr, SId, SMult, SPattern, SQualification, SQuantification,
         SSession, SType, Session, SessionOp, Type,
     },
-    type_alias::{AliasEnv, expand_session, expand_stype},
+    type_alias::AliasEnv,
     type_context::TypeCtx,
     util::{
         boxed::Boxed,
@@ -96,9 +96,9 @@ impl TypeChecker {
         ty_ctx: &TypeCtx,
         e: &SExpr,
     ) -> Result<(SType, Constraints, Eff), TypeError> {
-        // println!("Expression: {}, {:?}", pretty_def(&e), e);
+        // println!("Infer: {}", pretty_def(&e));
         // println!("Ctx: {}", pretty_context_notype(&ctx.simplify()));
-        match &e.val {
+        let ty = match &e.val {
             Expr::Const(c) => {
                 assert_unr_ctx(e, ctx, ty_ctx)?;
                 let ty = match c {
@@ -113,8 +113,7 @@ impl TypeChecker {
             Expr::Var(x) => match ctx.lookup_ord_pure(ty_ctx, x) {
                 Some((ctx, ty)) => {
                     assert_unr_ctx(e, &ctx, ty_ctx)?;
-                    let ty = self.expand_type(ty_ctx, &ty)?;
-                    let ty = self.normalise(ty);
+                    let ty = self.normalise(ty_ctx, &ty)?;
                     Ok((ty, Constraints::empty(), Eff::No))
                 }
                 None => Err(TypeError::UndefinedVariable(x.clone())),
@@ -123,10 +122,7 @@ impl TypeChecker {
                 if !ctx.is_unr(ty_ctx) {
                     return Err(TypeError::LeftOverCtx(e.clone(), ctx.clone()));
                 }
-                let sess_type = Spanned::new(
-                    expand_session(sess_type, &self.alias_env, &HashSet::new())?,
-                    sess_type.span.clone(),
-                );
+                let sess_type = self.normalise_session(&ty_ctx, sess_type)?;
                 kinding::check_session(ty_ctx, &self.alias_env, &sess_type)?;
 
                 if !ty_ctx.new(&sess_type.val) {
@@ -461,7 +457,7 @@ impl TypeChecker {
                     ));
                 }
 
-                let ret = self.normalise(*ret);
+                let ret = self.normalise(ty_ctx, &ret)?;
                 Ok((
                     ret,
                     abs_cs.join(arg_cs),
@@ -617,7 +613,7 @@ impl TypeChecker {
                     return Err(TypeError::Mismatch(
                         *chan_expr.clone(),
                         Err("Choice<Send>".into()),
-                        fake_span(Type::Chan(s.unfold_if_mu())),
+                        fake_span(Type::Chan(s.clone())),
                     ));
                 };
 
@@ -674,8 +670,7 @@ impl TypeChecker {
                 Ok((fake_span(ty), chan_cs, Eff::Yes))
             }
             Expr::Ann(expr, ty) => {
-                let ty = self.expand_type(ty_ctx, ty)?;
-                let ty = self.normalise(ty);
+                let ty = self.normalise(ty_ctx, ty)?;
                 let (expr_cs, expr_eff) =
                     self.check(&ctx.restrict(&expr.free_vars()), ty_ctx, expr, &ty)?;
 
@@ -855,7 +850,9 @@ impl TypeChecker {
                 Ok((app_ty, expr_cs, expr_eff))
             }
             Expr::TyAbs { .. } => Err(TypeError::TypeAnnotationMissing(e.clone())),
-        }
+        }?;
+        // println!("Inferred: {}", pretty_def(&ty.0));
+        Ok(ty)
     }
 
     fn check_qualifications<'a>(
@@ -954,6 +951,11 @@ impl TypeChecker {
         e: &SExpr,
         expected_ty: &SType,
     ) -> Result<(Constraints, Eff), TypeError> {
+        // println!(
+        //     "Check: {} against {}",
+        //     pretty_def(&e),
+        //     pretty_def(&expected_ty)
+        // );
         match &e.val {
             Expr::Abs(id, body) => {
                 let Type::Arr {
@@ -1147,8 +1149,8 @@ impl TypeChecker {
             }
             _ => {
                 let (inferred_ty, mut cs, eff) = self.infer(ctx, ty_ctx, e)?;
-                let inferred_ty = self.expand_type(ty_ctx, &inferred_ty)?;
-                let expected_ty = self.expand_type(ty_ctx, expected_ty)?;
+                // let inferred_ty = self.expand_type(ty_ctx, &inferred_ty)?;
+                // let expected_ty = self.expand_type(ty_ctx, expected_ty)?;
 
                 if !inferred_ty.sem_eq(&expected_ty) {
                     cs.add(inferred_ty, expected_ty.clone());
@@ -1217,15 +1219,23 @@ impl TypeChecker {
         fake_span(Session::UVar(id))
     }
 
-    fn expand_type(&self, ty_ctx: &TypeCtx, t: &SType) -> Result<SType, TypeError> {
-        let expanded = expand_stype(t, &self.alias_env)?;
-        kinding::infer(ty_ctx, &self.alias_env, &expanded)?;
-        // self.check_wf_type(ty_ctx, &expanded)?;
-        Ok(expanded)
+    fn normalise(&self, ty_ctx: &TypeCtx, ty: &SType) -> Result<SType, TypeError> {
+        // Ensure that type is well formed
+        kinding::infer(ty_ctx, &self.alias_env, &ty)?;
+        Ok(Spanned::new(ty.normalise(&self.alias_env), ty.span.clone()))
     }
 
-    fn normalise(&self, ty: SType) -> SType {
-        Spanned::new(ty.val.normalise(), ty.span)
+    fn normalise_session(
+        &self,
+        ty_ctx: &TypeCtx,
+        session: &SSession,
+    ) -> Result<SSession, TypeError> {
+        // Ensure that type is well formed
+        kinding::check_session(ty_ctx, &self.alias_env, &session)?;
+        Ok(Spanned::new(
+            session.normalise(&self.alias_env),
+            session.span.clone(),
+        ))
     }
 }
 
