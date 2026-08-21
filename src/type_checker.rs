@@ -1233,7 +1233,7 @@ impl TypeChecker {
         // to later check that the solution satisfies mobility requirements.
         let mut non_mobile_ids = HashSet::new();
         for (id, ty) in ctx.binds_spanned() {
-            if !ty_ctx.mobile(&normalise(ty_ctx, &self.alias_env, &fake_span(ty.clone()))?.val) {
+            if !ty_ctx.mobile(&normalise(ty_ctx, &self.alias_env, &ty)?.val) {
                 if !ty.is_closed() {
                     non_mobile_ids.insert(id.clone());
                 } else {

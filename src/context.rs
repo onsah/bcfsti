@@ -77,7 +77,7 @@ impl Ctx {
             }
         }
     }
-    pub fn map_binds_spanned(&self, f: &mut impl FnMut(&SId, &Type)) {
+    pub fn map_binds_spanned(&self, f: &mut impl FnMut(&SId, &SType)) {
         match self {
             Ctx::Empty => (),
             Ctx::Bind(x, t) => f(x, t),
@@ -179,7 +179,7 @@ impl Ctx {
         });
         res
     }
-    pub fn binds_spanned(&self) -> HashMap<SId, Type> {
+    pub fn binds_spanned(&self) -> HashMap<SId, SType> {
         let mut res = HashMap::new();
         self.map_binds_spanned(&mut |x, t| {
             res.insert(x.clone(), t.clone());
