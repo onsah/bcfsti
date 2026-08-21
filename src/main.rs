@@ -7,6 +7,7 @@ pub mod freest;
 pub mod fresh_var;
 pub mod kinding;
 pub mod lexer;
+pub mod normalization;
 pub mod parser;
 pub mod pretty;
 pub mod syntax;
@@ -98,6 +99,7 @@ pub fn typecheck(
 
     let e = parser::parse(&toks).map_err(IErr::Parser)?;
     let (e, alias_env) = type_alias::get_alias_env(e);
+    // TODO: Use type context well formedness check instead
     type_alias::check_shadowing(&e, &alias_env).map_err(IErr::Typing)?;
     if verbose {
         println!("===== AST =====");

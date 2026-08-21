@@ -1,7 +1,4 @@
-use crate::{
-    type_alias::AliasEnv,
-    util::span::{Spanned, fake_span},
-};
+use crate::util::span::{Spanned, fake_span};
 use std::{collections::HashSet, hash::Hash, iter};
 
 pub type Id = String;
@@ -320,13 +317,6 @@ impl Type {
                     .filter(move |id1| quantification.id.as_str() != id1.as_str()),
             ),
             Type::PVar { id, .. } => Box::new(iter::once(id.clone())),
-        }
-    }
-
-    pub fn normalise(&self, alias_env: &AliasEnv) -> Type {
-        match self {
-            Type::Chan(session) => Type::Chan(session.normalise(alias_env)),
-            _ => self.clone(),
         }
     }
 
@@ -724,63 +714,6 @@ impl Session {
                 id: id.clone(),
                 dual: !dual,
             },
-        }
-    }
-
-    fn concatenate(&self, other: &Session) -> Session {
-        match (self, other) {
-            (_, Session::Skip) => self.clone(),
-            (Session::Semi { first, second }, other) => Session::Semi {
-                first: first.clone(),
-                second: Box::new(fake_span(second.val.concatenate(other))),
-            },
-            (s1, s2) => Session::Semi {
-                first: Box::new(fake_span(s1.clone())),
-                second: Box::new(fake_span(s2.clone())),
-            },
-        }
-    }
-
-    pub fn normalise(&self, alias_env: &AliasEnv) -> Session {
-        match self {
-            Session::Semi { first, second } => {
-                if first.is_only_skips() {
-                    second.val.normalise(alias_env)
-                } else {
-                    let normalised_first = first.val.normalise(alias_env);
-                    match normalised_first {
-                        Session::Choice(op, branches) => Session::Choice(
-                            op.clone(),
-                            branches
-                                .iter()
-                                .map(|(label, branch)| {
-                                    (
-                                        label.clone(),
-                                        fake_span(Session::Semi {
-                                            first: Box::new(branch.clone()),
-                                            second: second.clone(),
-                                        }),
-                                    )
-                                })
-                                .collect(),
-                        ),
-                        _ => normalised_first.concatenate(&second.val),
-                    }
-                }
-            }
-            Session::Mu(var, body) => {
-                let normalised_body = body.val.normalise(alias_env);
-                let recursive_type =
-                    Session::Mu(var.clone(), Box::new(fake_span(normalised_body.clone())));
-                normalised_body.subst(&var.val, &recursive_type)
-            }
-            Session::Var(id) => {
-                let session = alias_env.get(&id.val).expect(
-                    "Bug: well formed types must have their free recursion variables defined in the alias environment",
-                );
-                session.val.normalise(alias_env)
-            }
-            _ => self.clone(),
         }
     }
 }

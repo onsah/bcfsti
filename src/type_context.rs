@@ -1,9 +1,8 @@
 use std::collections::HashMap;
-use std::hash::Hash;
 
 use crate::context::Ctx;
-use crate::syntax::{Kind, Mult, PVarId, Qualification, Quantification, Session, SessionOp, Type};
-use crate::util::pretty::{Pretty, PrettyEnv, pretty_def};
+use crate::syntax::{Kind, Mult, PVarId, Qualification, Session, SessionOp, Type};
+use crate::util::pretty::{Pretty, PrettyEnv};
 use crate::util::span::fake_span;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -109,8 +108,7 @@ impl TypeCtx {
                     .all(|ty| self.unr(ty)),
                 // Q-Mbl-Acq
                 Type::Chan(session @ Session::Semi { .. }) => {
-                    // TODO: Pass alias_env
-                    let Session::Semi { first, second } = session.normalise(&HashMap::new()) else {
+                    let Session::Semi { first, second } = session else {
                         unreachable!()
                     };
                     first.val == Session::BorrowEnd(SessionOp::Recv) && self.bounded(&second)

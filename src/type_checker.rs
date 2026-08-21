@@ -3,7 +3,9 @@ use std::collections::HashSet;
 use crate::{
     constraint::Constraints,
     context::{Ctx, JoinOrd, ext},
-    kinding, session_type,
+    kinding,
+    normalization::{normalise, normalise_session},
+    session_type,
     syntax::{
         Eff, Expr, Id, Kind, Label, Mob, Mult, Op1, Op2, PVarId, Quantification,
         QuantificationType, SEff, SExpr, SId, SMult, SPattern, SQualification, SQuantification,
@@ -113,7 +115,7 @@ impl TypeChecker {
             Expr::Var(x) => match ctx.lookup_ord_pure(ty_ctx, x) {
                 Some((ctx, ty)) => {
                     assert_unr_ctx(e, &ctx, ty_ctx)?;
-                    let ty = self.normalise(ty_ctx, &ty)?;
+                    let ty = normalise(ty_ctx, &self.alias_env, &ty)?;
                     Ok((ty, Constraints::empty(), Eff::No))
                 }
                 None => Err(TypeError::UndefinedVariable(x.clone())),
@@ -122,7 +124,7 @@ impl TypeChecker {
                 if !ctx.is_unr(ty_ctx) {
                     return Err(TypeError::LeftOverCtx(e.clone(), ctx.clone()));
                 }
-                let sess_type = self.normalise_session(&ty_ctx, sess_type)?;
+                let sess_type = normalise_session(ty_ctx, &self.alias_env, sess_type)?;
                 kinding::check_session(ty_ctx, &self.alias_env, &sess_type)?;
 
                 if !ty_ctx.new(&sess_type.val) {
@@ -457,7 +459,7 @@ impl TypeChecker {
                     ));
                 }
 
-                let ret = self.normalise(ty_ctx, &ret)?;
+                let ret = normalise(ty_ctx, &self.alias_env, &ret)?;
                 Ok((
                     ret,
                     abs_cs.join(arg_cs),
@@ -670,7 +672,7 @@ impl TypeChecker {
                 Ok((fake_span(ty), chan_cs, Eff::Yes))
             }
             Expr::Ann(expr, ty) => {
-                let ty = self.normalise(ty_ctx, ty)?;
+                let ty = normalise(ty_ctx, &self.alias_env, ty)?;
                 let (expr_cs, expr_eff) =
                     self.check(&ctx.restrict(&expr.free_vars()), ty_ctx, expr, &ty)?;
 
@@ -975,7 +977,7 @@ impl TypeChecker {
 
                 let mut ctx_cs = Constraints::empty();
                 if mob.val == Mob::Mobile {
-                    check_mobility(e, ctx, ty_ctx, &mut ctx_cs)?;
+                    self.check_mobility(e, ctx, ty_ctx, &mut ctx_cs)?;
                 }
 
                 if mult.val == Mult::Unr {
@@ -1219,23 +1221,34 @@ impl TypeChecker {
         fake_span(Session::UVar(id))
     }
 
-    fn normalise(&self, ty_ctx: &TypeCtx, ty: &SType) -> Result<SType, TypeError> {
-        // Ensure that type is well formed
-        kinding::infer(ty_ctx, &self.alias_env, &ty)?;
-        Ok(Spanned::new(ty.normalise(&self.alias_env), ty.span.clone()))
-    }
-
-    fn normalise_session(
+    fn check_mobility(
         &self,
+        expr: &SExpr,
+        ctx: &Ctx,
         ty_ctx: &TypeCtx,
-        session: &SSession,
-    ) -> Result<SSession, TypeError> {
-        // Ensure that type is well formed
-        kinding::check_session(ty_ctx, &self.alias_env, &session)?;
-        Ok(Spanned::new(
-            session.normalise(&self.alias_env),
-            session.span.clone(),
-        ))
+        cs: &mut Constraints,
+    ) -> Result<(), TypeError> {
+        // If we can't ensure that the type is mobile
+        // we add a constraint that the type must be mobile
+        // to later check that the solution satisfies mobility requirements.
+        let mut non_mobile_ids = HashSet::new();
+        for (id, ty) in ctx.binds_spanned() {
+            if !ty_ctx.mobile(&normalise(ty_ctx, &self.alias_env, &fake_span(ty.clone()))?.val) {
+                if !ty.is_closed() {
+                    non_mobile_ids.insert(id.clone());
+                } else {
+                    return Err(TypeError::SessionTypeNotMobileInContext(
+                        expr.clone(),
+                        ctx.clone(),
+                        id,
+                    ));
+                }
+            }
+        }
+        if !non_mobile_ids.is_empty() {
+            cs.check_mobility(expr.clone(), non_mobile_ids, ctx.clone());
+        }
+        Ok(())
     }
 }
 
@@ -1265,33 +1278,4 @@ fn ctx_join(e: &SExpr, ty_ctx: &TypeCtx, c1: &Ctx, c2: &Ctx, o: JoinOrd) -> Resu
         ));
     }
     Ok(Ctx::Join(c1.boxed(), c2.boxed(), o))
-}
-
-fn check_mobility(
-    expr: &SExpr,
-    ctx: &Ctx,
-    ty_ctx: &TypeCtx,
-    cs: &mut Constraints,
-) -> Result<(), TypeError> {
-    // If we can't ensure that the type is mobile
-    // we add a constraint that the type must be mobile
-    // to later check that the solution satisfies mobility requirements.
-    let mut non_mobile_ids = HashSet::new();
-    for (id, ty) in ctx.binds_spanned() {
-        if !ty_ctx.mobile(&ty) {
-            if !ty.is_closed() {
-                non_mobile_ids.insert(id.clone());
-            } else {
-                return Err(TypeError::SessionTypeNotMobileInContext(
-                    expr.clone(),
-                    ctx.clone(),
-                    id,
-                ));
-            }
-        }
-    }
-    if !non_mobile_ids.is_empty() {
-        cs.check_mobility(expr.clone(), non_mobile_ids, ctx.clone());
-    }
-    Ok(())
 }
