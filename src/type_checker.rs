@@ -127,6 +127,7 @@ impl TypeChecker {
                     expand_session(sess_type, &self.alias_env, &HashSet::new())?,
                     sess_type.span.clone(),
                 );
+                // TODO: Check new entails
                 self.check_wf_session(ty_ctx, &sess_type)?;
 
                 if !is_valid_for_new(&sess_type.val) {
@@ -840,7 +841,7 @@ impl TypeChecker {
                     ));
                 };
 
-                kinding::check(ty_ctx, ty, quantification.kind.val)?;
+                kinding::check(ty_ctx, &self.alias_env, ty, quantification.kind.val)?;
 
                 let substituted_qualifications: Vec<SQualification> = quantification
                     .qualifications
@@ -1093,8 +1094,12 @@ impl TypeChecker {
                     qualifications,
                 } = quantification.val.clone();
                 let ty_ctx = ty_ctx.extend_var(id.val.clone(), kind.val);
-                if kinding::check_qualifications_well_formed(&ty_ctx, qualifications.iter())
-                    .is_err()
+                if kinding::check_qualifications_well_formed(
+                    &ty_ctx,
+                    &self.alias_env,
+                    qualifications.iter(),
+                )
+                .is_err()
                 {
                     return Err(TypeError::QualificationNotWellFormed(
                         ty_ctx,
@@ -1215,7 +1220,8 @@ impl TypeChecker {
 
     fn expand_type(&self, ty_ctx: &TypeCtx, t: &SType) -> Result<SType, TypeError> {
         let expanded = expand_stype(t, &self.alias_env)?;
-        self.check_wf_type(ty_ctx, &expanded)?;
+        kinding::infer(ty_ctx, &self.alias_env, &expanded)?;
+        // self.check_wf_type(ty_ctx, &expanded)?;
         Ok(expanded)
     }
 
@@ -1314,7 +1320,7 @@ impl TypeChecker {
             Type::Abstraction {
                 quantification, ty, ..
             } => {
-                kinding::infer(ty_ctx, t)?;
+                kinding::infer(ty_ctx, &self.alias_env, t)?;
                 let new_ty_ctx = ty_ctx.extend(
                     quantification.id.val.clone(),
                     quantification.kind.val,
