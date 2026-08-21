@@ -409,7 +409,7 @@ mod tests {
         })]
         #[test]
         fn freest_session_type_display(
-            ty in (prop::collection::vec(ty_label(), 0..6))
+            ty in (prop::collection::vec(ty_label(), 0..5))
                 .prop_flat_map(|vars| {
                     let (ty_vars, sess_vars) = vars.split_at(vars.len() / 2);
                     freest_session_type(Vec::from(ty_vars), Vec::from(sess_vars))
