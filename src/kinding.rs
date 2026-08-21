@@ -26,6 +26,15 @@ pub(crate) fn check(
     state.check(ty, expected)
 }
 
+pub(crate) fn check_session(
+    ty_ctx: &TypeCtx,
+    alias_env: &AliasEnv,
+    session: &SSession,
+) -> Result<(), TypeError> {
+    let state = KindCheckState::from(ty_ctx.clone(), alias_env);
+    state.check_session_well_formed(session)
+}
+
 pub(crate) fn check_qualifications_well_formed<'a>(
     ty_ctx: &TypeCtx,
     alias_env: &AliasEnv,

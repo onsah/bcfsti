@@ -127,10 +127,9 @@ impl TypeChecker {
                     expand_session(sess_type, &self.alias_env, &HashSet::new())?,
                     sess_type.span.clone(),
                 );
-                // TODO: Check new entails
-                self.check_wf_session(ty_ctx, &sess_type)?;
+                kinding::check_session(ty_ctx, &self.alias_env, &sess_type)?;
 
-                if !is_valid_for_new(&sess_type.val) {
+                if !ty_ctx.new(&sess_type.val) {
                     return Err(TypeError::TypeNotValidForNew(sess_type.clone()));
                 }
                 let typ = fake_span(Type::Prod {
@@ -1227,125 +1226,6 @@ impl TypeChecker {
 
     fn normalise(&self, ty: SType) -> SType {
         Spanned::new(ty.val.normalise(), ty.span)
-    }
-
-    fn check_wf_session_(
-        &self,
-        ty_ctx: &TypeCtx,
-        s: &SSession,
-        vars: &HashSet<Id>,
-    ) -> Result<(), TypeError> {
-        match &s.val {
-            Session::Var(x) => {
-                if !vars.contains(&x.val) && !self.alias_env.contains_key(&x.val) {
-                    Err(TypeError::WfSessionNotClosed(s.clone(), x.clone()))
-                } else {
-                    Ok(())
-                }
-            }
-            Session::Mu(x, s1) => {
-                if vars.contains(&x.val) {
-                    return Err(TypeError::WfSessionShadowing(s.clone(), x.clone()));
-                }
-                let mut vars = vars.clone();
-                vars.insert(x.val.clone());
-                self.check_wf_session_(ty_ctx, s1, &vars)?;
-
-                if !s1.is_contractive_on(&x) {
-                    return Err(TypeError::WfNonContractive(s.clone(), x.clone()));
-                }
-
-                Ok(())
-            }
-            Session::Op(_, ty) => {
-                self.check_wf_type(ty_ctx, ty)?;
-                Ok(())
-            }
-            Session::Choice(_op, cs) => {
-                for (_l, s) in cs {
-                    self.check_wf_session_(ty_ctx, s, vars)?;
-                }
-                Ok(())
-            }
-            Session::End(_) => Ok(()),
-            Session::BorrowEnd(_op) => Ok(()),
-            Session::Skip => Ok(()),
-            Session::Semi { first, second } => {
-                self.check_wf_session_(ty_ctx, first, vars)?;
-                self.check_wf_session_(ty_ctx, second, vars)?;
-                Ok(())
-            }
-            Session::UVar(_) => Ok(()),
-            Session::PVar { .. } => Ok(()),
-        }
-    }
-
-    fn check_wf_session(&self, ty_ctx: &TypeCtx, s: &SSession) -> Result<(), TypeError> {
-        self.check_wf_session_(ty_ctx, s, &HashSet::new())
-            .map(|_| ())
-    }
-
-    fn check_wf_type(&self, ty_ctx: &TypeCtx, t: &SType) -> Result<(), TypeError> {
-        match &t.val {
-            Type::Chan(s) => self.check_wf_session(ty_ctx, &fake_span(s.clone())),
-            Type::Arr {
-                param: t1, ret: t2, ..
-            } => {
-                self.check_wf_type(ty_ctx, t1)?;
-                self.check_wf_type(ty_ctx, t2)?;
-                Ok(())
-            }
-            Type::Prod {
-                first: t1,
-                second: t2,
-                ..
-            } => {
-                self.check_wf_type(ty_ctx, t1)?;
-                self.check_wf_type(ty_ctx, t2)?;
-                Ok(())
-            }
-            Type::Variant(cs) => {
-                if cs.len() == 0 {
-                    return Err(TypeError::WfEmptyVariant(t.clone()));
-                }
-                for (_l, t) in cs {
-                    self.check_wf_type(ty_ctx, t)?;
-                }
-                Ok(())
-            }
-            Type::Unit => Ok(()),
-            Type::Int => Ok(()),
-            Type::Bool => Ok(()),
-            Type::String => Ok(()),
-            Type::Abstraction {
-                quantification, ty, ..
-            } => {
-                kinding::infer(ty_ctx, &self.alias_env, t)?;
-                let new_ty_ctx = ty_ctx.extend(
-                    quantification.id.val.clone(),
-                    quantification.kind.val,
-                    quantification.qualifications.iter().map(|q| q.val.clone()),
-                );
-                self.check_wf_type(&new_ty_ctx, ty)
-            }
-            Type::PVar { .. } => Ok(()),
-        }
-    }
-}
-
-fn is_valid_for_new(s: &Session) -> bool {
-    match s {
-        Session::Skip => true,
-        Session::Semi { first, second } => {
-            is_valid_for_new(&first.val) && is_valid_for_new(&second.val)
-        }
-        Session::Op(_, _) => true,
-        Session::Choice(_, items) => items.iter().all(|(_, s)| is_valid_for_new(s)),
-        Session::Mu(_, body) => is_valid_for_new(body),
-        Session::Var(_) => true,
-        Session::UVar(_) => false,
-        Session::End(_) | Session::BorrowEnd(_) => false,
-        Session::PVar { .. } => true,
     }
 }
 

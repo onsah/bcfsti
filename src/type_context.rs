@@ -217,7 +217,7 @@ impl TypeCtx {
         }
     }
 
-    fn new(&self, session: &Session) -> bool {
+    pub fn new(&self, session: &Session) -> bool {
         self.or_assumed(
             || Qualification::New(fake_span(session.clone())),
             match session {
