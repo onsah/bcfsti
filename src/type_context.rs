@@ -43,7 +43,8 @@ impl TypeCtx {
     }
 
     fn equivalent(&self, ty1: &Type, ty2: &Type) -> bool {
-        ty1.sem_eq(ty2)||
+        self.type_sem_eq(ty1, ty2)
+            ||
             self.contains_equiv(ty1, ty2) ||
             // We don't need the symmetric case since if we can find from one direction
             // we can also find from the other direction
@@ -53,7 +54,8 @@ impl TypeCtx {
     fn contains_equiv(&self, ty11: &Type, ty12: &Type) -> bool {
         self.qualifications.iter().any(|q| match q {
             Qualification::Equiv(ty21, ty22) => {
-                (ty11.sem_eq(ty21) && ty12.sem_eq(ty22)) || (ty11.sem_eq(ty22) && ty12.sem_eq(ty21))
+                (self.type_sem_eq(ty11, ty21) && self.type_sem_eq(ty12, ty22))
+                    || (self.type_sem_eq(ty11, ty22) && self.type_sem_eq(ty12, ty21))
             }
             _ => false,
         })
@@ -62,8 +64,8 @@ impl TypeCtx {
     /// Set of types equivalent to a type under this context
     fn equivalent_to(&self, ty: &Type) -> impl Iterator<Item = &Type> {
         self.qualifications.iter().filter_map(|q| match q {
-            Qualification::Equiv(ty1, ty2) if ty1.val.sem_eq(ty) => Some(&ty2.val),
-            Qualification::Equiv(ty1, ty2) if ty2.val.sem_eq(ty) => Some(&ty1.val),
+            Qualification::Equiv(ty1, ty2) if self.type_sem_eq(&ty1.val, ty) => Some(&ty2.val),
+            Qualification::Equiv(ty1, ty2) if self.type_sem_eq(&ty2.val, ty) => Some(&ty1.val),
             _ => None,
         })
     }

@@ -745,7 +745,7 @@ impl TypeChecker {
                         Op2::Eq | Op2::Neq | Op2::Lt | Op2::Le | Op2::Gt | Op2::Ge,
                         t1 @ (Type::Int | Type::Bool | Type::String | Type::Unit),
                         t2,
-                    ) if t1.sem_eq(t2) => Type::Bool,
+                    ) if ty_ctx.type_sem_eq(t1, t2) => Type::Bool,
                     (Op2::Eq | Op2::Neq | Op2::Lt | Op2::Le | Op2::Gt | Op2::Ge, _, _) => {
                         return Err(TypeError::Op2Mismatch(
                             e.clone(),
@@ -1166,7 +1166,7 @@ impl TypeChecker {
                 // let inferred_ty = self.expand_type(ty_ctx, &inferred_ty)?;
                 // let expected_ty = self.expand_type(ty_ctx, expected_ty)?;
 
-                if !inferred_ty.sem_eq(&expected_ty) {
+                if !ty_ctx.type_sem_eq(&inferred_ty, &expected_ty) {
                     cs.add(inferred_ty, expected_ty.clone());
                 }
 

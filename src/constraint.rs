@@ -94,7 +94,7 @@ impl Constraints {
         self,
         ty_ctx: &TypeCtx,
     ) -> Result<Constraints, ConstraintSolutionError> {
-        let (assignments, equivalences) = self.equivalences.solve();
+        let (assignments, equivalences) = self.equivalences.solve(ty_ctx);
 
         let unsolved_vars = equivalences.unsolved_variables();
         if !unsolved_vars.is_empty() {
@@ -141,7 +141,7 @@ impl Equivalences {
         self.0.into_iter()
     }
 
-    pub fn solve(self) -> (Assignments, Equivalences) {
+    pub fn solve(self, ty_ctx: &TypeCtx) -> (Assignments, Equivalences) {
         let mut assignments = Assignments::new();
         let mut equivelances: HashSet<(SType, SType)> = HashSet::new();
 
@@ -152,7 +152,12 @@ impl Equivalences {
         loop {
             let Some((result, (ty1, ty2))) = equivelances
                 .iter()
-                .map(|(ty1, ty2)| (Self::unify_type(ty1, ty2), (ty1.clone(), ty2.clone())))
+                .map(|(ty1, ty2)| {
+                    (
+                        Self::unify_type(ty_ctx, ty1, ty2),
+                        (ty1.clone(), ty2.clone()),
+                    )
+                })
                 .find(|(result, _)| !matches!(result, Err(SolveError::Check)))
             else {
                 break;
@@ -184,8 +189,8 @@ impl Equivalences {
 
     /// Unifies two regular types. When structures match, further subconstraints are generated.
     /// When a unification variable on one side is found, it's converted to an assignment.
-    fn unify_type(ty1: &Type, ty2: &Type) -> Result<Assignments, SolveError> {
-        if ty1.sem_eq(ty2) {
+    fn unify_type(ty_ctx: &TypeCtx, ty1: &Type, ty2: &Type) -> Result<Assignments, SolveError> {
+        if ty_ctx.type_sem_eq(ty1, ty2) {
             Ok(HashMap::new())
         } else {
             match (ty1, ty2) {
@@ -244,7 +249,7 @@ impl Equivalences {
                     ))
                 }
                 (Type::Chan(session1), Type::Chan(session2)) => {
-                    Self::unify_session(session1, session2)
+                    Self::unify_session(ty_ctx, session1, session2)
                 }
                 (Type::Chan(Session::UVar(uvar_id)), Type::PVar { id, dual })
                 | (Type::PVar { id, dual }, Type::Chan(Session::UVar(uvar_id))) => {
@@ -269,7 +274,11 @@ impl Equivalences {
     /// 2. When both side structurally match, further substructures are unified.
     ///    - If all substructures generate assignment, the result is the union of those assignments
     ///    - Otherwise, equivalence constraint can't be unified
-    fn unify_session(session1: &Session, session2: &Session) -> Result<Assignments, SolveError> {
+    fn unify_session(
+        ty_ctx: &TypeCtx,
+        session1: &Session,
+        session2: &Session,
+    ) -> Result<Assignments, SolveError> {
         match (session1, session2) {
             (Session::UVar(id), session) | (session, Session::UVar(id))
                 if !matches!(session, Session::UVar(_)) =>
@@ -290,12 +299,13 @@ impl Equivalences {
                     second: second2,
                 },
             ) => {
-                let mut assignments = Self::unify_session(first1, first2)?;
-                assignments.extend(Self::unify_session(second1, second2)?);
+                let mut assignments = Self::unify_session(ty_ctx, first1, first2)?;
+                assignments.extend(Self::unify_session(ty_ctx, second1, second2)?);
                 Ok(assignments)
             }
             (Session::Op(op1, session1), Session::Op(op2, session2)) if op1 == op2 => {
-                Self::unify_type(&session1.val, &session2.val).map_err(|_| SolveError::Check)
+                Self::unify_type(ty_ctx, &session1.val, &session2.val)
+                    .map_err(|_| SolveError::Check)
             }
             (Session::Choice(op1, branches1), Session::Choice(op2, branches2)) if op1 == op2 => {
                 if branches1.len() != branches2.len() {
@@ -314,13 +324,13 @@ impl Equivalences {
                         return Err(SolveError::Check);
                     };
 
-                    assignments.extend(Self::unify_session(branch1, branch2)?);
+                    assignments.extend(Self::unify_session(ty_ctx, branch1, branch2)?);
                 }
 
                 Ok(assignments)
             }
             (Session::Mu(id1, session1), Session::Mu(id2, session2)) if id1 == id2 => {
-                Self::unify_session(session1, session2).map_err(|_| SolveError::Check)
+                Self::unify_session(ty_ctx, session1, session2).map_err(|_| SolveError::Check)
             }
             _ => Err(SolveError::Check),
         }
