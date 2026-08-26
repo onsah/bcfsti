@@ -166,12 +166,11 @@ impl Pretty<UserState> for Session {
                 p.pp(")");
             }
             Session::PVar { id, dual } => {
-                p.pp("(");
+                p.pp("'");
                 p.pp(id);
                 if *dual {
                     p.pp("^");
                 }
-                p.pp(")");
             }
         }
     }
