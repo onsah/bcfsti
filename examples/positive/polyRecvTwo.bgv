@@ -6,4 +6,8 @@ let
         let t2 = recv['a] c2 in
         unit
 in
+let
+    recvTwoInt: ?Int;?Int -[m u 1]-> Unit
+    recvTwoInt c = recvTwo[Int] c
+in
 unit
