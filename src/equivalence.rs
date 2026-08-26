@@ -204,7 +204,13 @@ fn convert_type_impl(ty: &Type, defs: &mut Definitions) -> FreestType {
         Type::Bool => FreestType::Bool,
         Type::String => FreestType::String,
         Type::Abstraction { .. } => todo!(),
-        Type::PVar { .. } => todo!(),
+        // FIXME: This should panic, instead we solve constraints
+        // with poly variables via syntactic simplification.
+        // Otherwise fail.
+        Type::PVar { id, .. } => panic!(
+            "Poly variable {:?} should be solved before translation to FreeST!",
+            id
+        ),
     }
 }
 

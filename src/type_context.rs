@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::context::Ctx;
-use crate::syntax::{Kind, Mult, PVarId, Qualification, Session, SessionOp, Type};
+use crate::syntax::{Kind, Mult, PVarId, Qualification, Quantification, Session, SessionOp, Type};
 use crate::util::pretty::{Pretty, PrettyEnv};
 use crate::util::span::fake_span;
 
@@ -121,8 +121,7 @@ impl TypeCtx {
                     quantification, ty, ..
                 } => {
                     let new_ctx = self.extend(
-                        quantification.id.val.clone(),
-                        quantification.kind.val,
+                        Quantification::bindings(quantification.bindings.iter().cloned()),
                         quantification.qualifications.iter().map(|q| q.val.clone()),
                     );
                     new_ctx.mobile(ty)
@@ -138,8 +137,7 @@ impl TypeCtx {
                 quantification, ty, ..
             } => {
                 let new_ctx = TypeCtx::empty().extend(
-                    quantification.id.val.clone(),
-                    quantification.kind.val,
+                    Quantification::bindings(quantification.bindings.iter().cloned()),
                     quantification.qualifications.iter().map(|q| q.val.clone()),
                 );
                 let (inner_ctx, inner_ty) = Self::non_qualified_type(ty);
@@ -301,9 +299,9 @@ impl TypeCtx {
         }
     }
 
-    pub fn extend_var(&self, id: PVarId, kind: Kind) -> TypeCtx {
+    pub fn extend_bindings(&self, bindings: impl Iterator<Item = (PVarId, Kind)>) -> TypeCtx {
         let mut new_vars = self.vars.clone();
-        new_vars.insert(id, kind);
+        new_vars.extend(bindings);
         TypeCtx {
             vars: new_vars,
             qualifications: self.qualifications.clone(),
@@ -321,11 +319,10 @@ impl TypeCtx {
 
     pub fn extend(
         &self,
-        id: PVarId,
-        kind: Kind,
+        bindings: impl Iterator<Item = (PVarId, Kind)>,
         qualifications: impl IntoIterator<Item = Qualification>,
     ) -> TypeCtx {
-        self.extend_var(id, kind)
+        self.extend_bindings(bindings)
             .extend_qualifications(qualifications)
     }
 }

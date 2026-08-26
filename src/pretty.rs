@@ -1,7 +1,7 @@
 use crate::{
     syntax::{
         Clause, Const, Eff, Expr, Kind, Mob, Mult, Op1, Op2, Pattern, Qualification,
-        Quantification, QuantificationType, SMult, Session, SessionOp, Type,
+        Quantification, QuantificationType, SKind, SMult, SPVarId, Session, SessionOp, Type,
     },
     util::{
         pretty::{Assoc, Pretty, PrettyEnv},
@@ -536,12 +536,18 @@ impl Pretty<UserState> for Qualification {
     }
 }
 
+impl Pretty<()> for (SPVarId, SKind) {
+    fn pp(&self, p: &mut PrettyEnv<()>) {
+        p.pp(&self.0);
+        p.pp(": ");
+        p.pp(&self.1);
+    }
+}
+
 impl Pretty<UserState> for Quantification {
     fn pp(&self, p: &mut PrettyEnv<UserState>) {
         p.pp("[");
-        p.pp(&self.id);
-        p.pp(" : ");
-        p.pp(&self.kind);
+        p.pp_sep(", ", &self.bindings);
         p.pp("]");
         if !self.qualifications.is_empty() {
             p.pp(".");

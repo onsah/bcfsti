@@ -167,7 +167,10 @@ peg::parser! {
 
         pub rule quant() -> Quantification
             = tok(BracketL) id:sid() tok(Colon) kind:skind() tok(BracketR) qs:qual_clause()?
-                { Quantification { id, kind, qualifications: qs.unwrap_or(Vec::new()).into_iter().map(fake_span).collect() } }
+                {
+                    let bindings = vec![(id, kind)];
+                    Quantification { bindings, qualifications: qs.unwrap_or(Vec::new()).into_iter().map(fake_span).collect() }
+                }
         pub rule squant() -> Spanned<Quantification> = spanned(<quant()>)
 
         // Expressions
@@ -278,7 +281,7 @@ peg::parser! {
             / tok(LSplit) tok(BracketL) s:ssession() tok(BracketR) e:sexpr_atom() { Expr::LSplit(s, Box::new(e)) }
             / tok(RSplit) tok(BracketL) s:ssession() tok(BracketR) e:sexpr_atom() { Expr::RSplit(s, Box::new(e)) }
             / e1:sexpr_app() e2:sexpr_atom() { Expr::App(Box::new(e1), Box::new(e2)) }
-            / e1:sexpr_app() tok(BracketL) ty:stype() tok(BracketR) { Expr::TyApp(Box::new(e1), ty) }
+            / e1:sexpr_app() tok(BracketL) tys:stype()+ tok(BracketR) { Expr::TyApp(Box::new(e1), tys) }
             / e:expr_atom() { e }
         pub rule sexpr_app() -> SExpr = spanned(<expr_app()>)
 

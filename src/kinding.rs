@@ -221,16 +221,14 @@ impl KindCheckState<'_> {
     fn add_quantification(
         self,
         Quantification {
-            id,
-            kind,
+            bindings,
             qualifications,
         }: Quantification,
     ) -> Self {
         Self {
             // TODO: Implement extend that reuses the existing context instead of cloning everything
             ty_ctx: self.ty_ctx.extend(
-                id.val.clone(),
-                kind.val,
+                Quantification::bindings(bindings.into_iter()),
                 qualifications.into_iter().map(|q| q.val),
             ),
             alias_env: self.alias_env,
@@ -669,8 +667,7 @@ mod tests {
         let ty = Type::Abstraction {
             typ: QuantificationType::Universal,
             quantification: fake_span(Quantification {
-                id: fake_span("a".to_string()),
-                kind: fake_span(Kind::Session),
+                bindings: vec![(fake_span("a".to_string()), fake_span(Kind::Session))],
                 qualifications: vec![],
             }),
             ty: Box::new(fake_span(Type::Unit)),
@@ -688,8 +685,7 @@ mod tests {
         let ty = Type::Abstraction {
             typ: QuantificationType::Universal,
             quantification: fake_span(Quantification {
-                id: fake_span("a".to_string()),
-                kind: fake_span(Kind::Session),
+                bindings: vec![(fake_span("a".to_string()), fake_span(Kind::Session))],
                 qualifications: vec![],
             }),
             ty: Box::new(fake_span(pvar_chan("b".to_string()))),
@@ -707,8 +703,7 @@ mod tests {
         let ty = Type::Abstraction {
             typ: QuantificationType::Universal,
             quantification: fake_span(Quantification {
-                id: fake_span("a".to_string()),
-                kind: fake_span(Kind::Session),
+                bindings: vec![(fake_span("a".to_string()), fake_span(Kind::Session))],
                 qualifications: vec![],
             }),
             ty: Box::new(fake_span(pvar_chan("a".to_string()))),

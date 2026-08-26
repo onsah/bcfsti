@@ -1,5 +1,9 @@
 use crate::util::span::{Spanned, fake_span};
-use std::{collections::HashSet, hash::Hash, iter};
+use std::{
+    collections::{HashMap, HashSet},
+    hash::Hash,
+    iter,
+};
 
 pub type Id = String;
 pub type SId = Spanned<Id>;
@@ -228,11 +232,24 @@ pub type SType = Spanned<Type>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Quantification {
-    pub id: SPVarId,
-    pub kind: SKind,
+    pub bindings: Vec<(SPVarId, SKind)>,
     pub qualifications: Vec<SQualification>,
 }
 pub type SQuantification = Spanned<Quantification>;
+
+impl Quantification {
+    pub fn has_binding(&self, id: &PVarId) -> bool {
+        self.bindings
+            .iter()
+            .any(|(binding_id, _)| &binding_id.val == id)
+    }
+
+    pub fn bindings<'a>(
+        bindings: impl Iterator<Item = (SPVarId, SKind)> + 'a,
+    ) -> impl Iterator<Item = (PVarId, Kind)> + 'a {
+        bindings.map(|(binding_id, kind)| (binding_id.val.clone(), kind.val))
+    }
+}
 
 impl Type {
     /// Closed type means it has no unification variables.
@@ -284,7 +301,7 @@ impl Type {
                 quantification, ty, ..
             } => Box::new(
                 ty.poly_variables()
-                    .filter(move |id1| quantification.id.as_str() != id1.as_str()),
+                    .filter(move |id1| !quantification.has_binding(id1)),
             ),
             Type::PVar { id, .. } => Box::new(iter::once(id.clone())),
         }
@@ -314,16 +331,16 @@ impl Type {
                 quantification, ty, ..
             } => Box::new(
                 ty.poly_variables_under_prod_and_variant()
-                    .filter(move |id1| quantification.id.as_str() != id1.as_str()),
+                    .filter(move |id1| !quantification.has_binding(id1)),
             ),
             Type::PVar { id, .. } => Box::new(iter::once(id.clone())),
         }
     }
 
-    pub fn subst_poly(&self, var_id: &PVarId, ty: &SType) -> Type {
+    pub fn subst_poly(&self, bindings: &HashMap<PVarId, SType>) -> Type {
         match self {
             Type::PVar { id, dual } => {
-                if id == var_id {
+                if let Some(ty) = bindings.get(id) {
                     let ty = ty.val.clone();
                     if *dual { ty.dual() } else { ty }
                 } else {
@@ -335,17 +352,20 @@ impl Type {
                 quantification,
                 ty,
             } => {
-                if &quantification.id.val != var_id {
+                if bindings
+                    .iter()
+                    .all(|(id, _)| !quantification.has_binding(id))
+                {
                     Type::Abstraction {
                         typ: *typ,
                         quantification: quantification.clone(),
-                        ty: Box::new(fake_span(ty.val.subst_poly(var_id, ty))),
+                        ty: Box::new(fake_span(ty.val.subst_poly(bindings))),
                     }
                 } else {
                     panic!("Polymorphic variable shadowing is not allowed.")
                 }
             }
-            Type::Chan(session) => Type::Chan(session.subst_poly(var_id, ty)),
+            Type::Chan(session) => Type::Chan(session.subst_poly(bindings)),
             Type::Arr {
                 mob,
                 mult,
@@ -356,8 +376,8 @@ impl Type {
                 mob: mob.clone(),
                 mult: mult.clone(),
                 eff: eff.clone(),
-                param: Box::new(fake_span(param.val.subst_poly(var_id, ty))),
-                ret: Box::new(fake_span(ret.val.subst_poly(var_id, ty))),
+                param: Box::new(fake_span(param.val.subst_poly(bindings))),
+                ret: Box::new(fake_span(ret.val.subst_poly(bindings))),
             },
             Type::Prod {
                 mult,
@@ -365,13 +385,13 @@ impl Type {
                 second,
             } => Type::Prod {
                 mult: mult.clone(),
-                first: Box::new(fake_span(first.val.subst_poly(var_id, ty))),
-                second: Box::new(fake_span(second.val.subst_poly(var_id, ty))),
+                first: Box::new(fake_span(first.val.subst_poly(bindings))),
+                second: Box::new(fake_span(second.val.subst_poly(bindings))),
             },
             Type::Variant(items) => Type::Variant(
                 items
                     .iter()
-                    .map(|(label, ty)| (label.clone(), fake_span(ty.val.subst_poly(var_id, ty))))
+                    .map(|(label, ty)| (label.clone(), fake_span(ty.val.subst_poly(bindings))))
                     .collect(),
             ),
             Type::Unit | Type::Int | Type::Bool | Type::String => self.clone(),
@@ -390,25 +410,25 @@ impl SType {
 }
 
 impl Qualification {
-    pub fn subst_poly(&self, var_id: &PVarId, ty: &SType) -> Qualification {
+    pub fn subst_poly(&self, bindings: &HashMap<PVarId, SType>) -> Qualification {
         match self {
-            Qualification::Unr(t) => Qualification::Unr(fake_span(t.val.subst_poly(var_id, ty))),
+            Qualification::Unr(t) => Qualification::Unr(fake_span(t.val.subst_poly(bindings))),
             Qualification::Mobile(t) => {
-                Qualification::Mobile(fake_span(t.val.subst_poly(var_id, ty)))
+                Qualification::Mobile(fake_span(t.val.subst_poly(bindings)))
             }
             Qualification::Bounded(s) => {
-                Qualification::Bounded(fake_span(s.val.subst_poly(var_id, ty)))
+                Qualification::Bounded(fake_span(s.val.subst_poly(bindings)))
             }
-            Qualification::New(s) => Qualification::New(fake_span(s.val.subst_poly(var_id, ty))),
+            Qualification::New(s) => Qualification::New(fake_span(s.val.subst_poly(bindings))),
             Qualification::Dualable(s) => {
-                Qualification::Dualable(fake_span(s.val.subst_poly(var_id, ty)))
+                Qualification::Dualable(fake_span(s.val.subst_poly(bindings)))
             }
             Qualification::NonSkip(s) => {
-                Qualification::NonSkip(fake_span(s.val.subst_poly(var_id, ty)))
+                Qualification::NonSkip(fake_span(s.val.subst_poly(bindings)))
             }
             Qualification::Equiv(t1, t2) => Qualification::Equiv(
-                fake_span(t1.val.subst_poly(var_id, ty)),
-                fake_span(t2.val.subst_poly(var_id, ty)),
+                fake_span(t1.val.subst_poly(bindings)),
+                fake_span(t2.val.subst_poly(bindings)),
             ),
         }
     }
@@ -556,7 +576,7 @@ pub enum Expr {
 
     If(Box<SExpr>, Box<SExpr>, Box<SExpr>),
 
-    TyApp(Box<SExpr>, SType),
+    TyApp(Box<SExpr>, Vec<SType>),
     TyAbs {
         quantification: SQuantification,
         expr: Box<SExpr>,
@@ -719,10 +739,10 @@ impl Session {
 }
 
 impl Session {
-    pub fn subst_poly(&self, var_id: &PVarId, ty: &SType) -> Session {
+    pub fn subst_poly(&self, bindings: &HashMap<PVarId, SType>) -> Session {
         match self {
             Session::PVar { id, dual } => {
-                if id == var_id {
+                if let Some(ty) = bindings.get(id) {
                     let ty = ty.val.clone();
                     let Type::Chan(session) = ty else {
                         panic!("Polymorphic variable substitution must be a session type.");
@@ -733,24 +753,24 @@ impl Session {
                 }
             }
             Session::Semi { first, second } => Session::Semi {
-                first: Box::new(fake_span(first.val.subst_poly(var_id, ty))),
-                second: Box::new(fake_span(second.val.subst_poly(var_id, ty))),
+                first: Box::new(fake_span(first.val.subst_poly(bindings))),
+                second: Box::new(fake_span(second.val.subst_poly(bindings))),
             },
             Session::Op(session_op, payload) => Session::Op(
                 session_op.clone(),
-                Box::new(fake_span(payload.val.subst_poly(var_id, ty))),
+                Box::new(fake_span(payload.val.subst_poly(bindings))),
             ),
             Session::Choice(session_op, items) => Session::Choice(
                 session_op.clone(),
                 items
                     .iter()
-                    .map(|(label, s)| (label.clone(), fake_span(s.val.subst_poly(var_id, ty))))
+                    .map(|(label, s)| (label.clone(), fake_span(s.val.subst_poly(bindings))))
                     .collect(),
             ),
             // Recursion variables are separate than polymorphic variables, so we don't substitute them.
             Session::Mu(id, body) => Session::Mu(
                 id.clone(),
-                Box::new(fake_span(body.val.subst_poly(var_id, ty))),
+                Box::new(fake_span(body.val.subst_poly(bindings))),
             ),
             Session::Skip
             | Session::End(_)

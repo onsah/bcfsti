@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     constraint::Constraints,
@@ -821,7 +821,7 @@ impl TypeChecker {
             Expr::TypeDef(_, _, _, _) => {
                 unreachable!("type abbreviations are expanded before type checking")
             }
-            Expr::TyApp(expr, ty) => {
+            Expr::TyApp(expr, tys) => {
                 let (expr_ty, expr_cs, expr_eff) = self.infer(ctx, ty_ctx, expr)?;
 
                 let Type::Abstraction {
@@ -837,18 +837,27 @@ impl TypeChecker {
                     ));
                 };
 
-                kinding::check(ty_ctx, &self.alias_env, ty, quantification.kind.val)?;
+                for (ty, expected_kind) in tys
+                    .iter()
+                    .zip(quantification.bindings.iter().map(|(_, kind)| kind))
+                {
+                    kinding::check(ty_ctx, &self.alias_env, ty, expected_kind.val)?;
+                }
 
+                let bindings: HashMap<PVarId, SType> = quantification
+                    .bindings
+                    .iter()
+                    .map(|(id, _)| id.val.clone())
+                    .zip(tys.iter().cloned())
+                    .collect();
                 let substituted_qualifications: Vec<SQualification> = quantification
                     .qualifications
                     .iter()
-                    .map(|q| {
-                        Spanned::new(q.val.subst_poly(&quantification.id.val, ty), q.span.clone())
-                    })
+                    .map(|q| Spanned::new(q.val.subst_poly(&bindings), q.span.clone()))
                     .collect();
                 Self::check_qualifications(ty_ctx, substituted_qualifications.iter())?;
 
-                let app_ty = fake_span(abs_ty.subst_poly(&quantification.id.val, ty));
+                let app_ty = fake_span(abs_ty.subst_poly(&bindings));
                 Ok((app_ty, expr_cs, expr_eff))
             }
             Expr::TyAbs { .. } => Err(TypeError::TypeAnnotationMissing(e.clone())),
@@ -1092,11 +1101,10 @@ impl TypeChecker {
             } => {
                 // TODO: Ensure expr is value
                 let Quantification {
-                    id,
-                    kind,
+                    bindings,
                     qualifications,
                 } = quantification.val.clone();
-                let ty_ctx = ty_ctx.extend_var(id.val.clone(), kind.val);
+                let ty_ctx = ty_ctx.extend_bindings(Quantification::bindings(bindings.into_iter()));
                 if kinding::check_qualifications_well_formed(
                     &ty_ctx,
                     &self.alias_env,
@@ -1110,7 +1118,13 @@ impl TypeChecker {
                     ));
                 }
 
-                if ctx.vars().contains(&id.val) {
+                if let Some(id) = quantification
+                    .val
+                    .bindings
+                    .iter()
+                    .map(|(id, _)| id)
+                    .find(|id| ctx.vars().contains(&id.val))
+                {
                     return Err(TypeError::Shadowing(e.clone(), id.clone()));
                 }
 
@@ -1127,8 +1141,7 @@ impl TypeChecker {
                     ));
                 };
 
-                if id.val != expected_quantification.id.val
-                    || kind.val != expected_quantification.kind.val
+                if quantification.val.bindings != expected_quantification.bindings
                     || &qualifications != &expected_quantification.qualifications
                 {
                     return Err(TypeError::Mismatch(
@@ -1136,8 +1149,7 @@ impl TypeChecker {
                         Err(format!(
                             "Forall with quantification {}",
                             pretty_def(Quantification {
-                                id,
-                                kind,
+                                bindings: quantification.bindings.clone(),
                                 qualifications
                             })
                         )),
