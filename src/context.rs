@@ -195,7 +195,7 @@ impl Ctx {
     }
     pub fn is_splittable(&self, ty_ctx: &TypeCtx, xs: &HashSet<Id>) -> bool {
         let sem = self.to_sem(ty_ctx);
-        let node_eq = |a: &(Id, Type), b: &(Id, Type)| a.0 == b.0 && ty_ctx.type_sem_eq(&a.1, &b.1);
+        let node_eq = |a: &(Id, Type), b: &(Id, Type)| a.0 == b.0 && ty_ctx.equivalent(&a.1, &b.1);
         let (binds_xs, binds_not_xs) = self
             .binds()
             .into_iter()
