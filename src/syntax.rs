@@ -702,6 +702,16 @@ impl Session {
                     },
                 ) => first1.sem_eq_(first2, &seen) && second1.sem_eq_(second2, &seen),
                 (Session::UVar(x1), Session::UVar(x2)) => x1 == x2,
+                (
+                    Session::PVar {
+                        id: id1,
+                        dual: dual1,
+                    },
+                    Session::PVar {
+                        id: id2,
+                        dual: dual2,
+                    },
+                ) => id1 == id2 && dual1 == dual2,
                 (Session::Skip, Session::Skip) => true,
                 _ => false,
             }
@@ -916,6 +926,26 @@ impl Type {
                     id: id1,
                     dual: dual1,
                 },
+                Type::PVar {
+                    id: id2,
+                    dual: dual2,
+                },
+            )
+            | (
+                Type::PVar {
+                    id: id1,
+                    dual: dual1,
+                },
+                Type::Chan(Session::PVar {
+                    id: id2,
+                    dual: dual2,
+                }),
+            )
+            | (
+                Type::Chan(Session::PVar {
+                    id: id1,
+                    dual: dual1,
+                }),
                 Type::PVar {
                     id: id2,
                     dual: dual2,
