@@ -246,6 +246,16 @@ impl Equivalences {
                 (Type::Chan(session1), Type::Chan(session2)) => {
                     Self::unify_session(session1, session2)
                 }
+                (Type::Chan(Session::UVar(uvar_id)), Type::PVar { id, dual })
+                | (Type::PVar { id, dual }, Type::Chan(Session::UVar(uvar_id))) => {
+                    Ok(HashMap::from([(
+                        *uvar_id,
+                        Session::PVar {
+                            id: id.clone(),
+                            dual: *dual,
+                        },
+                    )]))
+                }
                 _ => Err(SolveError::Check),
             }
         }
@@ -425,7 +435,7 @@ fn subst_session(ty: Session, assignments: &Assignments) -> Session {
                 Session::UVar(var)
             }
         }
-        Session::PVar { .. } => todo!(),
+        Session::PVar { .. } => ty,
         Session::Skip => Session::Skip,
         Session::Semi { first, second } => Session::Semi {
             first: Box::new(fake_span(subst_session(first.val, assignments))),
