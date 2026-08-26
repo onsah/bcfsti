@@ -56,13 +56,13 @@ impl<L: Clone + Eq + Hash + std::fmt::Debug> Graph<L> {
         }
         true
     }
-    pub fn is_reachable(&self, src: &L, tgt: &L) -> bool {
+    pub fn is_reachable<F: Fn(&L, &L) -> bool>(&self, src: &L, tgt: &L, node_eq: F) -> bool {
         let mut visited = HashSet::<&L>::new();
         let mut queue = VecDeque::new();
         queue.push_back(src);
         while let Some(src) = queue.pop_front() {
             if visited.insert(src) {
-                if src == tgt {
+                if node_eq(src, tgt) {
                     return true;
                 }
                 for tgt in &self.edges[src] {

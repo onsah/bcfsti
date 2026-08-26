@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
-use crate::syntax::{Id, Mult, SId, SType, Type, TypeSemEq};
+use crate::syntax::{Id, Mult, SId, SType, Type};
 use crate::type_context::TypeCtx;
 use crate::util::boxed::Boxed;
 use crate::util::graph::Graph;
@@ -195,17 +195,17 @@ impl Ctx {
     }
     pub fn is_splittable(&self, ty_ctx: &TypeCtx, xs: &HashSet<Id>) -> bool {
         let sem = self.to_sem(ty_ctx);
+        let node_eq = |a: &(Id, Type), b: &(Id, Type)| a.0 == b.0 && a.1.sem_eq(&b.1);
         let (binds_xs, binds_not_xs) = self
             .binds()
             .into_iter()
             .filter(|(_, t)| !ty_ctx.unr(t))
-            .map(|(x, t)| (x, TypeSemEq(t)))
             .partition::<HashSet<_>, _>(|(x, _)| xs.contains(x));
         for b1 in &binds_xs {
             for b2 in &binds_not_xs {
-                if sem.ord.is_reachable(b1, b2) {
+                if sem.ord.is_reachable(b1, b2, node_eq) {
                     for b3 in &binds_xs {
-                        if sem.ord.is_reachable(b2, b3) {
+                        if sem.ord.is_reachable(b2, b3, node_eq) {
                             return false;
                         }
                     }
@@ -520,8 +520,8 @@ impl CtxCtx {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SemCtx {
-    pub ord: Graph<(Id, TypeSemEq)>,
-    pub unr: HashSet<(Id, TypeSemEq)>,
+    pub ord: Graph<(Id, Type)>,
+    pub unr: HashSet<(Id, Type)>,
 }
 
 impl SemCtx {
@@ -534,9 +534,9 @@ impl SemCtx {
     pub fn bind(x: Id, t: Type, ty_ctx: &TypeCtx) -> Self {
         let mut c = Self::empty();
         if ty_ctx.unr(&t) {
-            c.unr.insert((x, TypeSemEq(t)));
+            c.unr.insert((x, t));
         } else {
-            c.ord = Graph::singleton((x, TypeSemEq(t)));
+            c.ord = Graph::singleton((x, t));
         }
         c
     }
@@ -641,7 +641,7 @@ impl Pretty<()> for SemCtx {
             p.pp("  ");
             p.pp(x);
             p.pp(" : ");
-            p.pp(&t.0);
+            p.pp(t);
             p.pp("\n");
         }
         p.pp("\nGraph:\n");
@@ -651,13 +651,13 @@ impl Pretty<()> for SemCtx {
             p.pp("  ");
             p.pp(x);
             p.pp(" : ");
-            p.pp(&t.0);
+            p.pp(t);
             p.pp("\n");
             for (x, t) in ys {
                 p.pp("    ");
                 p.pp(x);
                 p.pp(" : ");
-                p.pp(&t.0);
+                p.pp(t);
                 p.pp("\n");
             }
         }

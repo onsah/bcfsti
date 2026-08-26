@@ -1,6 +1,7 @@
 pub mod args;
 pub mod constraint;
 pub mod context;
+pub mod equality;
 pub mod equivalence;
 pub mod error_reporting;
 pub mod freest;
