@@ -498,18 +498,18 @@ impl TypeChecker {
                 }
 
                 // Add the function to the context
-                let var_ctx = ctx.restrict(&clause.body.free_vars());
+                let clause_ctx = ctx.restrict(&clause.body.free_vars());
                 let (var_cs, var_eff) = {
-                    let var_ctx = ext(
+                    let clause_ctx = ext(
                         Mult::Unr,
-                        var_ctx.clone(),
+                        clause_ctx.clone(),
                         Ctx::Bind(id.clone(), var_ty.clone()),
                     );
-                    self.check(&var_ctx, ty_ctx, &var_body, &var_ty)?
+                    self.check(&clause_ctx, ty_ctx, &var_body, &var_ty)?
                 };
 
                 let (ty, let_cs, let_eff) =
-                    self.infer_let_body(ctx, ty_ctx, e, id, &var_ctx, &var_ty, var_eff, body)?;
+                    self.infer_let_body(ctx, ty_ctx, e, id, &clause_ctx, &var_ty, var_eff, body)?;
                 Ok((ty, var_cs.join(let_cs), Eff::lub(var_eff, let_eff)))
             }
             Expr::CaseSum(expr, cases) => {
