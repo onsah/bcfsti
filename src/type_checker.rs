@@ -9,7 +9,7 @@ use crate::{
     syntax::{
         Eff, Expr, Id, Kind, Label, Mob, Mult, Op1, Op2, PVarId, Quantification,
         QuantificationType, SEff, SExpr, SId, SMult, SPattern, SQualification, SQuantification,
-        SSession, SType, Session, SessionOp, Type,
+        SSession, SType, Session, SessionOp, Type, UVarId,
     },
     type_alias::AliasEnv,
     type_context::TypeCtx,
@@ -72,6 +72,8 @@ pub enum TypeError {
     KindMismatch(SType, Kind, TypeCtx),
     QualificationNotSatisfied(TypeCtx, SQualification),
     UndefinedPVar(SType, PVarId),
+    VariablesUnsolvable { vars: HashSet<UVarId> },
+    AssignmentNotMobile { expr: SExpr, id: SId, ctx: Ctx },
 }
 
 pub fn infer_type(e: &SExpr, alias_env: AliasEnv) -> Result<(SType, Constraints, Eff), TypeError> {

@@ -3,6 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     context::Ctx,
     syntax::{SExpr, SId, SType, Session, Type, UVarId},
+    type_checker::TypeError,
     type_context::TypeCtx,
     util::span::{Spanned, fake_span},
 };
@@ -36,12 +37,6 @@ impl Eq for Equivalences {}
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 struct Mobilities(Vec<(SExpr, HashSet<SId>, Ctx)>);
-
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub enum ConstraintSolutionError {
-    VariablesUnsolvable { vars: HashSet<UVarId> },
-    AssignmentNotMobile { expr: SExpr, id: SId, ctx: Ctx },
-}
 
 type Assignments = HashMap<UVarId, Session>;
 
@@ -85,22 +80,17 @@ impl Constraints {
 
     /// Solve the constraints by propagating assignments to unification variables until a fixed point is reached.
     /// If there is still no solution for some unification variables, `Skip` is substituted instead.
-    pub fn solve(self) -> Result<Constraints, ConstraintSolutionError> {
+    pub fn solve(self) -> Result<Constraints, TypeError> {
         self.solve_with_type_ctx(&TypeCtx::empty())
     }
 
     /// Solve the constraints with a type context for checking mobility.
-    pub fn solve_with_type_ctx(
-        self,
-        ty_ctx: &TypeCtx,
-    ) -> Result<Constraints, ConstraintSolutionError> {
+    pub fn solve_with_type_ctx(self, ty_ctx: &TypeCtx) -> Result<Constraints, TypeError> {
         let (assignments, equivalences) = self.equivalences.solve(ty_ctx);
 
         let unsolved_vars = equivalences.unsolved_variables();
         if !unsolved_vars.is_empty() {
-            return Err(ConstraintSolutionError::VariablesUnsolvable {
-                vars: unsolved_vars,
-            });
+            return Err(TypeError::VariablesUnsolvable { vars: unsolved_vars });
         }
 
         self.mobilities.check(ty_ctx, &assignments)?;
@@ -370,13 +360,13 @@ impl Mobilities {
         mut self,
         ty_ctx: &TypeCtx,
         assignments: &Assignments,
-    ) -> Result<(), ConstraintSolutionError> {
+    ) -> Result<(), TypeError> {
         for (expr, ids, ctx) in self.0.iter_mut() {
             subst_ctx(ctx, &assignments);
             let binds = ctx.binds();
             for id in ids.iter() {
                 if !ty_ctx.mobile(binds.get(&id.val).unwrap()) {
-                    return Err(ConstraintSolutionError::AssignmentNotMobile {
+                    return Err(TypeError::AssignmentNotMobile {
                         expr: expr.clone(),
                         id: id.clone(),
                         ctx: ctx.clone(),
@@ -482,9 +472,10 @@ mod tests {
     use std::collections::HashSet;
 
     use crate::{
-        constraint::{ConstraintSolutionError, Constraints},
+        constraint::Constraints,
         session_type,
         syntax::{Eff, Mob, Mult, Session, Type},
+        type_checker::TypeError,
         util::span::fake_span,
     };
 
@@ -553,7 +544,7 @@ mod tests {
 
         assert_eq!(
             solved,
-            Err(ConstraintSolutionError::VariablesUnsolvable {
+            Err(TypeError::VariablesUnsolvable {
                 vars: HashSet::from([1, 2])
             })
         );

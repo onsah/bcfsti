@@ -1,7 +1,6 @@
 use std::{collections::HashSet, ops::Range};
 
 use crate::{
-    constraint::ConstraintSolutionError,
     lexer::LexerError,
     syntax::SType,
     type_checker::TypeError,
@@ -16,7 +15,6 @@ pub enum IErr {
     Lexer(LexerError),
     Parser(ParseError<usize>),
     Typing(TypeError),
-    Constraint(ConstraintSolutionError),
     Equivalence {
         ty1: SType,
         ty2: SType,
@@ -744,34 +742,34 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
             TypeError::KindMismatch(spanned, kind, type_ctx) => todo!(),
             TypeError::QualificationNotSatisfied(type_ctx, qualification) => todo!(),
             TypeError::UndefinedPVar(_, _) => todo!(),
-        },
-        IErr::Constraint(ConstraintSolutionError::AssignmentNotMobile { expr, id, ctx }) => {
-            let (_, ty) = ctx.lookup_ord_pure(&ty_ctx, &id).unwrap();
-            report(
-                &src,
-                expr.span.clone(),
-                "Constraint Solution Error",
-                [label(
-                    expr.span,
-                    format!(
-                        "Type {} is not mobile in context: {}",
-                        pretty_def(&ty.val),
-                        pretty_def(&ctx.simplify())
-                    ),
-                )],
-            );
-        }
-        IErr::Constraint(ConstraintSolutionError::VariablesUnsolvable { vars }) => {
-            report(
-                &src,
-                0..1,
-                "Constraint Solution Error",
-                [label(
+            TypeError::AssignmentNotMobile { expr, id, ctx } => {
+                let (_, ty) = ctx.lookup_ord_pure(&ty_ctx, &id).unwrap();
+                report(
+                    &src,
+                    expr.span.clone(),
+                    "Constraint Solution Error",
+                    [label(
+                        expr.span,
+                        format!(
+                            "Type {} is not mobile in context: {}",
+                            pretty_def(&ty.val),
+                            pretty_def(&ctx.simplify())
+                        ),
+                    )],
+                );
+            }
+            TypeError::VariablesUnsolvable { vars } => {
+                report(
+                    &src,
                     0..1,
-                    format!("Unification variables {:?} are not solvable", vars),
-                )],
-            );
-        }
+                    "Constraint Solution Error",
+                    [label(
+                        0..1,
+                        format!("Unification variables {:?} are not solvable", vars),
+                    )],
+                );
+            }
+        },
         IErr::Equivalence { ty1, ty2, reason } => {
             report(
                 &src,
