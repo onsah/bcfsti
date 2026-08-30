@@ -410,8 +410,11 @@ impl Pretty<UserState> for Expr {
                 p.pp_arg(L, prefix);
                 p.pp_arg(R, expr);
             }
-            Expr::LetDecl(x, t, q, c, e) => {
+            Expr::LetDecl(x, t, q, c, e, is_rec) => {
                 p.pp("let");
+                if *is_rec {
+                    p.pp(" rec");
+                }
                 p.block(|p| {
                     p.pp(x);
                     if let Some(q) = q {

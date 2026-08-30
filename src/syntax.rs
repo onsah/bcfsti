@@ -558,6 +558,7 @@ pub enum Expr {
         Option<SQuantification>,
         Box<SClause>,
         Box<SExpr>,
+        bool,
     ),
     LetPair(SId, SId, Box<SExpr>, Box<SExpr>),
 
@@ -754,8 +755,13 @@ impl Expr {
             Expr::Branch(e) => e.free_vars(),
             Expr::LSplit(_, e) => e.free_vars(),
             Expr::RSplit(_, e) => e.free_vars(),
-            Expr::LetDecl(id, _, _, clause, body) => {
-                union(clause.body.free_vars(), without(body.free_vars(), &id.val))
+            Expr::LetDecl(id, _, _, clause, body, is_rec) => {
+                let body_free_vars = if *is_rec {
+                    without(body.free_vars(), &id.val)
+                } else {
+                    body.free_vars()
+                };
+                union(clause.body.free_vars(), body_free_vars)
             }
             Expr::TypeDef(_, _, body, _) => body.free_vars(),
             Expr::Discard(e) => e.free_vars(),

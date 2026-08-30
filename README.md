@@ -116,8 +116,8 @@ e ::= x                             (variable)
         (l x '->' '{' e '}')*
       '}'
 
-    | 'let' x ':' t '\n'
-            x x '=' e 'in' e        (let expression for recursive functions)
+    | 'let' 'rec'? x ':' t '\n'
+            x x '=' e 'in' e        (let declaration; recursive iff 'rec' is given)
 
     | 'fork' e                      (thread spawning)
     | 'new' s                       (channel allocation)

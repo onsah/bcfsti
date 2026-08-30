@@ -70,10 +70,10 @@ pub fn check_shadowing(e: &SExpr, alias_env: &AliasEnv) -> Result<(), TypeError>
             check_shadowing(spanned1, alias_env)?;
             check_shadowing(spanned2, alias_env)
         }
-        Expr::LetDecl(_, spanned1, _, spanned2, spanned3) => {
-            check_type_shadowing(spanned1, alias_env)?;
-            check_shadowing(&spanned2.val.body, alias_env)?;
-            check_shadowing(spanned3, alias_env)
+        Expr::LetDecl(_, ty, _, clause, body, _) => {
+            check_type_shadowing(ty, alias_env)?;
+            check_shadowing(&clause.val.body, alias_env)?;
+            check_shadowing(body, alias_env)
         }
         Expr::LetPair(_, _, spanned2, spanned3) => {
             check_shadowing(spanned2, alias_env)?;

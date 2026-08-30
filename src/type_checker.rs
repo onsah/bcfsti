@@ -478,7 +478,7 @@ impl TypeChecker {
 
                 Ok((body_ty, var_cs.join(body_cs), Eff::lub(var_eff, body_eff)))
             }
-            Expr::LetDecl(id, var_ty, quant, clause, body) => {
+            Expr::LetDecl(id, var_ty, quant, clause, body, is_rec) => {
                 let (var_ty, var_body) = {
                     // Desugar clause to an abstraction
                     let var_body = Spanned::new(
@@ -488,7 +488,8 @@ impl TypeChecker {
                     Self::desugar_quantification(quant.clone(), var_ty.clone(), var_body)
                 };
 
-                if let Type::Arr { mult, .. } = &var_ty.val
+                if *is_rec
+                    && let Type::Arr { mult, .. } = &var_ty.val
                     && mult.val != Mult::Unr
                 {
                     return Err(TypeError::RecursiveFunctionMustBeUnrestricted(
@@ -497,14 +498,19 @@ impl TypeChecker {
                     ));
                 }
 
-                // Add the function to the context
+                // Add the function to the context when the declaration is
+                // recursive (`let rec`)
                 let clause_ctx = ctx.restrict(&clause.body.free_vars());
                 let (var_cs, var_eff) = {
-                    let clause_ctx = ext(
-                        Mult::Unr,
-                        clause_ctx.clone(),
-                        Ctx::Bind(id.clone(), var_ty.clone()),
-                    );
+                    let clause_ctx = if *is_rec {
+                        ext(
+                            Mult::Unr,
+                            clause_ctx.clone(),
+                            Ctx::Bind(id.clone(), var_ty.clone()),
+                        )
+                    } else {
+                        clause_ctx.clone()
+                    };
                     self.check(&clause_ctx, ty_ctx, &var_body, &var_ty)?
                 };
 
