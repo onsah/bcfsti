@@ -529,11 +529,6 @@ impl Pretty<UserState> for Qualification {
                 p.pp("nonskip ");
                 p.pp(ty)
             }
-            Qualification::Equiv(ty1, ty2) => {
-                p.pp(ty1);
-                p.pp(" ≃ ");
-                p.pp(ty2);
-            }
         }
     }
 }

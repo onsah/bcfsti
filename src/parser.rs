@@ -155,7 +155,6 @@ peg::parser! {
         pub rule qual() -> Qualification
             = tok(QMbl) ty:stype() { Qualification::Mobile(ty) }
             / tok(Unr) ty:stype() { Qualification::Unr(ty) }
-            / ty:stype() tok(DoubleEquals) ty2:stype() { Qualification::Equiv(ty, ty2) }
 
         pub rule quals() -> Vec<Qualification>
             = q:qual() tok(Caret) qs:quals() { let mut v = vec![q]; v.extend(qs); v }

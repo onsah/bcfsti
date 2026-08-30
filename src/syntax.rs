@@ -426,10 +426,6 @@ impl Qualification {
             Qualification::NonSkip(s) => {
                 Qualification::NonSkip(fake_span(s.val.subst_poly(bindings)))
             }
-            Qualification::Equiv(t1, t2) => Qualification::Equiv(
-                fake_span(t1.val.subst_poly(bindings)),
-                fake_span(t2.val.subst_poly(bindings)),
-            ),
         }
     }
 }
@@ -523,7 +519,6 @@ pub enum Qualification {
     New(SSession),
     Dualable(SSession),
     NonSkip(SSession),
-    Equiv(SType, SType),
 }
 pub type SQualification = Spanned<Qualification>;
 

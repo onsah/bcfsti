@@ -205,14 +205,6 @@ impl KindCheckState<'_> {
                 | Qualification::NonSkip(s) => {
                     self.check(&SType::from_session(s.clone()), Kind::Session)?
                 }
-                // QF-Eq: T : K and U : K for the same kind (via inference)
-                Qualification::Equiv(ty1, ty2) => match (self.infer(ty1)?, self.infer(ty2)?) {
-                    (k1, k2) if k1 == k2 => Ok(()),
-                    _ => Err(TypeError::QualificationNotSatisfied(
-                        self.ty_ctx.clone(),
-                        qualification.clone(),
-                    )),
-                }?,
             }
         }
         Ok(())
@@ -345,30 +337,6 @@ mod tests {
     }
 
     #[test]
-    fn equiv_of_value_types() {
-        assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
-                [fake_span(Qualification::Equiv(
-                    fake_span(Type::Int),
-                    fake_span(Type::Bool)
-                ))]
-                .iter()
-            ),
-            Ok(())
-        );
-        assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
-                [fake_span(Qualification::Equiv(
-                    fake_span(Type::Chan(Session::Skip)),
-                    fake_span(Type::Chan(Session::End(SessionOp::Recv)))
-                ))]
-                .iter()
-            ),
-            Ok(())
-        );
-    }
-
-    #[test]
     fn conjunction_of_well_formed() {
         assert_eq!(
             KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
@@ -495,18 +463,6 @@ mod tests {
     }
 
     #[test]
-    fn equiv_with_ill_kinded_side_not_well_formed() {
-        let q = fake_span(Qualification::Equiv(
-            fake_span(Type::Int),
-            fake_span(pvar_chan("a".to_string())),
-        ));
-        assert!(matches!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed([q].iter()),
-            Err(TypeError::UndefinedPVar(_, id)) if id == "a"
-        ));
-    }
-
-    #[test]
     fn recursive_session_is_well_formed() {
         let s = Session::Mu(
             fake_span("X".to_string()),
@@ -518,48 +474,6 @@ mod tests {
             ),
             Ok(())
         );
-    }
-
-    #[test]
-    fn equiv_different_kinds_not_well_formed() {
-        assert!(matches!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
-                [fake_span(Qualification::Equiv(
-                    fake_span(Type::Int),
-                    fake_span(Type::Chan(Session::Skip))
-                ))]
-                .iter()
-            ),
-            Err(TypeError::QualificationNotSatisfied(
-                _,
-                Spanned { val: Qualification::Equiv(ty1, ty2), .. }
-            )) if ty1.val == Type::Int && ty2.val == Type::Chan(Session::Skip)
-        ));
-        assert!(matches!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
-                [fake_span(Qualification::Equiv(
-                    fake_span(Type::Chan(Session::Skip)),
-                    fake_span(Type::Int)
-                ))]
-                .iter()
-            ),
-            Err(TypeError::QualificationNotSatisfied(
-                _,
-                Spanned { val: Qualification::Equiv(ty1, ty2), .. }
-            )) if ty1.val == Type::Chan(Session::Skip) && ty2.val == Type::Int
-        ));
-    }
-
-    #[test]
-    fn equiv_both_sides_ill_kinded_not_well_formed() {
-        let q = fake_span(Qualification::Equiv(
-            fake_span(pvar_chan("b".to_string())),
-            fake_span(pvar_chan("2".to_string())),
-        ));
-        assert!(matches!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed([q].iter()),
-            Err(TypeError::UndefinedPVar(_, id)) if id == "b" || id == "2"
-        ));
     }
 
     #[test]
@@ -773,57 +687,5 @@ mod tests {
                 _
             )) if id == "a"
         ));
-    }
-
-    #[test]
-    fn equiv_product_well_formed() {
-        let prod1 = Type::Prod {
-            mult: fake_span(Mult::Unr),
-            first: Box::new(fake_span(Type::Int)),
-            second: Box::new(fake_span(Type::Bool)),
-        };
-        let prod2 = Type::Prod {
-            mult: fake_span(Mult::Unr),
-            first: Box::new(fake_span(Type::Int)),
-            second: Box::new(fake_span(Type::Bool)),
-        };
-        assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
-                [fake_span(Qualification::Equiv(
-                    fake_span(prod1),
-                    fake_span(prod2)
-                ))]
-                .iter()
-            ),
-            Ok(())
-        );
-    }
-
-    #[test]
-    fn equiv_arrow_well_formed() {
-        let arr1 = Type::Arr {
-            mob: fake_span(Mob::Mobile),
-            mult: fake_span(Mult::Unr),
-            eff: fake_span(Eff::No),
-            param: Box::new(fake_span(Type::Int)),
-            ret: Box::new(fake_span(Type::Bool)),
-        };
-        let arr2 = Type::Arr {
-            mob: fake_span(Mob::Mobile),
-            mult: fake_span(Mult::Unr),
-            eff: fake_span(Eff::No),
-            param: Box::new(fake_span(Type::Int)),
-            ret: Box::new(fake_span(Type::Bool)),
-        };
-        assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
-                [fake_span(Qualification::Equiv(
-                    fake_span(arr1),
-                    fake_span(arr2)
-                ))]
-                .iter()
-            ),
-            Ok(())
-        );
     }
 }

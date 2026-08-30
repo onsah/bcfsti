@@ -39,7 +39,6 @@ impl TypeCtx {
                 Qualification::New(session) => self.new(session),
                 Qualification::Dualable(session) => self.dualable(session),
                 Qualification::NonSkip(session) => self.nonskip(session),
-                Qualification::Equiv(ty1, ty2) => self.equivalent(ty1, ty2),
             },
         )
     }
@@ -59,10 +58,6 @@ impl TypeCtx {
                     .iter()
                     .map(|(_, ty)| &ty.val)
                     .all(|ty| self.unr(ty)),
-                // Q-Unr-Conv
-                Type::Chan(Session::PVar { id, .. }) => {
-                    self.equivalent_types_pv(id.clone()).any(|ty| self.unr(ty))
-                }
                 _ => false,
             },
         )
@@ -89,10 +84,6 @@ impl TypeCtx {
                     };
                     first.val == Session::BorrowEnd(SessionOp::Recv) && self.bounded(&second)
                 }
-                // Q-Mbl-Conv
-                Type::Chan(Session::PVar { id, .. }) => self
-                    .equivalent_types_pv(id.clone())
-                    .any(|ty| self.mobile(ty)),
                 Type::Abstraction {
                     quantification, ty, ..
                 } => {
@@ -134,26 +125,6 @@ impl TypeCtx {
                 Session::Mu(_, session) => self.bounded(session),
                 Session::Var(_) => true,
                 Session::Choice(_, branches) => branches.iter().all(|(_, s)| self.bounded(s)),
-                Session::PVar { id, .. } => self
-                    .qualifications
-                    .iter()
-                    .filter_map::<&Session, _>(|q| match q {
-                        Qualification::Equiv(ty1, ty2) => {
-                            if let Type::Chan(s) = &ty2.val
-                                && ty1.val == pvar(id.clone())
-                            {
-                                Some(s)
-                            } else if let Type::Chan(s) = &ty1.val
-                                && ty2.val == pvar(id.clone())
-                            {
-                                Some(s)
-                            } else {
-                                None
-                            }
-                        }
-                        _ => None,
-                    })
-                    .any(|s| self.bounded(s)),
                 _ => false,
             },
         )
@@ -164,13 +135,7 @@ impl TypeCtx {
             || Qualification::Dualable(fake_span(session.clone())),
             match session {
                 Session::Skip | Session::Op(_, _) | Session::End(_) | Session::Var(_) => true,
-                Session::PVar { id, .. } => {
-                    self.new(session)
-                        || self.equivalent_types(id.clone()).any(|ty| match ty {
-                            Type::Chan(session) => self.dualable(session),
-                            _ => false,
-                        })
-                }
+                Session::PVar { .. } => self.new(session),
                 Session::Semi { first, second } => {
                     self.dualable(&first.val) && self.dualable(&second.val)
                 }
@@ -200,57 +165,9 @@ impl TypeCtx {
                 Session::Semi { first, second } => self.new(&first.val) && self.new(&second.val),
                 Session::Choice(_, items) => items.iter().all(|(_, s)| self.new(s)),
                 Session::Mu(_, body) => self.new(body),
-                Session::PVar { id, .. } => self.equivalent_types(id.clone()).any(|ty| match ty {
-                    Type::Chan(session) => self.new(session),
-                    _ => false,
-                }),
                 _ => false,
             },
         )
-    }
-
-    /// Returns the set of types from equivalent qualifications
-    /// that `id` occurs in the other type.
-    fn equivalent_types(&self, id: PVarId) -> impl Iterator<Item = &Type> {
-        self.qualifications.iter().filter_map(move |q| match q {
-            Qualification::Equiv(ty1, ty2)
-                if ty1.val.poly_variables().find(|id1| id1 == &id).is_some() =>
-            {
-                Some(&ty2.val)
-            }
-            Qualification::Equiv(ty1, ty2)
-                if ty2.val.poly_variables().find(|id1| id1 == &id).is_some() =>
-            {
-                Some(&ty1.val)
-            }
-            _ => None,
-        })
-    }
-
-    /// Returns the set of types from equivalent qualifications
-    /// that `id` occurs in the other type under any amount of prod and variant constructors.
-    fn equivalent_types_pv(&self, id: PVarId) -> impl Iterator<Item = &Type> {
-        self.qualifications.iter().filter_map(move |q| match q {
-            Qualification::Equiv(ty1, ty2)
-                if ty1
-                    .val
-                    .poly_variables_under_prod_and_variant()
-                    .find(|id1| id1 == &id)
-                    .is_some() =>
-            {
-                Some(&ty2.val)
-            }
-            Qualification::Equiv(ty1, ty2)
-                if ty2
-                    .val
-                    .poly_variables_under_prod_and_variant()
-                    .find(|id1| id1 == &id)
-                    .is_some() =>
-            {
-                Some(&ty1.val)
-            }
-            _ => None,
-        })
     }
 
     fn or_assumed<F>(&self, make_qualification: F, result: bool) -> bool
@@ -307,19 +224,6 @@ impl TypeCtx {
 impl TypeCtx {
     pub fn equivalent(&self, ty1: &Type, ty2: &Type) -> bool {
         self.type_sem_eq(ty1, ty2)
-                ||
-                // We don't need the symmetric case since if we can find from one direction
-                // we can also find from the other direction
-                self.equivalent_to(ty1).any(|ty| self.equivalent(ty, ty2))
-    }
-
-    /// Set of types equivalent to a type under this context
-    fn equivalent_to(&self, ty: &Type) -> impl Iterator<Item = &Type> {
-        self.qualifications.iter().filter_map(|q| match q {
-            Qualification::Equiv(ty1, ty2) if self.type_sem_eq(&ty1.val, ty) => Some(&ty2.val),
-            Qualification::Equiv(ty1, ty2) if self.type_sem_eq(&ty2.val, ty) => Some(&ty1.val),
-            _ => None,
-        })
     }
 
     fn type_sem_eq(&self, t1: &Type, t2: &Type) -> bool {
