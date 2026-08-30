@@ -3,7 +3,6 @@ use std::collections::HashMap;
 use crate::context::Ctx;
 use crate::syntax::{Kind, Mult, PVarId, Qualification, Quantification, Session, SessionOp, Type};
 use crate::util::pretty::{Pretty, PrettyEnv};
-use crate::util::span::fake_span;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct TypeCtx {
@@ -24,7 +23,7 @@ impl TypeCtx {
         ctx.binds()
             .into_iter()
             .map(|(_, ty)| ty)
-            .all(|ty| self.entails(&Qualification::Unr(fake_span(ty))))
+            .all(|ty| self.entails(&Qualification::Unr(ty.into())))
     }
 
     pub fn entails(&self, qualification: &Qualification) -> bool {
@@ -44,7 +43,7 @@ impl TypeCtx {
     pub fn unr(&self, ty: &Type) -> bool {
         let (ty_ctx, ty) = Self::non_qualified_type(ty);
         self.clone().join(ty_ctx).or_assumed(
-            || Qualification::Unr(fake_span(ty.clone())),
+            || Qualification::Unr(ty.clone().into()),
             match ty {
                 // Q-Unr-Atom
                 Type::Unit | Type::Int | Type::Bool | Type::String => true,
@@ -64,7 +63,7 @@ impl TypeCtx {
     pub fn mobile(&self, ty: &Type) -> bool {
         let (ty_ctx, ty) = Self::non_qualified_type(ty);
         self.clone().join(ty_ctx).or_assumed(
-            || Qualification::Mobile(fake_span(ty.clone())),
+            || Qualification::Mobile(ty.clone().into()),
             match ty {
                 // Q-Mbl-Atom
                 Type::Unit | Type::String | Type::Int | Type::Bool | Type::Arr { .. } => true,
@@ -114,7 +113,7 @@ impl TypeCtx {
 
     fn bounded(&self, session: &Session) -> bool {
         self.or_assumed(
-            || Qualification::Bounded(fake_span(session.clone())),
+            || Qualification::Bounded(session.clone().into()),
             match session {
                 Session::End(_) | Session::BorrowEnd(SessionOp::Send) => true,
                 Session::Semi { first, second } => {
@@ -130,7 +129,7 @@ impl TypeCtx {
 
     fn dualable(&self, session: &Session) -> bool {
         self.or_assumed(
-            || Qualification::Dualable(fake_span(session.clone())),
+            || Qualification::Dualable(session.clone().into()),
             match session {
                 Session::Skip | Session::Op(_, _) | Session::End(_) | Session::Var(_) => true,
                 Session::PVar { .. } => self.new(session),
@@ -156,7 +155,7 @@ impl TypeCtx {
 
     pub fn new(&self, session: &Session) -> bool {
         self.or_assumed(
-            || Qualification::New(fake_span(session.clone())),
+            || Qualification::New(session.clone().into()),
             match session {
                 Session::Skip | Session::Op(_, _) | Session::Var(_) => true,
 

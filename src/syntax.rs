@@ -1,8 +1,9 @@
 use crate::util::span::{fake_span, Spanned};
 use std::{
     collections::{HashMap, HashSet},
-    hash::Hash,
+    hash::{Hash, Hasher},
     iter,
+    ops::Deref,
 };
 
 pub type Id = String;
@@ -580,19 +581,19 @@ impl SType {
 impl Qualification {
     pub fn subst_poly(&self, bindings: &HashMap<PVarId, SType>) -> Qualification {
         match self {
-            Qualification::Unr(t) => Qualification::Unr(fake_span(t.val.subst_poly(bindings))),
+            Qualification::Unr(t) => Qualification::Unr(t.val.subst_poly(bindings).into()),
             Qualification::Mobile(t) => {
-                Qualification::Mobile(fake_span(t.val.subst_poly(bindings)))
+                Qualification::Mobile(t.val.subst_poly(bindings).into())
             }
             Qualification::Bounded(s) => {
-                Qualification::Bounded(fake_span(s.val.subst_poly(bindings)))
+                Qualification::Bounded(s.val.subst_poly(bindings).into())
             }
-            Qualification::New(s) => Qualification::New(fake_span(s.val.subst_poly(bindings))),
+            Qualification::New(s) => Qualification::New(s.val.subst_poly(bindings).into()),
             Qualification::Dualable(s) => {
-                Qualification::Dualable(fake_span(s.val.subst_poly(bindings)))
+                Qualification::Dualable(s.val.subst_poly(bindings).into())
             }
             Qualification::NonSkip(s) => {
-                Qualification::NonSkip(fake_span(s.val.subst_poly(bindings)))
+                Qualification::NonSkip(s.val.subst_poly(bindings).into())
             }
         }
     }
@@ -679,14 +680,76 @@ impl Kind {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct SSemType(pub SType);
+
+impl PartialEq for SSemType {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.val.sem_eq(&other.0.val)
+    }
+}
+
+impl Eq for SSemType {}
+
+impl Hash for SSemType {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.val.hash(state)
+    }
+}
+
+impl Deref for SSemType {
+    type Target = SType;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<Type> for SSemType {
+    fn from(val: Type) -> Self {
+        SSemType(fake_span(val))
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct SSemSession(pub SSession);
+
+impl PartialEq for SSemSession {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.val.sem_eq(&other.0.val)
+    }
+}
+
+impl Eq for SSemSession {}
+
+impl Hash for SSemSession {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.val.hash(state)
+    }
+}
+
+impl Deref for SSemSession {
+    type Target = SSession;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl From<Session> for SSemSession {
+    fn from(val: Session) -> Self {
+        SSemSession(fake_span(val))
+    }
+}
+
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Qualification {
-    Unr(SType),
-    Mobile(SType),
-    Bounded(SSession),
-    New(SSession),
-    Dualable(SSession),
-    NonSkip(SSession),
+    Unr(SSemType),
+    Mobile(SSemType),
+    Bounded(SSemSession),
+    New(SSemSession),
+    Dualable(SSemSession),
+    NonSkip(SSemSession),
 }
 pub type SQualification = Spanned<Qualification>;
 

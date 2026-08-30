@@ -507,27 +507,27 @@ impl Pretty<UserState> for Qualification {
         match self {
             Qualification::Mobile(ty) => {
                 p.pp("mob ");
-                p.pp(ty)
+                p.pp(&ty.0)
             }
             Qualification::Unr(ty) => {
                 p.pp("unr ");
-                p.pp(ty)
+                p.pp(&ty.0)
             }
             Qualification::Bounded(ty) => {
                 p.pp("bnd ");
-                p.pp(ty)
+                p.pp(&ty.0)
             }
             Qualification::New(ty) => {
                 p.pp("new ");
-                p.pp(ty)
+                p.pp(&ty.0)
             }
             Qualification::Dualable(ty) => {
                 p.pp("dualable ");
-                p.pp(ty)
+                p.pp(&ty.0)
             }
             Qualification::NonSkip(ty) => {
                 p.pp("nonskip ");
-                p.pp(ty)
+                p.pp(&ty.0)
             }
         }
     }
