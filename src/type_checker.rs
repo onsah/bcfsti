@@ -7,7 +7,7 @@ use crate::{
     normalization::{normalise, normalise_session},
     session_type,
     syntax::{
-        Eff, Expr, Id, Kind, Label, Mob, Mult, Op1, Op2, PVarId, Quantification,
+        Eff, Expr, Id, Kind, Label, Mob, Mult, Op1, Op2, PVarId, Qualification, Quantification,
         QuantificationType, SEff, SExpr, SId, SMult, SPattern, SQualification, SQuantification,
         SSession, SType, Session, SessionOp, Type, UVarId,
     },
@@ -231,6 +231,14 @@ impl TypeChecker {
                 ))
             }
             Expr::Send(ty, val, chan) => {
+                dbg!(pretty_def(&val));
+                dbg!(pretty_def(&ty));
+                for q in &ty_ctx.qualifications {
+                    if let Qualification::Mobile(ty) = &q {
+                        dbg!(pretty_def(&q));
+                        dbg!(&ty.span);
+                    }
+                }
                 if !ty_ctx.mobile(&ty.val) {
                     return Err(TypeError::AbsNotMobile(e.clone(), ty.clone()));
                 }

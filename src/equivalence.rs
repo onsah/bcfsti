@@ -5,7 +5,11 @@ use crate::{
     util::span::fake_span,
 };
 
-use std::{collections::HashMap, io::Write, process::Command};
+use std::{
+    collections::HashMap,
+    io::{Read, Write},
+    process::Command,
+};
 
 #[allow(dead_code)]
 pub enum EquivalenceResult {
@@ -44,6 +48,11 @@ pub fn check_equivalence(type1: &Type, type2: &Type, alias_env: &AliasEnv) -> Eq
     writeln!(test_file, "right : T2 -> T1").unwrap();
     writeln!(test_file, "right x = x").unwrap();
 
+    println!(
+        "file: {}",
+        std::fs::read_to_string(test_file.path()).unwrap()
+    );
+
     let freest_cmd = Command::new("freest")
         .arg(test_file.path())
         .output()
@@ -59,8 +68,25 @@ pub fn check_equivalence(type1: &Type, type2: &Type, alias_env: &AliasEnv) -> Eq
 
 fn write_freest_type(name: &str, ty: &FreestType, test_file: &mut impl Write) {
     let kind = if ty.is_session_type() { "1S" } else { "1T" }.to_owned();
-    writeln!(test_file, "type {} : {}", name, kind).unwrap();
-    writeln!(test_file, "type {} = {}", name, ty).unwrap();
+    let poly_vars = ty.free_poly_variables();
+    write!(test_file, "type {} : ", name).unwrap();
+    for (_, kind) in poly_vars.iter() {
+        write!(
+            test_file,
+            "{} -> ",
+            match kind {
+                crate::freest::Kind::Type => "1T",
+                crate::freest::Kind::Session => "1S",
+            }
+        )
+        .unwrap();
+    }
+    writeln!(test_file, "{}", kind).unwrap();
+    write!(test_file, "type {} ", name).unwrap();
+    for (var, _) in poly_vars.iter() {
+        write!(test_file, "{} ", var).unwrap();
+    }
+    writeln!(test_file, "= {}", ty).unwrap();
 }
 
 pub fn check_equivalence_sessions(type1: &Session, type2: &Session) -> EquivalenceResult {
@@ -134,136 +160,154 @@ impl Definitions {
 }
 
 fn convert_type_impl(ty: &Type, defs: &mut Definitions) -> FreestType {
-    match ty {
-        Type::Chan(session) => convert_session_impl(session, defs),
-        Type::Arr {
-            mob,
-            mult,
-            eff,
-            param,
-            ret,
-        } => {
-            let mut labels = vec![mob.to_label(), mult.to_label()];
-            if let Some(label) = eff.to_label() {
-                labels.push(label);
-            }
+    fn helper(ty: &Type, defs: &mut Definitions) -> FreestType {
+        match ty {
+            Type::Chan(session) => convert_session_impl(session, defs),
+            Type::Arr {
+                mob,
+                mult,
+                eff,
+                param,
+                ret,
+            } => {
+                let mut labels = vec![mob.to_label(), mult.to_label()];
+                if let Some(label) = eff.to_label() {
+                    labels.push(label);
+                }
 
-            let param = convert_type_impl(&param.val, defs);
-            let ret = convert_type_impl(&ret.val, defs);
-            FreestType::Tuple(vec![
-                FreestType::Arrow {
-                    param: Box::new(param),
-                    ret: Box::new(ret),
-                }
-                .into(),
-                FreestType::Choice {
+                let param = convert_type_impl(&param.val, defs);
+                let ret = convert_type_impl(&ret.val, defs);
+                FreestType::Tuple(vec![
+                    FreestType::Arrow {
+                        param: Box::new(param),
+                        ret: Box::new(ret),
+                    }
+                    .into(),
+                    FreestType::Choice {
+                        dir: SessionOp::Recv,
+                        branches: labels
+                            .into_iter()
+                            .map(|label| (label.to_owned(), Box::new(FreestType::Skip)))
+                            .collect(),
+                    }
+                    .into(),
+                ])
+            }
+            Type::Prod {
+                mult,
+                first,
+                second,
+            } => {
+                let first = convert_type_impl(&first.val, defs);
+                let second = convert_type_impl(&second.val, defs);
+                FreestType::Tuple(vec![
+                    Box::new(first),
+                    Box::new(second),
+                    FreestType::Choice {
+                        dir: SessionOp::Recv,
+                        branches: vec![(
+                            mult.to_label().to_uppercase(),
+                            Box::new(FreestType::Skip),
+                        )],
+                    }
+                    .into(),
+                ])
+            }
+            Type::Variant(items) => FreestType::Tuple(vec![
+                Box::new(FreestType::Choice {
                     dir: SessionOp::Recv,
-                    branches: labels
+                    branches: items
                         .into_iter()
-                        .map(|label| (label.to_owned(), Box::new(FreestType::Skip)))
+                        .map(|(label, ty)| {
+                            let ty = convert_type_impl(&ty.val, defs);
+                            (label.val.to_uppercase(), Box::new(ty))
+                        })
                         .collect(),
-                }
-                .into(),
-            ])
-        }
-        Type::Prod {
-            mult,
-            first,
-            second,
-        } => {
-            let first = convert_type_impl(&first.val, defs);
-            let second = convert_type_impl(&second.val, defs);
-            FreestType::Tuple(vec![
-                Box::new(first),
-                Box::new(second),
-                FreestType::Choice {
+                }),
+                Box::new(FreestType::Choice {
                     dir: SessionOp::Recv,
-                    branches: vec![(mult.to_label().to_uppercase(), Box::new(FreestType::Skip))],
-                }
-                .into(),
-            ])
+                    branches: vec![("variant".to_uppercase(), Box::new(FreestType::Skip))],
+                }),
+            ]),
+            Type::Unit => FreestType::Unit,
+            Type::Int => FreestType::Int,
+            Type::Bool => FreestType::Bool,
+            Type::String => FreestType::String,
+            Type::Abstraction { .. } => todo!(),
+            Type::PVar { id, .. } => FreestType::PVar(id.clone(), crate::freest::Kind::Type),
         }
-        Type::Variant(items) => FreestType::Tuple(vec![
-            Box::new(FreestType::Choice {
-                dir: SessionOp::Recv,
-                branches: items
-                    .into_iter()
-                    .map(|(label, ty)| {
-                        let ty = convert_type_impl(&ty.val, defs);
-                        (label.val.to_uppercase(), Box::new(ty))
-                    })
-                    .collect(),
-            }),
-            Box::new(FreestType::Choice {
-                dir: SessionOp::Recv,
-                branches: vec![("variant".to_uppercase(), Box::new(FreestType::Skip))],
-            }),
-        ]),
-        Type::Unit => FreestType::Unit,
-        Type::Int => FreestType::Int,
-        Type::Bool => FreestType::Bool,
-        Type::String => FreestType::String,
-        Type::Abstraction { .. } => todo!(),
-        // FIXME: This should panic, instead we solve constraints
-        // with poly variables via syntactic simplification.
-        // Otherwise fail.
-        Type::PVar { id, .. } => panic!(
-            "Poly variable {:?} should be solved before translation to FreeST!",
-            id
-        ),
     }
+    let mut ty = helper(ty, defs);
+    // let poly_vars = ty.free_poly_variables();
+    // for var in poly_vars {
+    //     ty = FreestType::Forall {
+    //         var: var.clone(),
+    //         body: Box::new(ty),
+    //         kind: crate::freest::Kind::Type,
+    //     }
+    // }
+    ty
 }
 
 fn convert_session_impl(session: &Session, defs: &mut Definitions) -> FreestType {
-    match session {
-        Session::Skip => FreestType::Skip,
-        Session::Semi { first, second } => {
-            let first = convert_session_impl(&first.val, defs);
-            let second = convert_session_impl(&second.val, defs);
-            FreestType::Semi {
-                first: Box::new(first),
-                second: Box::new(second),
+    fn helper(session: &Session, defs: &mut Definitions) -> FreestType {
+        match session {
+            Session::Skip => FreestType::Skip,
+            Session::Semi { first, second } => {
+                let first = convert_session_impl(&first.val, defs);
+                let second = convert_session_impl(&second.val, defs);
+                FreestType::Semi {
+                    first: Box::new(first),
+                    second: Box::new(second),
+                }
             }
-        }
-        Session::End(session_op) => FreestType::End(*session_op),
-        Session::BorrowEnd(session_op) => FreestType::Message {
-            dir: *session_op,
-            ty: Box::new(FreestType::Var(FreestType::RET.into())),
-        },
-        Session::Op(session_op, ty) => {
-            let ty = convert_type_impl(&ty.val, defs);
-            FreestType::Message {
+            Session::End(session_op) => FreestType::End(*session_op),
+            Session::BorrowEnd(session_op) => FreestType::Message {
                 dir: *session_op,
-                ty: Box::new(ty),
+                ty: Box::new(FreestType::Var(FreestType::RET.into())),
+            },
+            Session::Op(session_op, ty) => {
+                let ty = convert_type_impl(&ty.val, defs);
+                FreestType::Message {
+                    dir: *session_op,
+                    ty: Box::new(ty),
+                }
             }
+            Session::Choice(session_op, items) => FreestType::Choice {
+                dir: *session_op,
+                branches: items
+                    .into_iter()
+                    .map(|(label, ty)| {
+                        let ty = convert_session_impl(&ty.val, defs);
+                        (label.val.to_uppercase(), Box::new(ty))
+                    })
+                    .collect(),
+            },
+            Session::Mu(var, body) => {
+                let label = defs.next_label();
+                // Subst the definition name to the body
+                let body = body.subst(&var.val, &Session::Var(fake_span(label.clone())));
+                let body = convert_session_impl(&body, defs);
+                defs.add(&label, body);
+                FreestType::Var(label)
+            }
+            Session::Var(var) => FreestType::Var(var.val.to_owned()),
+            Session::UVar(_) => {
+                panic!("Unification variables must be solved before translation to FreeST!")
+            }
+            Session::PVar { id, .. } => FreestType::PVar(id.clone(), crate::freest::Kind::Session),
         }
-        Session::Choice(session_op, items) => FreestType::Choice {
-            dir: *session_op,
-            branches: items
-                .into_iter()
-                .map(|(label, ty)| {
-                    let ty = convert_session_impl(&ty.val, defs);
-                    (label.val.to_uppercase(), Box::new(ty))
-                })
-                .collect(),
-        },
-        Session::Mu(var, body) => {
-            let label = defs.next_label();
-            // Subst the definition name to the body
-            let body = body.subst(&var.val, &Session::Var(fake_span(label.clone())));
-            let body = convert_session_impl(&body, defs);
-            defs.add(&label, body);
-            FreestType::Var(label)
-        }
-        Session::Var(var) => FreestType::Var(var.val.to_owned()),
-        Session::UVar(_) => {
-            panic!("Unification variables must be solved before translation to FreeST!")
-        }
-        Session::PVar { id, .. } => panic!(
-            "Poly variable {:?} should be solved before translation to FreeST!",
-            id
-        ),
     }
+    let mut ty = helper(session, defs);
+    // let poly_vars = ty.free_poly_variables();
+    // for var in poly_vars {
+    //     ty = FreestType::Forall {
+    //         var: var.clone(),
+    //         body: Box::new(ty),
+    //         kind: crate::freest::Kind::Type,
+    //     }
+    // }
+    ty
 }
 
 #[cfg(test)]

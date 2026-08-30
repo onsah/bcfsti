@@ -1,4 +1,5 @@
 use std::{
+    collections::{HashMap, HashSet},
     fmt::{self},
     hash::Hash,
 };
@@ -47,6 +48,7 @@ pub(crate) enum FreestType {
         body: Box<FreestType>,
     },
     Var(Label),
+    PVar(Label, Kind),
 }
 
 impl FreestType {
@@ -59,6 +61,48 @@ impl FreestType {
             | FreestType::Message { .. }
             | FreestType::Choice { .. } => true,
             _ => false,
+        }
+    }
+
+    pub fn free_poly_variables(&self) -> HashMap<Label, Kind> {
+        match self {
+            FreestType::Unit | FreestType::Int | FreestType::Bool | FreestType::String => {
+                HashMap::default()
+            }
+            FreestType::Tuple(fields) => {
+                let mut result = HashMap::new();
+                for ty in fields {
+                    result.extend(ty.free_poly_variables());
+                }
+                result
+            }
+            FreestType::Arrow { param, ret } => {
+                let mut result = param.free_poly_variables();
+                result.extend(ret.free_poly_variables());
+                result
+            }
+            FreestType::Skip => HashMap::default(),
+            FreestType::End(_) => HashMap::default(),
+            FreestType::Semi { first, second } => {
+                let mut result = first.free_poly_variables();
+                result.extend(second.free_poly_variables());
+                result
+            }
+            FreestType::Message { ty, .. } => ty.free_poly_variables(),
+            FreestType::Choice { branches, .. } => {
+                let mut result = HashMap::new();
+                for (_, ty) in branches {
+                    result.extend(ty.free_poly_variables());
+                }
+                result
+            }
+            FreestType::Forall { var, body, .. } => {
+                let mut free_in_body = body.free_poly_variables();
+                free_in_body.remove(var);
+                free_in_body
+            }
+            FreestType::Var(_) => HashMap::default(),
+            FreestType::PVar(label, kind) => HashMap::from([(label.clone(), kind.clone())]),
         }
     }
 }
@@ -115,14 +159,11 @@ impl fmt::Display for FreestType {
                 }
                 write!(f, "}}")
             }
-            FreestType::Forall { var, kind, body } => {
-                let kind = match kind {
-                    Kind::Type => "1T",
-                    Kind::Session => "1S",
-                };
-                write!(f, "(forall ({} : {}) -> {})", var, kind, body)
+            FreestType::Forall { var, body, .. } => {
+                write!(f, "(forall {} -> {})", var, body)
             }
             FreestType::Var(label) => write!(f, "{}", label),
+            FreestType::PVar(label, _) => write!(f, "{}", label),
         }
     }
 }
@@ -185,6 +226,7 @@ mod tests {
                     free_in_body
                 }
                 FreestType::Var(label) => HashSet::from([label.clone()]),
+                FreestType::PVar(_, _) => HashSet::default(),
             }
         }
     }
