@@ -3,8 +3,10 @@
   "permission": {
     "bash": {
       "*": "ask",
-      "git show *": "allow",
       "git *": "deny",
+      "git show *": "allow",
+      "git status *": "allow",
+      "git diff *": "allow",
       "npm *": "allow",
       "rm *": "deny",
       "grep *": "allow",
@@ -30,7 +32,9 @@
     "glob": {
       "*": "allow"
     },
-    "grep": "allow"
+    "grep": "allow",
+    "todowrite": "allow",
+    "lsp": "allow"
   },
   "lsp": {
     "rust": {
