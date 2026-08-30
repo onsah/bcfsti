@@ -9,7 +9,7 @@ let
     x + y
 in
 
-let
+let rec
   main : (mu X. ?Int; X) *[u] (mu X. !Int; X) -[m u 1]-> Unit
   main pair =
     let cin, cout = pair in

@@ -1,5 +1,5 @@
 type TreeChannel = (mu x. +{ leaf: Skip, node: !Int; x; x }) in
-let
+let rec
     sendTree : TreeChannel -[m u 1]-> Unit
     sendTree c =
         if true then

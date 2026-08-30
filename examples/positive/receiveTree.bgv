@@ -1,5 +1,5 @@
 rec type TreeChannel = &{ leaf: Skip, node: ?Int; TreeChannel; TreeChannel } in
-let
+let rec
     recvTree : TreeChannel -[m u 1]-> Unit
     recvTree c =
         case (branch c) {
