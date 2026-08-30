@@ -180,7 +180,7 @@ impl Equivalences {
     /// Unifies two regular types. When structures match, further subconstraints are generated.
     /// When a unification variable on one side is found, it's converted to an assignment.
     fn unify_type(ty_ctx: &TypeCtx, ty1: &Type, ty2: &Type) -> Result<Assignments, SolveError> {
-        if ty_ctx.equivalent(ty1, ty2) {
+        if ty1.sem_eq(ty2) {
             Ok(HashMap::new())
         } else {
             match (ty1, ty2) {
