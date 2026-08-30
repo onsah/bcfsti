@@ -740,7 +740,19 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                 )],
             ),
             TypeError::KindMismatch(spanned, kind, type_ctx) => todo!(),
-            TypeError::QualificationNotSatisfied(type_ctx, qualification) => todo!(),
+            TypeError::QualificationNotSatisfied(type_ctx, qualification) => report(
+                &src,
+                qualification.span.clone(),
+                "Type Error",
+                [label(
+                    qualification.span,
+                    format!(
+                        "Qualification {} is not satisfied under context {}",
+                        pretty_def(&qualification.val),
+                        pretty_def(&type_ctx)
+                    ),
+                )],
+            ),
             TypeError::UndefinedPVar(_, _) => todo!(),
             TypeError::AssignmentNotMobile { expr, id, ctx } => {
                 let (_, ty) = ctx.lookup_ord_pure(&ty_ctx, &id).unwrap();
