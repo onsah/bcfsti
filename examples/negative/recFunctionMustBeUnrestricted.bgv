@@ -1,0 +1,6 @@
+# Recursive `let` declarations must have unrestricted function types.
+let rec
+    foo : !Int -[m p 1]-> Unit
+    foo c = foo c
+in
+unit

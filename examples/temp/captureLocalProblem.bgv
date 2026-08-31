@@ -1,0 +1,12 @@
+let
+    foo : !Int; !String -[m u 1]-> !Int
+    foo c =
+        let c1, c2 = lsplit[!Int] c in
+        send[Int] 42 c1;
+        let
+            bar : Unit -[s p 1]-> !Int
+            bar x = c2
+        in
+            bar unit
+in
+unit

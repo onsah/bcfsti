@@ -1,0 +1,8 @@
+let rec
+    recvInf[a: Type]. mbl 'a ^ unr 'a : (mu X. ?'a;X) -[m u 1]-> Unit
+    recvInf c =
+        let c1, c2 = lsplit[?'a] c in
+        let t1 = recv['a] c1 in
+        recvInf['a] c2
+in
+unit

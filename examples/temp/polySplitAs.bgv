@@ -1,0 +1,5 @@
+let
+    split_as[a b c : Session]. 'a == ('b; 'c) : 'a -[m u 0]-> ('b *[l] 'c)
+    split_as x = lsplit['b] x
+in
+unit

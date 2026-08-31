@@ -1,0 +1,6 @@
+# Without `rec`, the function is not in scope in its own clause.
+let
+    foo : !Int -[m u 1]-> Unit
+    foo c = foo c
+in
+unit

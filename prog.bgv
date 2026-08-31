@@ -1,0 +1,6 @@
+let
+    foo[a : Type, b : Type] : 'a -[m u 1]-> Unit
+    foo x =
+        unit
+in
+unit

@@ -1,0 +1,9 @@
+let
+    foo[a : Session]. mbl 'a : (!Int; 'a) *[p] (!'a) -[m u 1]-> Unit
+    foo c =
+    	let c, x = c in
+    	let c1, c2 = lsplit[!Int] c in
+		send[Int] 42 c1;
+		send['a] x c2
+in
+unit
