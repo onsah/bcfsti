@@ -236,7 +236,7 @@ impl KindCheckState<'_> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::{BTreeMap, HashMap};
 
     use crate::{
         session_type,

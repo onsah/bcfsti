@@ -1,6 +1,6 @@
-use crate::util::span::{fake_span, Spanned};
+use crate::util::span::{Spanned, fake_span};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     hash::{Hash, Hasher},
     iter,
     ops::Deref,
@@ -396,11 +396,7 @@ impl Type {
             Type::PVar { id, dual } => {
                 if let Some(ty) = bindings.get(id) {
                     let ty = ty.val.clone();
-                    if *dual {
-                        ty.dual()
-                    } else {
-                        ty
-                    }
+                    if *dual { ty.dual() } else { ty }
                 } else {
                     self.clone()
                 }
@@ -582,19 +578,13 @@ impl Qualification {
     pub fn subst_poly(&self, bindings: &HashMap<PVarId, SType>) -> Qualification {
         match self {
             Qualification::Unr(t) => Qualification::Unr(t.val.subst_poly(bindings).into()),
-            Qualification::Mobile(t) => {
-                Qualification::Mobile(t.val.subst_poly(bindings).into())
-            }
-            Qualification::Bounded(s) => {
-                Qualification::Bounded(s.val.subst_poly(bindings).into())
-            }
+            Qualification::Mobile(t) => Qualification::Mobile(t.val.subst_poly(bindings).into()),
+            Qualification::Bounded(s) => Qualification::Bounded(s.val.subst_poly(bindings).into()),
             Qualification::New(s) => Qualification::New(s.val.subst_poly(bindings).into()),
             Qualification::Dualable(s) => {
                 Qualification::Dualable(s.val.subst_poly(bindings).into())
             }
-            Qualification::NonSkip(s) => {
-                Qualification::NonSkip(s.val.subst_poly(bindings).into())
-            }
+            Qualification::NonSkip(s) => Qualification::NonSkip(s.val.subst_poly(bindings).into()),
         }
     }
 }
@@ -912,11 +902,7 @@ impl Session {
                     let Type::Chan(session) = ty else {
                         panic!("Polymorphic variable substitution must be a session type.");
                     };
-                    if *dual {
-                        session.dual()
-                    } else {
-                        session
-                    }
+                    if *dual { session.dual() } else { session }
                 } else {
                     self.clone()
                 }

@@ -10,8 +10,8 @@ use crate::{
     session_type,
     syntax::{
         Eff, Expr, Id, Kind, Label, Mob, Mult, Op1, Op2, PVarId, Qualification, Quantification,
-        QuantificationType, SEff, SExpr, SId, SMult, SPattern, SQualification, SQuantification,
-        SSession, SType, Session, SessionOp, Type, UVarId,
+        QuantificationType, SEff, SExpr, SId, SKind, SMult, SPVarId, SPattern, SQualification,
+        SQuantification, SSession, SType, Session, SessionOp, Type, UVarId,
     },
     type_alias::AliasEnv,
     type_context::TypeCtx,
@@ -552,15 +552,7 @@ impl TypeChecker {
                         mobilities: Mobilities::new(),
                     }
                     .solve()?;
-                    self.check_equivalence(
-                        &local_solved_cs,
-                        &HashMap::from_iter(
-                            quant
-                                .bindings
-                                .iter()
-                                .map(|(id, kind)| (id.val.clone(), kind.val.clone())),
-                        ),
-                    )?;
+                    self.check_equivalence(&local_solved_cs, &quant.binding_lookup())?;
 
                     other_eqs
                 } else {
@@ -1349,6 +1341,13 @@ impl TypeChecker {
 impl Quantification {
     fn binding_ids(&self) -> HashSet<PVarId> {
         self.bindings.iter().map(|(id, _)| id.val.clone()).collect()
+    }
+
+    fn binding_lookup(&self) -> HashMap<PVarId, Kind> {
+        self.bindings
+            .iter()
+            .map(|(sid, skind)| (sid.val.clone(), skind.val.clone()))
+            .collect()
     }
 }
 
