@@ -62,22 +62,6 @@ impl Constraints {
         }
     }
 
-    pub fn add(&mut self, ty1: SType, ty2: SType) {
-        self.equivalences.add((ty1, ty2));
-    }
-
-    pub fn check_mobility(&mut self, expr: SExpr, ids: HashSet<SId>, ctx: Ctx) {
-        self.mobilities.add(expr, ids, ctx);
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &(SType, SType)> {
-        self.equivalences.iter()
-    }
-
-    pub fn into_iter(self) -> impl Iterator<Item = (SType, SType)> {
-        self.equivalences.into_iter()
-    }
-
     /// Solve the constraints by propagating assignments to unification variables until a fixed point is reached.
     /// If there is still no solution for some unification variables, `Skip` is substituted instead.
     pub fn solve(self) -> Result<Constraints, TypeError> {
@@ -85,7 +69,7 @@ impl Constraints {
     }
 
     /// Solve the constraints with a type context for checking mobility.
-    pub fn solve_with_type_ctx(self, ty_ctx: &TypeCtx) -> Result<Constraints, TypeError> {
+    fn solve_with_type_ctx(self, ty_ctx: &TypeCtx) -> Result<Constraints, TypeError> {
         let (assignments, equivalences) = self.equivalences.solve(ty_ctx);
 
         let unsolved_vars = equivalences.unsolved_variables();
@@ -117,7 +101,7 @@ impl Equivalences {
         Equivalences(eqs)
     }
 
-    fn join(self, other: Equivalences) -> Equivalences {
+    pub fn join(self, other: Equivalences) -> Equivalences {
         let mut equivalences = self.0;
         for constraint in other.0 {
             equivalences.insert(constraint);
@@ -125,11 +109,11 @@ impl Equivalences {
         Equivalences(equivalences)
     }
 
-    fn add(&mut self, constraint: (SType, SType)) {
+    pub fn add(&mut self, constraint: (SType, SType)) {
         self.0.insert(constraint);
     }
 
-    fn iter(&self) -> impl Iterator<Item = &(SType, SType)> {
+    pub fn iter(&self) -> impl Iterator<Item = &(SType, SType)> {
         self.0.iter()
     }
 
@@ -137,7 +121,7 @@ impl Equivalences {
         self.0.into_iter()
     }
 
-    pub fn solve(self, ty_ctx: &TypeCtx) -> (Assignments, Equivalences) {
+    fn solve(self, ty_ctx: &TypeCtx) -> (Assignments, Equivalences) {
         let mut assignments = Assignments::new();
         let mut equivelances: HashSet<(SType, SType)> = HashSet::new();
 
@@ -358,7 +342,7 @@ impl Mobilities {
         self
     }
 
-    fn add(&mut self, expr: SExpr, ids: HashSet<SId>, ctx: Ctx) {
+    pub fn add(&mut self, expr: SExpr, ids: HashSet<SId>, ctx: Ctx) {
         self.0.push((expr, ids, ctx));
     }
 
@@ -490,9 +474,13 @@ mod tests {
         let session2 = fake_span(Type::Chan(session_type! { ?Int }.val));
 
         let mut constraints = Constraints::empty();
-        constraints.add(uvar1.clone(), uvar2.clone());
-        constraints.add(uvar1.clone(), session1.clone());
-        constraints.add(uvar2.clone(), session2.clone());
+        constraints.equivalences.add((uvar1.clone(), uvar2.clone()));
+        constraints
+            .equivalences
+            .add((uvar1.clone(), session1.clone()));
+        constraints
+            .equivalences
+            .add((uvar2.clone(), session2.clone()));
 
         let solved = constraints.solve();
 
@@ -516,10 +504,14 @@ mod tests {
         let session2 = fake_span(Type::Chan(session_type! { ?Int }.val));
 
         let mut constraints = Constraints::empty();
-        constraints.add(uvar1.clone(), uvar2.clone());
-        constraints.add(uvar2.clone(), uvar3.clone());
-        constraints.add(uvar3.clone(), session1.clone());
-        constraints.add(uvar1.clone(), session2.clone());
+        constraints.equivalences.add((uvar1.clone(), uvar2.clone()));
+        constraints.equivalences.add((uvar2.clone(), uvar3.clone()));
+        constraints
+            .equivalences
+            .add((uvar3.clone(), session1.clone()));
+        constraints
+            .equivalences
+            .add((uvar1.clone(), session2.clone()));
 
         let solved = constraints.solve();
 
@@ -537,10 +529,10 @@ mod tests {
         let uvar2 = Session::UVar(2);
 
         let mut constraints = Constraints::empty();
-        constraints.add(
+        constraints.equivalences.add((
             fake_span(Type::Chan(uvar1.clone())),
             fake_span(Type::Chan(uvar2.clone())),
-        );
+        ));
 
         let solved = constraints.solve();
 
@@ -558,7 +550,7 @@ mod tests {
         let uvar2 = fake_span(Type::Chan(Session::UVar(2)));
 
         let mut constraints = Constraints::empty();
-        constraints.add(
+        constraints.equivalences.add((
             uvar1.clone(),
             fake_span(Type::Chan(
                 session_type! {
@@ -570,17 +562,17 @@ mod tests {
                 }
                 .val,
             )),
-        );
-        constraints.add(
+        ));
+        constraints.equivalences.add((
             uvar2.clone(),
             fake_span(Type::Chan(session_type! { ?String }.val)),
-        );
+        ));
 
         let solved = constraints.solve();
         assert_eq!(solved, Ok(Constraints::from_equivalences(HashSet::new())));
 
         let mut constraints = Constraints::empty();
-        constraints.add(
+        constraints.equivalences.add((
             fake_span(Type::Chan(
                 session_type! {
                     !(Type::Prod {
@@ -601,15 +593,15 @@ mod tests {
                 }
                 .val,
             )),
-        );
-        constraints.add(
+        ));
+        constraints.equivalences.add((
             uvar1.clone(),
             fake_span(Type::Chan(session_type! { !Int }.val)),
-        );
-        constraints.add(
+        ));
+        constraints.equivalences.add((
             uvar2.clone(),
             fake_span(Type::Chan(session_type! { ?String }.val)),
-        );
+        ));
 
         let solved = constraints.solve();
         assert_eq!(solved, Ok(Constraints::empty()));
@@ -621,7 +613,7 @@ mod tests {
         let uvar2 = fake_span(Type::Chan(Session::UVar(2)));
 
         let mut constraints = Constraints::empty();
-        constraints.add(
+        constraints.equivalences.add((
             uvar1.clone(),
             fake_span(Type::Chan(
                 session_type! {
@@ -635,17 +627,17 @@ mod tests {
                 }
                 .val,
             )),
-        );
-        constraints.add(
+        ));
+        constraints.equivalences.add((
             uvar2.clone(),
             fake_span(Type::Chan(session_type! { ?String }.val)),
-        );
+        ));
 
         let solved = constraints.solve();
         assert_eq!(solved, Ok(Constraints::from_equivalences(HashSet::new())));
 
         let mut constraints = Constraints::empty();
-        constraints.add(
+        constraints.equivalences.add((
             fake_span(Type::Chan(
                 session_type! {
                     !(Type::Arr {
@@ -670,15 +662,15 @@ mod tests {
                 }
                 .val,
             )),
-        );
-        constraints.add(
+        ));
+        constraints.equivalences.add((
             uvar1.clone(),
             fake_span(Type::Chan(session_type! { !Int }.val)),
-        );
-        constraints.add(
+        ));
+        constraints.equivalences.add((
             uvar2.clone(),
             fake_span(Type::Chan(session_type! { ?String }.val)),
-        );
+        ));
 
         let solved = constraints.solve();
         assert_eq!(solved, Ok(Constraints::empty()));
@@ -690,7 +682,7 @@ mod tests {
         let uvar2 = fake_span(Type::Chan(Session::UVar(2)));
 
         let mut constraints = Constraints::empty();
-        constraints.add(
+        constraints.equivalences.add((
             uvar1.clone(),
             fake_span(Type::Chan(
                 session_type! {
@@ -701,44 +693,41 @@ mod tests {
                 }
                 .val,
             )),
-        );
-        constraints.add(
+        ));
+        constraints.equivalences.add((
             uvar2.clone(),
             fake_span(Type::Chan(session_type! { ?String }.val)),
-        );
+        ));
 
         let solved = constraints.solve();
         assert_eq!(solved, Ok(Constraints::from_equivalences(HashSet::new())));
 
         let mut constraints = Constraints::empty();
-        constraints.add(
-            fake_span(Type::Chan(
-                session_type! {
-                    !(Type::Variant(vec![
-                        (fake_span("Left".to_string()), fake_span(uvar1.clone().val)),
-                        (fake_span("Right".to_string()), fake_span(Type::Chan(session_type! { ?String }.val)))
-                    ]))
-                }
-                .val,
-            )),
-            fake_span(Type::Chan(
-                session_type! {
-                    !(Type::Variant(vec![
-                        (fake_span("Left".to_string()), fake_span(Type::Chan(session_type! { !Int }.val))),
-                        (fake_span("Right".to_string()), fake_span(uvar2.clone().val))
-                    ]))
-                }
-                .val,
-            )),
-        );
-        constraints.add(
+        constraints.equivalences.add((fake_span(Type::Chan(
+            session_type! {
+                !(Type::Variant(vec![
+                    (fake_span("Left".to_string()), fake_span(uvar1.clone().val)),
+                    (fake_span("Right".to_string()), fake_span(Type::Chan(session_type! { ?String }.val)))
+                ]))
+            }
+            .val,
+        )), fake_span(Type::Chan(
+            session_type! {
+                !(Type::Variant(vec![
+                    (fake_span("Left".to_string()), fake_span(Type::Chan(session_type! { !Int }.val))),
+                    (fake_span("Right".to_string()), fake_span(uvar2.clone().val))
+                ]))
+            }
+            .val,
+        ))));
+        constraints.equivalences.add((
             uvar1.clone(),
             fake_span(Type::Chan(session_type! { !Int }.val)),
-        );
-        constraints.add(
+        ));
+        constraints.equivalences.add((
             uvar2.clone(),
             fake_span(Type::Chan(session_type! { ?String }.val)),
-        );
+        ));
 
         let solved = constraints.solve();
         assert_eq!(solved, Ok(Constraints::empty()));
@@ -750,22 +739,22 @@ mod tests {
         let uvar2 = Session::UVar(2);
 
         let mut constraints = Constraints::empty();
-        constraints.add(
+        constraints.equivalences.add((
             fake_span(Type::Chan(
                 session_type! { fake_span(Session::UVar(1)); !Int }.val,
             )),
             fake_span(Type::Chan(
                 session_type! { ?String; fake_span(Session::UVar(2)) }.val,
             )),
-        );
-        constraints.add(
+        ));
+        constraints.equivalences.add((
             fake_span(Type::Chan(uvar1.clone())),
             fake_span(Type::Chan(session_type! { ?String }.val)),
-        );
-        constraints.add(
+        ));
+        constraints.equivalences.add((
             fake_span(Type::Chan(uvar2.clone())),
             fake_span(Type::Chan(session_type! { !Int }.val)),
-        );
+        ));
 
         let solved = constraints.solve();
         assert_eq!(solved, Ok(Constraints::empty()));
@@ -776,14 +765,14 @@ mod tests {
         let uvar1 = Session::UVar(1);
 
         let mut constraints = Constraints::empty();
-        constraints.add(
+        constraints.equivalences.add((
             fake_span(Type::Chan(
                 session_type! { +{ left: !Int, right: fake_span(uvar1.clone()) } }.val,
             )),
             fake_span(Type::Chan(
                 session_type! { +{ left: !Int, right: ?String } }.val,
             )),
-        );
+        ));
 
         let solved = constraints.solve();
         assert_eq!(solved, Ok(Constraints::empty()));
@@ -794,12 +783,12 @@ mod tests {
         let uvar1 = Session::UVar(1);
 
         let mut constraints = Constraints::empty();
-        constraints.add(
+        constraints.equivalences.add((
             fake_span(Type::Chan(
                 session_type! { mu X. !Int; fake_span(uvar1.clone()) }.val,
             )),
             fake_span(Type::Chan(session_type! { mu X. !Int; X }.val)),
-        );
+        ));
 
         let solved = constraints.solve();
         assert_eq!(solved, Ok(Constraints::empty()));
@@ -812,23 +801,20 @@ mod tests {
 
         let mut constraints = Constraints::empty();
         // mu X. +{ a: !Int; X, b: !Bool; fake_span(uvar1) }
-        constraints.add(
-            fake_span(Type::Chan(
-                session_type! { mu X. +{ a: !Int; X, b: !Bool; fake_span(uvar1.clone()) } }.val,
-            )),
-            fake_span(Type::Chan(
-                session_type! { mu X. +{ a: !Int; X, b: !Bool; ?String; fake_span(uvar2.clone()) } }
-                    .val,
-            )),
-        );
-        constraints.add(
+        constraints.equivalences.add((fake_span(Type::Chan(
+            session_type! { mu X. +{ a: !Int; X, b: !Bool; fake_span(uvar1.clone()) } }.val,
+        )), fake_span(Type::Chan(
+            session_type! { mu X. +{ a: !Int; X, b: !Bool; ?String; fake_span(uvar2.clone()) } }
+                .val,
+        ))));
+        constraints.equivalences.add((
             fake_span(Type::Chan(uvar1.clone())),
             fake_span(Type::Chan(session_type! { ?String; Wait }.val)),
-        );
-        constraints.add(
+        ));
+        constraints.equivalences.add((
             fake_span(Type::Chan(uvar2.clone())),
             fake_span(Type::Chan(session_type! { Wait }.val)),
-        );
+        ));
 
         let solved = constraints.solve();
         assert_eq!(solved, Ok(Constraints::empty()));
@@ -840,24 +826,24 @@ mod tests {
         let uvar2 = Session::UVar(2);
 
         let mut constraints = Constraints::empty();
-        constraints.add(
+        constraints.equivalences.add((
             fake_span(Type::Chan(
                 session_type! { !Int; fake_span(uvar1.clone()) }.val,
             )),
             fake_span(Type::Chan(session_type! { !Int; ?String }.val)),
-        );
-        constraints.add(
+        ));
+        constraints.equivalences.add((
             fake_span(Type::Chan(
                 session_type! { !Int; fake_span(uvar2.clone()) }.val,
             )),
             fake_span(Type::Chan(
                 session_type! { !Int; fake_span(uvar1.clone()) }.val,
             )),
-        );
-        constraints.add(
+        ));
+        constraints.equivalences.add((
             fake_span(Type::Chan(uvar2.clone())),
             fake_span(Type::Chan(session_type! { ?String }.val)),
-        );
+        ));
 
         let solved = constraints.solve();
         assert_eq!(solved, Ok(Constraints::empty()));

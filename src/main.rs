@@ -129,7 +129,7 @@ fn constraints_check(cs: Constraints, alias_env: &AliasEnv, verbose: bool) -> Re
     if verbose {
         println!("===== CONSTRAINTS CHECKING =====");
         println!("Constraints to solve:");
-        for (ty1, ty2) in cs.iter() {
+        for (ty1, ty2) in cs.equivalences.iter() {
             println!("{} == {}", pretty_def(&ty1.val), pretty_def(&ty2.val));
         }
         println!();
@@ -139,13 +139,13 @@ fn constraints_check(cs: Constraints, alias_env: &AliasEnv, verbose: bool) -> Re
 
     if verbose {
         println!("Constraints:");
-        for (ty1, ty2) in cs.iter() {
+        for (ty1, ty2) in cs.equivalences.iter() {
             println!("{} == {}", pretty_def(&ty1.val), pretty_def(&ty2.val));
         }
         println!();
     }
 
-    for (ty1, ty2) in cs.iter() {
+    for (ty1, ty2) in cs.equivalences.iter() {
         match check_equivalence(&ty1.val, &ty2.val, alias_env, &HashMap::new()) {
             EquivalenceResult::Success => (),
             EquivalenceResult::Error { reason } => {

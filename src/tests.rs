@@ -116,39 +116,39 @@ mod typechecker_tests {
         let res = typecheck(src, false);
         let expected_constraints = {
             let mut cs = Constraints::empty();
-            cs.add(
+            cs.equivalences.add((
                 fake_span(Type::Chan(session_type! { Session::UVar(1) })),
                 fake_span(Type::Chan(session_type! { Ret }.val)),
-            );
-            cs.add(
+            ));
+            cs.equivalences.add((
                 fake_span(Type::Chan(session_type! { !Int; Ret }.val)),
                 fake_span(Type::Chan(
                     session_type! { !Int; fake_span(Session::UVar(1)) }.val,
                 )),
-            );
-            cs.add(
+            ));
+            cs.equivalences.add((
                 fake_span(Type::Chan(session_type! { !Int; ?Int }.val)),
                 fake_span(Type::Chan(
                     session_type! { !Int; fake_span(Session::UVar(0)) }.val,
                 )),
-            );
-            cs.add(
+            ));
+            cs.equivalences.add((
                 fake_span(Type::Chan(
                     session_type! { Acq; fake_span(Session::UVar(0)) }.val,
                 )),
                 fake_span(Type::Chan(session_type! { Acq; ?Int }.val)),
-            );
+            ));
             cs
         };
         assert_matches!(res, Ok((_, Type::Unit, _, _, Eff::No)));
         let Ok((_, _, _, constraints, _)) = res else {
             unreachable!()
         };
-        for c in constraints.iter() {
+        for c in constraints.equivalences.iter() {
             println!("{} = {}", pretty_def(&c.0), pretty_def(&c.1));
         }
         println!("====================");
-        for c in expected_constraints.iter() {
+        for c in expected_constraints.equivalences.iter() {
             println!("{} = {}", pretty_def(&c.0), pretty_def(&c.1));
         }
         assert_eq!(constraints, expected_constraints);
@@ -317,9 +317,12 @@ mod typechecker_tests {
         };
         let expected_constraints = {
             let mut cs = Constraints::empty();
-            cs.add(fake_span(Type::Int), fake_span(Type::String));
-            cs.add(fake_span(Type::Int), fake_span(Type::Bool));
-            cs.add(fake_span(Type::String), fake_span(Type::Bool));
+            cs.equivalences
+                .add((fake_span(Type::Int), fake_span(Type::String)));
+            cs.equivalences
+                .add((fake_span(Type::Int), fake_span(Type::Bool)));
+            cs.equivalences
+                .add((fake_span(Type::String), fake_span(Type::Bool)));
             cs
         };
         assert_eq!(cs, expected_constraints);
@@ -626,10 +629,14 @@ mod typechecker_tests {
             unreachable!()
         };
 
-        assert!(cs.into_iter().any(
-            |(ty1, ty2)| (ty1.val == Type::Int && ty2.val == Type::String)
-                || (ty1.val == Type::String && ty2.val == Type::Int)
-        ));
+        assert!(
+            cs.equivalences
+                .into_iter()
+                .any(
+                    |(ty1, ty2)| (ty1.val == Type::Int && ty2.val == Type::String)
+                        || (ty1.val == Type::String && ty2.val == Type::Int)
+                )
+        );
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use core::panic;
 use std::collections::{HashMap, HashSet};
 
 use crate::{
@@ -518,8 +519,6 @@ impl TypeChecker {
                     ));
                 }
 
-                let uvar_limit = self.uvar_counter;
-
                 // Add the function to the context when the declaration is
                 // recursive (`let rec`)
                 let clause_ctx = ctx.restrict(&clause.body.free_vars());
@@ -539,25 +538,23 @@ impl TypeChecker {
                 let (ty, let_cs, let_eff) =
                     self.infer_let_body(ctx, ty_ctx, e, id, &clause_ctx, &var_ty, var_eff, body)?;
 
+                // Solve constraints that relate to the polymorphic variables
+                // introduced in this scope
                 let cs = var_cs.join(let_cs);
-                let eqs: HashSet<_> = if let Some(quant) = quant {
-                    // Partition constraints as ones that only contains poly variables introduced here versus others
-                    let poly_vars: HashSet<_> = quant
-                        .bindings
-                        .iter()
-                        .map(|(id, _)| id.val.clone())
-                        .collect();
+                let eqs: Equivalences = if let Some(quant) = quant {
+                    let poly_bindings = quant.get_bindings();
 
+                    // Partition constraints as ones that only contains poly variables introduced here versus others
                     let (local_eqs, other_eqs) =
                         cs.equivalences.into_iter().partition(|(ty1, ty2)| {
                             ty1.val
                                 .poly_variables()
                                 .collect::<HashSet<_>>()
-                                .is_subset(&poly_vars)
+                                .is_subset(&poly_bindings)
                                 && ty2
                                     .poly_variables()
                                     .collect::<HashSet<_>>()
-                                    .is_subset(&poly_vars)
+                                    .is_subset(&poly_bindings)
                         });
 
                     let local_solved_cs = Constraints::from_equivalences(local_eqs).solve()?;
@@ -571,13 +568,13 @@ impl TypeChecker {
                         ),
                     )?;
 
-                    other_eqs
+                    Equivalences::from(other_eqs)
                 } else {
-                    cs.equivalences.into_iter().collect()
+                    cs.equivalences
                 };
 
                 let cs = Constraints {
-                    equivalences: Equivalences::from(eqs),
+                    equivalences: eqs,
                     mobilities: cs.mobilities,
                 };
 
@@ -654,7 +651,7 @@ impl TypeChecker {
                 let mut cs = expr_cs;
                 for (i, (_, (ty1, _, _))) in case_inferences.iter().enumerate() {
                     for (_, (ty2, _, _)) in case_inferences[i + 1..].iter() {
-                        cs.add(ty1.clone(), ty2.clone());
+                        cs.equivalences.add((ty1.clone(), ty2.clone()));
                     }
                 }
                 Ok((expr_ty, cs, expr_eff))
@@ -880,7 +877,7 @@ impl TypeChecker {
                 let (else_ty, else_cs, else_eff) = self.infer(&else_ctx, ty_ctx, else_expr)?;
 
                 let mut cs = cond_cs.join(then_cs).join(else_cs);
-                cs.add(then_ty.clone(), else_ty.clone());
+                cs.equivalences.add((then_ty.clone(), else_ty.clone()));
 
                 Ok((
                     then_ty,
@@ -1240,7 +1237,7 @@ impl TypeChecker {
                 // let expected_ty = self.expand_type(ty_ctx, expected_ty)?;
 
                 if !inferred_ty.sem_eq(&expected_ty) {
-                    cs.add(inferred_ty, expected_ty.clone());
+                    cs.equivalences.add((inferred_ty, expected_ty.clone()));
                 }
 
                 Ok((cs, eff))
@@ -1311,7 +1308,7 @@ impl TypeChecker {
         constraints: &Constraints,
         bindings: &HashMap<PVarId, Kind>,
     ) -> Result<(), TypeError> {
-        for (ty1, ty2) in constraints.iter() {
+        for (ty1, ty2) in constraints.equivalences.iter() {
             match check_equivalence(&ty1.val, &ty2.val, &self.alias_env, bindings) {
                 EquivalenceResult::Success => (),
                 EquivalenceResult::Error { reason } => Err(TypeError::TypesAreNotEquivalent {
@@ -1349,9 +1346,15 @@ impl TypeChecker {
             }
         }
         if !non_mobile_ids.is_empty() {
-            cs.check_mobility(expr.clone(), non_mobile_ids, ctx.clone());
+            cs.mobilities.add(expr.clone(), non_mobile_ids, ctx.clone());
         }
         Ok(())
+    }
+}
+
+impl Quantification {
+    fn get_bindings(&self) -> HashSet<PVarId> {
+        self.bindings.iter().map(|(id, _)| id.val.clone()).collect()
     }
 }
 
