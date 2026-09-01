@@ -2,7 +2,7 @@ use core::panic;
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    constraint::{Constraints, Equivalences},
+    constraint::{Constraints, Equivalences, Mobilities},
     context::{Ctx, JoinOrd, ext},
     equivalence::{EquivalenceResult, check_equivalence},
     kinding,
@@ -542,22 +542,16 @@ impl TypeChecker {
                 // introduced in this scope
                 let cs = var_cs.join(let_cs);
                 let eqs: Equivalences = if let Some(quant) = quant {
-                    let poly_bindings = quant.get_bindings();
+                    let poly_bindings = quant.binding_ids();
 
                     // Partition constraints as ones that only contains poly variables introduced here versus others
-                    let (local_eqs, other_eqs) =
-                        cs.equivalences.into_iter().partition(|(ty1, ty2)| {
-                            ty1.val
-                                .poly_variables()
-                                .collect::<HashSet<_>>()
-                                .is_subset(&poly_bindings)
-                                && ty2
-                                    .poly_variables()
-                                    .collect::<HashSet<_>>()
-                                    .is_subset(&poly_bindings)
-                        });
+                    let (local_eqs, other_eqs) = cs.equivalences.partition(&poly_bindings);
 
-                    let local_solved_cs = Constraints::from_equivalences(local_eqs).solve()?;
+                    let local_solved_cs = Constraints {
+                        equivalences: local_eqs,
+                        mobilities: Mobilities::new(),
+                    }
+                    .solve()?;
                     self.check_equivalence(
                         &local_solved_cs,
                         &HashMap::from_iter(
@@ -568,7 +562,7 @@ impl TypeChecker {
                         ),
                     )?;
 
-                    Equivalences::from(other_eqs)
+                    other_eqs
                 } else {
                     cs.equivalences
                 };
@@ -1353,7 +1347,7 @@ impl TypeChecker {
 }
 
 impl Quantification {
-    fn get_bindings(&self) -> HashSet<PVarId> {
+    fn binding_ids(&self) -> HashSet<PVarId> {
         self.bindings.iter().map(|(id, _)| id.val.clone()).collect()
     }
 }

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     context::Ctx,
-    syntax::{SExpr, SId, SType, Session, Type, UVarId},
+    syntax::{PVarId, SExpr, SId, SType, Session, Type, UVarId},
     type_checker::TypeError,
     type_context::TypeCtx,
     util::span::{Spanned, fake_span},
@@ -119,6 +119,26 @@ impl Equivalences {
 
     pub fn into_iter(self) -> impl Iterator<Item = (SType, SType)> {
         self.0.into_iter()
+    }
+
+    /// Partition equivalences into ones that contains polymorphic variable from
+    /// `pvars` vs ones that don't
+    pub fn partition(self, pvars: &HashSet<PVarId>) -> (Equivalences, Equivalences) {
+        let (with_pvars, without_pvars) = self.into_iter().partition(|(ty1, ty2)| {
+            ty1.val
+                .poly_variables()
+                .collect::<HashSet<_>>()
+                .is_subset(&pvars)
+                || ty2
+                    .poly_variables()
+                    .collect::<HashSet<_>>()
+                    .is_subset(&pvars)
+        });
+
+        (
+            Equivalences::from(with_pvars),
+            Equivalences::from(without_pvars),
+        )
     }
 
     fn solve(self, ty_ctx: &TypeCtx) -> (Assignments, Equivalences) {
@@ -333,7 +353,7 @@ impl From<HashSet<(SType, SType)>> for Equivalences {
 }
 
 impl Mobilities {
-    fn new() -> Mobilities {
+    pub fn new() -> Mobilities {
         Mobilities(Vec::new())
     }
 
