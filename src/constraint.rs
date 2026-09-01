@@ -10,12 +10,12 @@ use crate::{
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Constraints {
-    equivalences: Equivalences,
-    mobilities: Mobilities,
+    pub equivalences: Equivalences,
+    pub mobilities: Mobilities,
 }
 
 #[derive(Debug, Clone)]
-struct Equivalences(HashSet<(SType, SType)>);
+pub struct Equivalences(HashSet<(SType, SType)>);
 
 impl PartialEq for Equivalences {
     fn eq(&self, other: &Self) -> bool {
@@ -36,7 +36,7 @@ impl PartialEq for Equivalences {
 impl Eq for Equivalences {}
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-struct Mobilities(Vec<(SExpr, HashSet<SId>, Ctx)>);
+pub struct Mobilities(Vec<(SExpr, HashSet<SId>, Ctx)>);
 
 type Assignments = HashMap<UVarId, Session>;
 
@@ -90,7 +90,9 @@ impl Constraints {
 
         let unsolved_vars = equivalences.unsolved_variables();
         if !unsolved_vars.is_empty() {
-            return Err(TypeError::VariablesUnsolvable { vars: unsolved_vars });
+            return Err(TypeError::VariablesUnsolvable {
+                vars: unsolved_vars,
+            });
         }
 
         self.mobilities.check(ty_ctx, &assignments)?;
@@ -111,6 +113,10 @@ impl Equivalences {
         Equivalences(HashSet::new())
     }
 
+    pub fn from(eqs: HashSet<(SType, SType)>) -> Self {
+        Equivalences(eqs)
+    }
+
     fn join(self, other: Equivalences) -> Equivalences {
         let mut equivalences = self.0;
         for constraint in other.0 {
@@ -127,7 +133,7 @@ impl Equivalences {
         self.0.iter()
     }
 
-    fn into_iter(self) -> impl Iterator<Item = (SType, SType)> {
+    pub fn into_iter(self) -> impl Iterator<Item = (SType, SType)> {
         self.0.into_iter()
     }
 
@@ -356,11 +362,7 @@ impl Mobilities {
         self.0.push((expr, ids, ctx));
     }
 
-    fn check(
-        mut self,
-        ty_ctx: &TypeCtx,
-        assignments: &Assignments,
-    ) -> Result<(), TypeError> {
+    fn check(mut self, ty_ctx: &TypeCtx, assignments: &Assignments) -> Result<(), TypeError> {
         for (expr, ids, ctx) in self.0.iter_mut() {
             subst_ctx(ctx, &assignments);
             let binds = ctx.binds();

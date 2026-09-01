@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    constraint::Constraints,
+    constraint::{Constraints, Equivalences},
     context::{Ctx, JoinOrd, ext},
+    equivalence::{EquivalenceResult, check_equivalence},
     kinding,
     normalization::{normalise, normalise_session},
     session_type,
@@ -72,8 +73,19 @@ pub enum TypeError {
     KindMismatch(SType, Kind, TypeCtx),
     QualificationNotSatisfied(TypeCtx, SQualification),
     UndefinedPVar(SType, PVarId),
-    VariablesUnsolvable { vars: HashSet<UVarId> },
-    AssignmentNotMobile { expr: SExpr, id: SId, ctx: Ctx },
+    VariablesUnsolvable {
+        vars: HashSet<UVarId>,
+    },
+    AssignmentNotMobile {
+        expr: SExpr,
+        id: SId,
+        ctx: Ctx,
+    },
+    TypesAreNotEquivalent {
+        ty1: SType,
+        ty2: SType,
+        reason: String,
+    },
 }
 
 pub fn infer_type(e: &SExpr, alias_env: AliasEnv) -> Result<(SType, Constraints, Eff), TypeError> {
@@ -506,6 +518,8 @@ impl TypeChecker {
                     ));
                 }
 
+                let uvar_limit = self.uvar_counter;
+
                 // Add the function to the context when the declaration is
                 // recursive (`let rec`)
                 let clause_ctx = ctx.restrict(&clause.body.free_vars());
@@ -524,7 +538,50 @@ impl TypeChecker {
 
                 let (ty, let_cs, let_eff) =
                     self.infer_let_body(ctx, ty_ctx, e, id, &clause_ctx, &var_ty, var_eff, body)?;
-                Ok((ty, var_cs.join(let_cs), Eff::lub(var_eff, let_eff)))
+
+                let cs = var_cs.join(let_cs);
+                let eqs: HashSet<_> = if let Some(quant) = quant {
+                    // Partition constraints as ones that only contains poly variables introduced here versus others
+                    let poly_vars: HashSet<_> = quant
+                        .bindings
+                        .iter()
+                        .map(|(id, _)| id.val.clone())
+                        .collect();
+
+                    let (local_eqs, other_eqs) =
+                        cs.equivalences.into_iter().partition(|(ty1, ty2)| {
+                            ty1.val
+                                .poly_variables()
+                                .collect::<HashSet<_>>()
+                                .is_subset(&poly_vars)
+                                && ty2
+                                    .poly_variables()
+                                    .collect::<HashSet<_>>()
+                                    .is_subset(&poly_vars)
+                        });
+
+                    let local_solved_cs = Constraints::from_equivalences(local_eqs).solve()?;
+                    self.check_equivalence(
+                        &local_solved_cs,
+                        &HashMap::from_iter(
+                            quant
+                                .bindings
+                                .iter()
+                                .map(|(id, kind)| (id.val.clone(), kind.val.clone())),
+                        ),
+                    )?;
+
+                    other_eqs
+                } else {
+                    cs.equivalences.into_iter().collect()
+                };
+
+                let cs = Constraints {
+                    equivalences: Equivalences::from(eqs),
+                    mobilities: cs.mobilities,
+                };
+
+                Ok((ty, cs, Eff::lub(var_eff, let_eff)))
             }
             Expr::CaseSum(expr, cases) => {
                 let expr_ctx = ctx.restrict(&expr.free_vars());
@@ -1247,6 +1304,24 @@ impl TypeChecker {
         let id = self.uvar_counter;
         self.uvar_counter += 1;
         fake_span(Session::UVar(id))
+    }
+
+    fn check_equivalence(
+        &self,
+        constraints: &Constraints,
+        bindings: &HashMap<PVarId, Kind>,
+    ) -> Result<(), TypeError> {
+        for (ty1, ty2) in constraints.iter() {
+            match check_equivalence(&ty1.val, &ty2.val, &self.alias_env, bindings) {
+                EquivalenceResult::Success => (),
+                EquivalenceResult::Error { reason } => Err(TypeError::TypesAreNotEquivalent {
+                    ty1: ty1.clone(),
+                    ty2: ty2.clone(),
+                    reason,
+                })?,
+            }
+        }
+        Ok(())
     }
 
     fn check_mobility(

@@ -22,7 +22,7 @@ mod tests;
 #[cfg(test)]
 extern crate proptest;
 
-use std::process::exit;
+use std::{collections::HashMap, process::exit};
 
 use clap::Parser;
 use syntax::SExpr;
@@ -35,6 +35,7 @@ use crate::{
     lexer::Token,
     syntax::{Eff, Type},
     type_alias::AliasEnv,
+    type_checker::TypeError,
     util::{
         lexer_offside::{self, Braced},
         pretty::pretty_def,
@@ -145,13 +146,15 @@ fn constraints_check(cs: Constraints, alias_env: &AliasEnv, verbose: bool) -> Re
     }
 
     for (ty1, ty2) in cs.iter() {
-        match check_equivalence(&ty1.val, &ty2.val, alias_env) {
+        match check_equivalence(&ty1.val, &ty2.val, alias_env, &HashMap::new()) {
             EquivalenceResult::Success => (),
-            EquivalenceResult::Error { reason } => Err(IErr::Equivalence {
-                ty1: ty1.clone(),
-                ty2: ty2.clone(),
-                reason,
-            })?,
+            EquivalenceResult::Error { reason } => {
+                Err(IErr::Typing(TypeError::TypesAreNotEquivalent {
+                    ty1: ty1.clone(),
+                    ty2: ty2.clone(),
+                    reason,
+                }))?
+            }
         }
     }
     Ok(())

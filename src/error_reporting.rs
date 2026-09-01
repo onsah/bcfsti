@@ -15,11 +15,6 @@ pub enum IErr {
     Lexer(LexerError),
     Parser(ParseError<usize>),
     Typing(TypeError),
-    Equivalence {
-        ty1: SType,
-        ty2: SType,
-        reason: String,
-    },
 }
 
 pub struct CSource {
@@ -781,22 +776,22 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     )],
                 );
             }
-        },
-        IErr::Equivalence { ty1, ty2, reason } => {
-            report(
-                &src,
-                0..1,
-                "Eqivalence Error",
-                [label(
+            TypeError::TypesAreNotEquivalent { ty1, ty2, reason } => {
+                report(
+                    &src,
                     0..1,
-                    format!(
-                        "Type {} is not equivalent to type {}. Reason: {}",
-                        pretty_def(&ty1.val),
-                        pretty_def(&ty2.val),
-                        reason
-                    ),
-                )],
-            );
-        }
+                    "Eqivalence Error",
+                    [label(
+                        0..1,
+                        format!(
+                            "Type {} is not equivalent to type {}. Reason: {}",
+                            pretty_def(&ty1.val),
+                            pretty_def(&ty2.val),
+                            reason
+                        ),
+                    )],
+                );
+            }
+        },
     }
 }
