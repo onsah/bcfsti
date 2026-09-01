@@ -428,7 +428,6 @@ mod tests {
             assert!(freest_available(), "'freest' executable not found on PATH");
             let mut test_file = Builder::new().suffix(".fst").disable_cleanup(true).tempfile()?;
             writeln!(test_file, "
-                module Test where
                 type T : 1T
                 type T = {}", ty)?;
             test_file.flush()?;
@@ -444,7 +443,7 @@ mod tests {
         #![proptest_config(ProptestConfig {
             // Setting both fork and timeout is redundant since timeout implies
             // fork, but both are shown for clarity.
-            fork: true,
+            fork: false,
             cases: 10,
             max_global_rejects: 1,
             .. ProptestConfig::default()
@@ -461,8 +460,7 @@ mod tests {
 
             let mut test_file = Builder::new().suffix(".fst").disable_cleanup(true).tempfile()?;
             writeln!(test_file, "
-                module Test where
-                type T : 1S
+                type T : 1T
                 type T = {}", ty)?;
             test_file.flush()?;
 
