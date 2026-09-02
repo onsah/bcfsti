@@ -898,11 +898,21 @@ impl Session {
         match self {
             Session::PVar { id, dual } => {
                 if let Some(ty) = bindings.get(id) {
-                    let ty = ty.val.clone();
-                    let Type::Chan(session) = ty else {
-                        panic!("Polymorphic variable substitution must be a session type.");
+                    let session = match &ty.val {
+                        Type::Chan(session) => session,
+                        // Whether it's type pvar or session pvar
+                        // is syntax related, not kind related
+                        Type::PVar { id, dual } => &Session::PVar {
+                            id: id.clone(),
+                            dual: *dual,
+                        },
+                        _ => panic!("Polymorphic variable substitution must be a session type."),
                     };
-                    if *dual { session.dual() } else { session }
+                    if *dual {
+                        session.dual()
+                    } else {
+                        session.clone()
+                    }
                 } else {
                     self.clone()
                 }

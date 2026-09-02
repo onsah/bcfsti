@@ -1,0 +1,10 @@
+let
+    foo[a: Session] : ('a;'a) -[m u 1]-> ('a *[l] 'a)
+    foo c =
+        let
+            bar[b: Session] : ('a;'b) -[m u 1]-> ('a *[l] 'b)
+            bar c1 = lsplit['a] c1
+        in
+        bar['a] c
+in
+    unit

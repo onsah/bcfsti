@@ -245,14 +245,6 @@ impl TypeChecker {
                 ))
             }
             Expr::Send(ty, val, chan) => {
-                dbg!(pretty_def(&val));
-                dbg!(pretty_def(&ty));
-                for q in &ty_ctx.qualifications {
-                    if let Qualification::Mobile(ty) = &q {
-                        dbg!(pretty_def(&q));
-                        dbg!(&ty.span);
-                    }
-                }
                 if !ty_ctx.mobile(&ty.val) {
                     return Err(TypeError::AbsNotMobile(e.clone(), ty.clone()));
                 }
