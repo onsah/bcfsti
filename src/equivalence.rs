@@ -5,7 +5,7 @@ use crate::{
     util::span::fake_span,
 };
 
-use std::{collections::HashMap, io::Write, process::Command};
+use std::{collections::HashMap, io::Write, process::Command, ptr::write};
 
 #[allow(dead_code)]
 pub enum EquivalenceResult {
@@ -63,10 +63,10 @@ pub fn check_equivalence(
     );
     writeln!(test_file, "right x = x").unwrap();
 
-    // println!(
-    //     "file: {}",
-    //     std::fs::read_to_string(test_file.path()).unwrap()
-    // );
+    println!(
+        "file: {}",
+        std::fs::read_to_string(test_file.path()).unwrap()
+    );
 
     let freest_cmd = Command::new("freest")
         .arg(test_file.path())
@@ -91,6 +91,18 @@ fn write_fn_type(
     type2: &FreestType,
 ) {
     write!(test_file, "{} : ", name).unwrap();
+
+    let mut poly_ids: Vec<_> = type1.free_poly_variables().into_keys().collect();
+    poly_ids.extend(type2.free_poly_variables().into_keys());
+
+    if !poly_ids.is_empty() {
+        write!(test_file, "forall ").unwrap();
+        for id in poly_ids.into_iter() {
+            write!(test_file, "{id} ").unwrap();
+        }
+        write!(test_file, "-> ").unwrap();
+    }
+
     write_inline(type1_name, &type1, test_file);
     write!(test_file, " -> ").unwrap();
     write_inline(type2_name, &type2, test_file);
@@ -98,16 +110,11 @@ fn write_fn_type(
 }
 
 fn write_inline(name: &str, ty: &FreestType, test_file: &mut impl Write) {
-    write!(test_file, "(").unwrap();
+    write!(test_file, "{name}").unwrap();
     let pvars = ty.free_poly_variables();
     for (id, _) in pvars.iter() {
-        write!(test_file, "forall {} -> ", id).unwrap();
+        write!(test_file, " {id}").unwrap();
     }
-    write!(test_file, "{}", name).unwrap();
-    for (id, _) in pvars.iter() {
-        write!(test_file, " {}", id).unwrap();
-    }
-    write!(test_file, ")").unwrap();
 }
 
 fn write_freest_type(name: &str, ty: &FreestType, test_file: &mut impl Write) {
