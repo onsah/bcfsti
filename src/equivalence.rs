@@ -121,6 +121,8 @@ fn write_freest_type(name: &str, ty: &FreestType, test_file: &mut impl Write) {
     let kind = if ty.is_session_type() { "1S" } else { "1T" }.to_owned();
     let poly_vars = ty.free_poly_variables();
     write!(test_file, "type {} : ", name).unwrap();
+    // CAREFUL: The order of iter is arbitrary but here it works because the iter call
+    // later is done on the same collection hence the ordering matches
     for (_, kind) in poly_vars.iter() {
         write!(
             test_file,
