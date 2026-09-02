@@ -106,7 +106,7 @@ impl Session {
             Session::Mu(_, body) => body.is_closed(),
             Session::Var(_) => true,
             Session::UVar(_) => false,
-            Session::PVar { .. } => todo!(),
+            Session::PVar { .. } => true,
         }
     }
 

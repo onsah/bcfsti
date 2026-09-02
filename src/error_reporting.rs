@@ -721,6 +721,19 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     ),
                 )],
             ),
+            TypeError::PolymorphicFunctionMustBeUnrestricted(ty, id) => report(
+                &src,
+                id.span.clone(),
+                "Type Error",
+                [label(
+                    id.span.clone(),
+                    format!(
+                        "Polymorphic function {} must have an unrestricted function type, but has type {}",
+                        pretty_def(&id),
+                        pretty_def(&ty.val)
+                    ),
+                )],
+            ),
             TypeError::UnrArrMustBeMobile(ty, mob) => report(
                 &src,
                 ty.span.clone(),

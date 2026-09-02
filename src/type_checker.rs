@@ -60,6 +60,7 @@ pub enum TypeError {
     VariantDuplicateLabel(SExpr, SType, Label),
     RecursiveNonFunctionBinding(SExpr, SId),
     RecursiveFunctionMustBeUnrestricted(SType, SId),
+    PolymorphicFunctionMustBeUnrestricted(SType, SId),
     WfNonContractive(SSession, SId),
     WfEmptyChoice(SSession),
     WfEmptyVariant(SType),
@@ -500,15 +501,6 @@ impl TypeChecker {
                 Ok((body_ty, var_cs.join(body_cs), Eff::lub(var_eff, body_eff)))
             }
             Expr::LetDecl(id, var_ty, quant, clause, body, is_rec) => {
-                let (var_ty, var_body) = {
-                    // Desugar clause to an abstraction
-                    let var_body = Spanned::new(
-                        Expr::Abs(clause.var_id.clone(), Box::new(clause.body.clone())),
-                        clause.span.clone(),
-                    );
-                    Self::desugar_quantification(quant.clone(), var_ty.clone(), var_body)
-                };
-
                 if *is_rec
                     && let Type::Arr { mult, .. } = &var_ty.val
                     && mult.val != Mult::Unr
@@ -518,6 +510,25 @@ impl TypeChecker {
                         id.clone(),
                     ));
                 }
+
+                if quant.is_some()
+                    && let Type::Arr { mult, .. } = &var_ty.val
+                    && mult.val != Mult::Unr
+                {
+                    return Err(TypeError::PolymorphicFunctionMustBeUnrestricted(
+                        var_ty.clone(),
+                        id.clone(),
+                    ));
+                }
+
+                let (var_ty, var_body) = {
+                    // Desugar clause to an abstraction
+                    let var_body = Spanned::new(
+                        Expr::Abs(clause.var_id.clone(), Box::new(clause.body.clone())),
+                        clause.span.clone(),
+                    );
+                    Self::desugar_quantification(quant.clone(), var_ty.clone(), var_body)
+                };
 
                 // Add the function to the context when the declaration is
                 // recursive (`let rec`)
@@ -538,33 +549,7 @@ impl TypeChecker {
                 let (ty, let_cs, let_eff) =
                     self.infer_let_body(ctx, ty_ctx, e, id, &clause_ctx, &var_ty, var_eff, body)?;
 
-                // Solve constraints that relate to the polymorphic variables
-                // introduced in this scope
-                let cs = var_cs.join(let_cs);
-                let eqs: Equivalences = if let Some(quant) = quant {
-                    let poly_bindings = quant.binding_ids();
-
-                    // Partition constraints as ones that only contains poly variables introduced here versus others
-                    let (local_eqs, other_eqs) = cs.equivalences.partition(&poly_bindings);
-
-                    let local_solved_cs = Constraints {
-                        equivalences: local_eqs,
-                        mobilities: Mobilities::new(),
-                    }
-                    .solve()?;
-                    self.check_equivalence(&local_solved_cs, &quant.binding_lookup())?;
-
-                    other_eqs
-                } else {
-                    cs.equivalences
-                };
-
-                let cs = Constraints {
-                    equivalences: eqs,
-                    mobilities: cs.mobilities,
-                };
-
-                Ok((ty, cs, Eff::lub(var_eff, let_eff)))
+                Ok((ty, var_cs.join(let_cs), Eff::lub(var_eff, let_eff)))
             }
             Expr::CaseSum(expr, cases) => {
                 let expr_ctx = ctx.restrict(&expr.free_vars());
@@ -1179,6 +1164,7 @@ impl TypeChecker {
                     .bindings
                     .iter()
                     .map(|(id, _)| id)
+                    // FIXME: Wrong context!
                     .find(|id| ctx.vars().contains(&id.val))
                 {
                     return Err(TypeError::Shadowing(e.clone(), id.clone()));
@@ -1215,7 +1201,12 @@ impl TypeChecker {
 
                 let ty_ctx =
                     ty_ctx.extend_qualifications(qualifications.into_iter().map(|q| q.val));
-                self.check(&ctx, &ty_ctx, expr, expr_ty)
+                let (cs, eff) = self.check(&ctx, &ty_ctx, expr, expr_ty)?;
+
+                let cs = cs.solve()?;
+                self.check_equivalence(&cs, &ty_ctx.vars)?;
+
+                Ok((Constraints::empty(), eff))
             }
             _ => {
                 let (inferred_ty, mut cs, eff) = self.infer(ctx, ty_ctx, e)?;
