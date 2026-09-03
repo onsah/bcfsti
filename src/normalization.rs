@@ -140,7 +140,7 @@ fn subst_session(session: &Session, var: &Id, s_new: &Session) -> Session {
         | Session::Skip
         | Session::UVar(_)
         | Session::PVar { .. } => session.clone(),
-        _ => unreachable!("Value type in session substitution"),
+        _ => unreachable!("Regular type in session substitution"),
     }
 }
 

@@ -60,170 +60,6 @@ pub type UVarId = usize;
 pub type PVarId = Label;
 pub type SPVarId = Spanned<PVarId>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum Session {
-    Skip,
-    Semi {
-        first: Box<SSession>,
-        second: Box<SSession>,
-    },
-    End(SessionOp),
-    BorrowEnd(SessionOp),
-    Op(SessionOp, Box<SType>),
-    Choice(SessionOp, Vec<(SLabel, SSession)>),
-    Mu(SId, Box<SSession>),
-    Var(SId),
-    // Unification variable introduced from splits
-    UVar(UVarId),
-    PVar {
-        id: PVarId,
-        dual: bool,
-    },
-}
-pub type SSession = Spanned<Session>;
-
-impl Session {
-    pub fn is_only_skips(&self) -> bool {
-        match self {
-            Session::Skip => true,
-            Session::Semi { first, second } => first.is_only_skips() && second.is_only_skips(),
-            Session::Mu(_, body) => body.is_only_skips(),
-            _ => false,
-        }
-    }
-
-    /// Closed session means it has no unification variables.
-    pub fn is_closed(&self) -> bool {
-        match self {
-            Session::Skip => true,
-            Session::Semi { first, second } => first.is_closed() && second.is_closed(),
-            Session::End(_) => true,
-            Session::BorrowEnd(_) => true,
-            Session::Op(_, t) => t.is_closed(),
-            Session::Choice(_, cs) => cs.iter().all(|(_, s)| s.is_closed()),
-            Session::Mu(_, body) => body.is_closed(),
-            Session::Var(_) => true,
-            Session::UVar(_) => false,
-            Session::PVar { .. } => true,
-        }
-    }
-
-    pub fn unification_variables(&self) -> HashSet<UVarId> {
-        match self {
-            Session::Skip => HashSet::new(),
-            Session::Semi { first, second } => union(
-                first.unification_variables(),
-                second.unification_variables(),
-            ),
-            Session::End(_) => HashSet::new(),
-            Session::BorrowEnd(_) => HashSet::new(),
-            Session::Op(_, t) => t.unification_variables(),
-            Session::Choice(_, cs) => cs
-                .iter()
-                .flat_map(|(_, s)| s.unification_variables())
-                .collect(),
-            Session::Mu(_, body) => body.unification_variables(),
-            Session::Var(_) => HashSet::new(),
-            Session::UVar(x) => HashSet::from([*x]),
-            Session::PVar { .. } => HashSet::new(),
-        }
-    }
-
-    pub fn poly_variables<'a>(&'a self) -> Box<dyn Iterator<Item = PVarId> + 'a> {
-        match self {
-            Session::Skip => Box::new(iter::empty()),
-            Session::Semi { first, second } => {
-                Box::new(first.poly_variables().chain(second.poly_variables()))
-            }
-            Session::End(_) => Box::new(iter::empty()),
-            Session::BorrowEnd(_) => Box::new(iter::empty()),
-            Session::Op(_, t) => t.poly_variables_under_prod_and_variant(),
-            Session::Choice(_, cs) => Box::new(cs.iter().flat_map(|(_, s)| s.poly_variables())),
-            Session::Mu(_, body) => body.poly_variables(),
-            Session::Var(_) => Box::new(iter::empty()),
-            Session::UVar(_) => Box::new(iter::empty()),
-            Session::PVar { id, .. } => Box::new(iter::once(id.clone())),
-        }
-    }
-
-    pub fn is_contractive_on(&self, var: &SId) -> bool {
-        match self {
-            Session::Skip => true,
-            Session::Semi { first, second } => match first.is_only_skips() {
-                true => second.is_contractive_on(var),
-                false => first.is_contractive_on(var),
-            },
-            Session::End(_) => true,
-            Session::BorrowEnd(_) => true,
-            Session::Op(_, _) => true,
-            Session::Choice(_, _) => true,
-            Session::Mu(_, body) => body.is_contractive_on(var),
-            Session::Var(id) => id != var,
-            Session::UVar(_) => true,
-            Session::PVar { .. } => todo!(),
-        }
-    }
-}
-
-impl Session {
-    pub fn sem_eq(&self, other: &Self) -> bool {
-        self.sem_eq_(other, &HashSet::new())
-    }
-
-    fn sem_eq_(&self, other: &Self, seen: &HashSet<(Session, Session)>) -> bool {
-        let mut seen = seen.clone();
-        if !seen.insert((self.clone(), other.clone())) {
-            return true;
-        } else {
-            match (self, other) {
-                (Session::Op(op1, t1), Session::Op(op2, t2)) => op1 == op2 && t1.sem_eq(t2),
-                (Session::End(op1), Session::End(op2)) => op1 == op2,
-                (Session::BorrowEnd(end1), Session::BorrowEnd(end2)) => end1 == end2,
-                (Session::Choice(op1, cs1), Session::Choice(op2, cs2)) if op1 == op2 => {
-                    if let Some(cs) = merge_clauses(cs1, cs2, false) {
-                        cs.iter().all(|(_, s1, s2)| s1.sem_eq_(s2, &seen))
-                    } else {
-                        false
-                    }
-                }
-                (Session::Mu(x1, s1), Session::Mu(x2, s2)) => {
-                    x1.val == x2.val && s1.sem_eq_(s2, &seen)
-                }
-                (Session::Var(x1), Session::Var(x2)) => x1.val == x2.val,
-                (
-                    Session::Semi {
-                        first: first1,
-                        second: second1,
-                    },
-                    Session::Semi {
-                        first: first2,
-                        second: second2,
-                    },
-                ) => first1.sem_eq_(first2, &seen) && second1.sem_eq_(second2, &seen),
-                (Session::UVar(x1), Session::UVar(x2)) => x1 == x2,
-                (
-                    Session::PVar {
-                        id: id1,
-                        dual: dual1,
-                    },
-                    Session::PVar {
-                        id: id2,
-                        dual: dual2,
-                    },
-                ) => id1 == id2 && dual1 == dual2,
-                (Session::Skip, Session::Skip) => true,
-                _ => false,
-            }
-        }
-    }
-}
-
-impl SSession {
-    pub fn to_type(self) -> SType {
-        Spanned::new(Type::Chan(self.val), self.span)
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum QuantificationType {
     Universal,
@@ -243,7 +79,20 @@ pub enum Type {
         dual: bool,
     },
     // Session Types
-    Chan(Session),
+    Skip,
+    Semi {
+        first: Box<SType>,
+        second: Box<SType>,
+    },
+    End(SessionOp),
+    BorrowEnd(SessionOp),
+    Op(SessionOp, Box<SType>),
+    Choice(SessionOp, Vec<(SLabel, SType)>),
+    Mu(SId, Box<SType>),
+    Var(SId),
+    UVar(UVarId),
+
+    // Value Types
     Arr {
         mob: SMob,
         mult: SMult,
@@ -263,6 +112,9 @@ pub enum Type {
     String,
 }
 pub type SType = Spanned<Type>;
+
+pub type Session = Type;
+pub type SSession = SType;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Quantification {
@@ -289,20 +141,43 @@ impl Type {
     /// Closed type means it has no unification variables.
     pub fn is_closed(&self) -> bool {
         match self {
-            Type::Chan(s) => s.is_closed(),
+            Type::Skip => true,
+            Type::Semi { first, second } => first.is_closed() && second.is_closed(),
+            Type::End(_) => true,
+            Type::BorrowEnd(_) => true,
+            Type::Op(_, t) => t.is_closed(),
+            Type::Choice(_, cs) => cs.iter().all(|(_, s)| s.is_closed()),
+            Type::Mu(_, body) => body.is_closed(),
+            Type::Var(_) => true,
+            Type::UVar(_) => false,
+            Type::PVar { .. } => true,
             Type::Arr { param, ret, .. } => param.is_closed() && ret.is_closed(),
             Type::Prod { first, second, .. } => first.is_closed() && second.is_closed(),
             Type::Variant(cs) => cs.iter().all(|(_, t)| t.is_closed()),
             Type::Unit | Type::Int | Type::Bool | Type::String => true,
             Type::Abstraction { ty, .. } => ty.is_closed(),
-            Type::PVar { .. } => true,
         }
     }
 
     /// Unification variables appear inside the type
     pub fn unification_variables(&self) -> HashSet<UVarId> {
         match self {
-            Type::Chan(s) => s.unification_variables(),
+            Type::Skip => HashSet::new(),
+            Type::Semi { first, second } => union(
+                first.unification_variables(),
+                second.unification_variables(),
+            ),
+            Type::End(_) => HashSet::new(),
+            Type::BorrowEnd(_) => HashSet::new(),
+            Type::Op(_, t) => t.unification_variables(),
+            Type::Choice(_, cs) => cs
+                .iter()
+                .flat_map(|(_, s)| s.unification_variables())
+                .collect(),
+            Type::Mu(_, body) => body.unification_variables(),
+            Type::Var(_) => HashSet::new(),
+            Type::UVar(x) => HashSet::from([*x]),
+            Type::PVar { .. } => HashSet::new(),
             Type::Arr { param, ret, .. } => {
                 union(param.unification_variables(), ret.unification_variables())
             }
@@ -316,13 +191,23 @@ impl Type {
                 .collect(),
             Type::Unit | Type::Int | Type::Bool | Type::String => HashSet::new(),
             Type::Abstraction { ty, .. } => ty.unification_variables(),
-            Type::PVar { .. } => HashSet::new(),
         }
     }
 
     pub fn poly_variables<'a>(&'a self) -> Box<dyn Iterator<Item = PVarId> + 'a> {
         match self {
-            Type::Chan(session) => session.poly_variables(),
+            Type::Skip => Box::new(iter::empty()),
+            Type::Semi { first, second } => {
+                Box::new(first.poly_variables().chain(second.poly_variables()))
+            }
+            Type::End(_) => Box::new(iter::empty()),
+            Type::BorrowEnd(_) => Box::new(iter::empty()),
+            Type::Op(_, t) => t.poly_variables_under_prod_and_variant(),
+            Type::Choice(_, cs) => Box::new(cs.iter().flat_map(|(_, s)| s.poly_variables())),
+            Type::Mu(_, body) => body.poly_variables(),
+            Type::Var(_) => Box::new(iter::empty()),
+            Type::UVar(_) => Box::new(iter::empty()),
+            Type::PVar { id, .. } => Box::new(iter::once(id.clone())),
             Type::Arr { param, ret, .. } => {
                 Box::new(param.poly_variables().chain(ret.poly_variables()))
             }
@@ -337,7 +222,6 @@ impl Type {
                 ty.poly_variables()
                     .filter(move |id1| !quantification.has_binding(id1)),
             ),
-            Type::PVar { id, .. } => Box::new(iter::once(id.clone())),
         }
     }
 
@@ -345,7 +229,6 @@ impl Type {
         &'a self,
     ) -> Box<dyn Iterator<Item = PVarId> + 'a> {
         match self {
-            Type::Chan(Session::PVar { id, .. }) => Box::new(iter::once(id.clone())),
             Type::Prod { first, second, .. } => Box::new(
                 first
                     .poly_variables_under_prod_and_variant()
@@ -360,7 +243,15 @@ impl Type {
             | Type::Bool
             | Type::String
             | Type::Arr { .. }
-            | Type::Chan(_) => Box::new(iter::empty()),
+            | Type::Skip
+            | Type::Semi { .. }
+            | Type::End(_)
+            | Type::BorrowEnd(_)
+            | Type::Op(_, _)
+            | Type::Choice(_, _)
+            | Type::Mu(_, _)
+            | Type::Var(_)
+            | Type::UVar(_) => Box::new(iter::empty()),
             Type::Abstraction {
                 quantification, ty, ..
             } => Box::new(
@@ -399,7 +290,6 @@ impl Type {
                     panic!("Polymorphic variable shadowing is not allowed.")
                 }
             }
-            Type::Chan(session) => Type::Chan(session.subst_poly(bindings)),
             Type::Arr {
                 mob,
                 mult,
@@ -428,17 +318,114 @@ impl Type {
                     .map(|(label, ty)| (label.clone(), fake_span(ty.val.subst_poly(bindings))))
                     .collect(),
             ),
-            Type::Unit | Type::Int | Type::Bool | Type::String => self.clone(),
+            Type::Semi { first, second } => Type::Semi {
+                first: Box::new(fake_span(first.val.subst_poly(bindings))),
+                second: Box::new(fake_span(second.val.subst_poly(bindings))),
+            },
+            Type::Op(op, t) => {
+                Type::Op(op.clone(), Box::new(fake_span(t.val.subst_poly(bindings))))
+            }
+            Type::Choice(op, cs) => Type::Choice(
+                op.clone(),
+                cs.iter()
+                    .map(|(label, s)| (label.clone(), fake_span(s.val.subst_poly(bindings))))
+                    .collect(),
+            ),
+            Type::Mu(id, body) => Type::Mu(
+                id.clone(),
+                Box::new(fake_span(body.val.subst_poly(bindings))),
+            ),
+            Type::Unit
+            | Type::Int
+            | Type::Bool
+            | Type::String
+            | Type::End(_)
+            | Type::BorrowEnd(_)
+            | Type::Skip
+            | Type::Var(_)
+            | Type::UVar(_) => self.clone(),
         }
     }
 
-    fn dual(&self) -> Self {
-        todo!()
+    pub fn dual(&self) -> Self {
+        match self {
+            Type::Op(op, t) => Type::Op(op.dual(), t.clone()),
+            Type::Choice(op, cs) => {
+                let cs2: Vec<(SLabel, SType)> = cs
+                    .iter()
+                    .map(|(l, s)| (l.clone(), fake_span(s.val.dual())))
+                    .collect();
+                Type::Choice(op.dual(), cs2)
+            }
+            Type::End(op) => Type::End(op.dual()),
+            Type::BorrowEnd(op) => Type::BorrowEnd(op.dual()),
+            Type::Mu(x, s) => Type::Mu(x.clone(), Box::new(fake_span(s.val.dual()))),
+            Type::Var(x) => Type::Var(x.clone()),
+            Type::Skip => Type::Skip,
+            Type::Semi { first, second } => Type::Semi {
+                first: Box::new(fake_span(first.val.dual())),
+                second: Box::new(fake_span(second.val.dual())),
+            },
+            Type::UVar(_) => unreachable!(),
+            Type::PVar { id, dual } => Type::PVar {
+                id: id.clone(),
+                dual: !dual,
+            },
+            Type::Arr { .. }
+            | Type::Prod { .. }
+            | Type::Variant(_)
+            | Type::Unit
+            | Type::Int
+            | Type::Bool
+            | Type::String
+            | Type::Abstraction { .. } => unreachable!(),
+        }
     }
 
     pub fn sem_eq(&self, other: &Self) -> bool {
+        self.sem_eq_(other, &HashSet::new())
+    }
+
+    fn sem_eq_(&self, other: &Self, seen: &HashSet<(Type, Type)>) -> bool {
+        let mut seen = seen.clone();
+        if !seen.insert((self.clone(), other.clone())) {
+            return true;
+        }
         match (self, other) {
-            (Type::Chan(s1), Type::Chan(s2)) => s1.sem_eq(s2),
+            (Type::Op(op1, t1), Type::Op(op2, t2)) => op1 == op2 && t1.sem_eq_(t2, &seen),
+            (Type::End(op1), Type::End(op2)) => op1 == op2,
+            (Type::BorrowEnd(end1), Type::BorrowEnd(end2)) => end1 == end2,
+            (Type::Choice(op1, cs1), Type::Choice(op2, cs2)) if op1 == op2 => {
+                if let Some(cs) = merge_clauses(cs1, cs2, false) {
+                    cs.iter().all(|(_, s1, s2)| s1.sem_eq_(s2, &seen))
+                } else {
+                    false
+                }
+            }
+            (Type::Mu(x1, s1), Type::Mu(x2, s2)) => x1.val == x2.val && s1.sem_eq_(s2, &seen),
+            (Type::Var(x1), Type::Var(x2)) => x1.val == x2.val,
+            (
+                Type::Semi {
+                    first: first1,
+                    second: second1,
+                },
+                Type::Semi {
+                    first: first2,
+                    second: second2,
+                },
+            ) => first1.sem_eq_(first2, &seen) && second1.sem_eq_(second2, &seen),
+            (Type::UVar(x1), Type::UVar(x2)) => x1 == x2,
+            (
+                Type::PVar {
+                    id: id1,
+                    dual: dual1,
+                },
+                Type::PVar {
+                    id: id2,
+                    dual: dual2,
+                },
+            ) => id1 == id2 && dual1 == dual2,
+            (Type::Skip, Type::Skip) => true,
             (
                 Type::Arr {
                     mob: mob1,
@@ -454,7 +441,13 @@ impl Type {
                     param: t21,
                     ret: t22,
                 },
-            ) => mob1 == mob2 && m1 == m2 && p1 == p2 && t11.sem_eq(t21) && t12.sem_eq(t22),
+            ) => {
+                mob1 == mob2
+                    && m1 == m2
+                    && p1 == p2
+                    && t11.sem_eq_(t21, &seen)
+                    && t12.sem_eq_(t22, &seen)
+            }
             (
                 Type::Prod {
                     mult: m1,
@@ -466,10 +459,10 @@ impl Type {
                     first: t21,
                     second: t22,
                 },
-            ) => m1 == m2 && t11.sem_eq(t21) && t12.sem_eq(t22),
+            ) => m1 == m2 && t11.sem_eq_(t21, &seen) && t12.sem_eq_(t22, &seen),
             (Type::Variant(cs1), Type::Variant(cs2)) => {
                 if let Some(cs) = merge_clauses(cs1, cs2, false) {
-                    cs.iter().all(|(_, t1, t2)| t1.sem_eq(t2))
+                    cs.iter().all(|(_, t1, t2)| t1.sem_eq_(t2, &seen))
                 } else {
                     false
                 }
@@ -478,36 +471,6 @@ impl Type {
             (Type::Int, Type::Int) => true,
             (Type::Bool, Type::Bool) => true,
             (Type::String, Type::String) => true,
-            (
-                Type::PVar {
-                    id: id1,
-                    dual: dual1,
-                },
-                Type::PVar {
-                    id: id2,
-                    dual: dual2,
-                },
-            )
-            | (
-                Type::PVar {
-                    id: id1,
-                    dual: dual1,
-                },
-                Type::Chan(Session::PVar {
-                    id: id2,
-                    dual: dual2,
-                }),
-            )
-            | (
-                Type::Chan(Session::PVar {
-                    id: id1,
-                    dual: dual1,
-                }),
-                Type::PVar {
-                    id: id2,
-                    dual: dual2,
-                },
-            ) => id1 == id2 && dual1 == dual2,
             (
                 Type::Abstraction {
                     typ: typ1,
@@ -519,8 +482,77 @@ impl Type {
                     quantification: q2,
                     ty: ty2,
                 },
-            ) => typ1 == typ2 && q1 == q2 && ty1.sem_eq(ty2),
+            ) => typ1 == typ2 && q1 == q2 && ty1.sem_eq_(ty2, &seen),
             _ => false,
+        }
+    }
+
+    pub fn subst(&self, x: &Id, s_new: &Self) -> Self {
+        match self {
+            Type::Var(y) if *x == **y => s_new.clone(),
+            Type::Var(y) => Type::Var(y.clone()),
+            Type::Mu(y, e) => {
+                if x != &y.val {
+                    Type::Mu(y.clone(), Box::new(fake_span(e.subst(x, s_new))))
+                } else {
+                    self.clone()
+                }
+            }
+            Type::Op(op, t) => Type::Op(op.clone(), t.clone()),
+            Type::Choice(op, cs) => {
+                let cs2 = cs
+                    .iter()
+                    .map(|(l, s)| (l.clone(), fake_span(s.subst(x, s_new))))
+                    .collect();
+                Type::Choice(op.clone(), cs2)
+            }
+            Type::Semi { first, second } => Type::Semi {
+                first: Box::new(fake_span(first.subst(x, s_new))),
+                second: Box::new(fake_span(second.subst(x, s_new))),
+            },
+            Type::End(_) | Type::BorrowEnd(_) | Type::Skip | Type::UVar(_) | Type::PVar { .. } => {
+                self.clone()
+            }
+            _ => self.clone(),
+        }
+    }
+
+    pub fn is_only_skips(&self) -> bool {
+        match self {
+            Type::Skip => true,
+            Type::Semi { first, second } => first.is_only_skips() && second.is_only_skips(),
+            Type::Mu(_, body) => body.is_only_skips(),
+            _ => false,
+        }
+    }
+
+    pub fn is_contractive_on(&self, var: &SId) -> bool {
+        match self {
+            Type::Skip => true,
+            Type::Semi { first, second } => match first.is_only_skips() {
+                true => second.is_contractive_on(var),
+                false => first.is_contractive_on(var),
+            },
+            Type::End(_) => true,
+            Type::BorrowEnd(_) => true,
+            Type::Op(_, _) => true,
+            Type::Choice(_, _) => true,
+            Type::Mu(_, body) => body.is_contractive_on(var),
+            Type::Var(id) => id != var,
+            Type::UVar(_) => true,
+            Type::PVar { .. } => todo!(),
+            _ => true,
+        }
+    }
+
+    fn unfold(&self, x: &SId) -> Self {
+        self.subst(x, &Type::Mu(x.clone(), Box::new(fake_span(self.clone()))))
+    }
+
+    pub fn unfold_if_mu(&self) -> Self {
+        match self {
+            Type::Mu(x, s) => s.unfold(x).unfold_if_mu(),
+            _ => self.clone(),
         }
     }
 }
@@ -548,23 +580,17 @@ fn merge_clauses<T: Clone>(
     Some(out)
 }
 
-impl SType {
-    pub fn from_session(session: SSession) -> Self {
-        Spanned::new(Type::Chan(session.val), session.span)
-    }
-}
-
 impl Qualification {
     pub fn subst_poly(&self, bindings: &HashMap<PVarId, SType>) -> Qualification {
         match self {
             Qualification::Unr(t) => Qualification::Unr(t.val.subst_poly(bindings).into()),
             Qualification::Mobile(t) => Qualification::Mobile(t.val.subst_poly(bindings).into()),
-            Qualification::Bounded(s) => Qualification::Bounded(s.val.subst_poly(bindings).into()),
-            Qualification::New(s) => Qualification::New(s.val.subst_poly(bindings).into()),
-            Qualification::Dualable(s) => {
-                Qualification::Dualable(s.val.subst_poly(bindings).into())
+            Qualification::Bounded(t) => Qualification::Bounded(t.val.subst_poly(bindings).into()),
+            Qualification::New(t) => Qualification::New(t.val.subst_poly(bindings).into()),
+            Qualification::Dualable(t) => {
+                Qualification::Dualable(t.val.subst_poly(bindings).into())
             }
-            Qualification::NonSkip(s) => Qualification::NonSkip(s.val.subst_poly(bindings).into()),
+            Qualification::NonSkip(t) => Qualification::NonSkip(t.val.subst_poly(bindings).into()),
         }
     }
 }
@@ -681,45 +707,14 @@ impl From<Type> for SSemType {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct SSemSession(pub SSession);
-
-impl PartialEq for SSemSession {
-    fn eq(&self, other: &Self) -> bool {
-        self.0.val.sem_eq(&other.0.val)
-    }
-}
-
-impl Eq for SSemSession {}
-
-impl Hash for SSemSession {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0.val.hash(state)
-    }
-}
-
-impl Deref for SSemSession {
-    type Target = SSession;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl From<Session> for SSemSession {
-    fn from(val: Session) -> Self {
-        SSemSession(fake_span(val))
-    }
-}
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum Qualification {
     Unr(SSemType),
     Mobile(SSemType),
-    Bounded(SSemSession),
-    New(SSemSession),
-    Dualable(SSemSession),
-    NonSkip(SSemSession),
+    Bounded(SSemType),
+    New(SSemType),
+    Dualable(SSemType),
+    NonSkip(SSemType),
 }
 pub type SQualification = Spanned<Qualification>;
 
@@ -802,130 +797,6 @@ impl SessionOp {
     }
 }
 
-impl Session {
-    pub fn subst(&self, x: &Id, s_new: &Self) -> Self {
-        match self {
-            Session::Var(y) if *x == **y => s_new.clone(),
-            Session::Var(y) => Session::Var(y.clone()),
-            Session::Mu(y, e) => {
-                if x != &y.val {
-                    Session::Mu(y.clone(), Box::new(fake_span(e.subst(x, s_new))))
-                } else {
-                    self.clone()
-                }
-            }
-            Session::Op(op, t) => Session::Op(op.clone(), t.clone()),
-            Session::Choice(op, cs) => {
-                let cs2 = cs
-                    .iter()
-                    .map(|(l, s)| (l.clone(), fake_span(s.subst(x, s_new))))
-                    .collect();
-                Session::Choice(op.clone(), cs2)
-            }
-            Session::Semi { first, second } => Self::Semi {
-                first: Box::new(fake_span(first.subst(x, s_new))),
-                second: Box::new(fake_span(second.subst(x, s_new))),
-            },
-            Session::End(_)
-            | Session::BorrowEnd(_)
-            | Session::Skip
-            | Session::UVar(_)
-            | Session::PVar { .. } => self.clone(),
-        }
-    }
-    fn unfold(&self, x: &SId) -> Self {
-        self.subst(
-            x,
-            &Session::Mu(x.clone(), Box::new(fake_span(self.clone()))),
-        )
-    }
-    pub fn unfold_if_mu(&self) -> Self {
-        match self {
-            Session::Mu(x, s) => s.unfold(x).unfold_if_mu(),
-            _ => self.clone(),
-        }
-    }
-    pub fn dual(&self) -> Self {
-        match self {
-            Session::Op(op, t) => Session::Op(op.dual(), t.clone()),
-            Session::Choice(op, cs) => {
-                let cs2: Vec<(SLabel, SSession)> = cs
-                    .iter()
-                    .map(|(l, s)| (l.clone(), fake_span(s.dual())))
-                    .collect();
-                Session::Choice(op.dual(), cs2)
-            }
-            Session::End(op) => Session::End(op.dual()),
-            Session::BorrowEnd(op) => Session::BorrowEnd(op.dual()),
-            Session::Mu(x, s) => Session::Mu(x.clone(), Box::new(fake_span(s.dual()))),
-            Session::Var(x) => Session::Var(x.clone()),
-            Session::Skip => Session::Skip,
-            Session::Semi { first, second } => Session::Semi {
-                first: Box::new(fake_span(first.dual())),
-                second: Box::new(fake_span(second.dual())),
-            },
-            Session::UVar(_) => unreachable!(),
-            Session::PVar { id, dual } => Session::PVar {
-                id: id.clone(),
-                dual: !dual,
-            },
-        }
-    }
-}
-
-impl Session {
-    pub fn subst_poly(&self, bindings: &HashMap<PVarId, SType>) -> Session {
-        match self {
-            Session::PVar { id, dual } => {
-                if let Some(ty) = bindings.get(id) {
-                    let session = match &ty.val {
-                        Type::Chan(session) => session,
-                        // Whether it's type pvar or session pvar
-                        // is syntax related, not kind related
-                        Type::PVar { id, dual } => &Session::PVar {
-                            id: id.clone(),
-                            dual: *dual,
-                        },
-                        _ => panic!("Polymorphic variable substitution must be a session type."),
-                    };
-                    if *dual {
-                        session.dual()
-                    } else {
-                        session.clone()
-                    }
-                } else {
-                    self.clone()
-                }
-            }
-            Session::Semi { first, second } => Session::Semi {
-                first: Box::new(fake_span(first.val.subst_poly(bindings))),
-                second: Box::new(fake_span(second.val.subst_poly(bindings))),
-            },
-            Session::Op(session_op, payload) => Session::Op(
-                session_op.clone(),
-                Box::new(fake_span(payload.val.subst_poly(bindings))),
-            ),
-            Session::Choice(session_op, items) => Session::Choice(
-                session_op.clone(),
-                items
-                    .iter()
-                    .map(|(label, s)| (label.clone(), fake_span(s.val.subst_poly(bindings))))
-                    .collect(),
-            ),
-            // Recursion variables are separate than polymorphic variables, so we don't substitute them.
-            Session::Mu(id, body) => Session::Mu(
-                id.clone(),
-                Box::new(fake_span(body.val.subst_poly(bindings))),
-            ),
-            Session::Skip
-            | Session::End(_)
-            | Session::BorrowEnd(_)
-            | Session::Var(_)
-            | Session::UVar(_) => self.clone(),
-        }
-    }
-}
-
 impl Expr {
     pub fn free_vars(&self) -> HashSet<Id> {
         match self {
@@ -973,7 +844,7 @@ impl Expr {
             Expr::Discard(e) => e.free_vars(),
             Expr::TyApp(e, _) => e.free_vars(),
             Expr::TyAbs {
-                quantification, // TODO: qualification free vars
+                quantification: _, // TODO: qualification free vars
                 expr,
                 ..
             } => expr.free_vars(),
@@ -1005,7 +876,15 @@ impl Pattern {
 impl Type {
     pub fn is_unr(&self) -> bool {
         match self {
-            Type::Chan(_) => false,
+            Type::Skip
+            | Type::Semi { .. }
+            | Type::End(_)
+            | Type::BorrowEnd(_)
+            | Type::Op(_, _)
+            | Type::Choice(_, _)
+            | Type::Mu(_, _)
+            | Type::Var(_)
+            | Type::UVar(_) => false,
             Type::Arr { mult: m, .. } => m.val == Mult::Unr,
             Type::Prod {
                 first: t1,
@@ -1132,13 +1011,13 @@ macro_rules! session_type {
         session_type!(@borrow_end $crate::syntax::SessionOp::Recv)
     };
     (@atom Skip) => {
-        session_type!(@spanned $crate::syntax::Session::Skip)
+        session_type!(@spanned $crate::syntax::Type::Skip)
     };
     (@atom mu $var:ident . $($body:tt)+) => {
         session_type!(@mu $var, session_type!($($body)+))
     };
     (@atom $var:ident) => {
-        session_type!(@spanned $crate::syntax::Session::Var(session_type!(@sid $var)))
+        session_type!(@spanned $crate::syntax::Type::Var(session_type!(@sid $var)))
     };
     (@atom ( $($inner:tt)+ )) => {
         session_type!($($inner)+)
@@ -1188,10 +1067,7 @@ macro_rules! session_type {
         $crate::util::span::Spanned::new($crate::syntax::Type::Unit, 0..0)
     };
     (@type Chan ( $($sess:tt)+ )) => {
-        $crate::util::span::Spanned::new(
-            $crate::syntax::Type::Chan(session_type!($($sess)+).val),
-            0..0,
-        )
+        session_type!($($sess)+)
     };
     (@type ($t:expr)) => {
         $crate::util::span::Spanned::new($t, 0..0)
@@ -1204,25 +1080,25 @@ macro_rules! session_type {
         $crate::util::span::Spanned::new($val, 0..0)
     };
     (@semi $first:expr, $second:expr) => {
-        session_type!(@spanned $crate::syntax::Session::Semi {
+        session_type!(@spanned $crate::syntax::Type::Semi {
             first: Box::new($first),
             second: Box::new($second),
         })
     };
     (@op $op:expr, $ty:expr) => {
-        session_type!(@spanned $crate::syntax::Session::Op($op, Box::new($ty)))
+        session_type!(@spanned $crate::syntax::Type::Op($op, Box::new($ty)))
     };
     (@choice $op:expr, $branches:expr) => {
-        session_type!(@spanned $crate::syntax::Session::Choice($op, $branches))
+        session_type!(@spanned $crate::syntax::Type::Choice($op, $branches))
     };
     (@end $op:expr) => {
-        session_type!(@spanned $crate::syntax::Session::End($op))
+        session_type!(@spanned $crate::syntax::Type::End($op))
     };
     (@borrow_end $op:expr) => {
-        session_type!(@spanned $crate::syntax::Session::BorrowEnd($op))
+        session_type!(@spanned $crate::syntax::Type::BorrowEnd($op))
     };
     (@mu $var:ident, $body:expr) => {
-        session_type!(@spanned $crate::syntax::Session::Mu(
+        session_type!(@spanned $crate::syntax::Type::Mu(
             session_type!(@sid $var),
             Box::new($body),
         ))
@@ -1246,23 +1122,23 @@ mod session_type_tests {
     }
 
     fn session_op(session_op: SessionOp, typ: Type) -> Session {
-        Session::Op(session_op, Box::new(Spanned::new(typ, 0..0)))
+        Type::Op(session_op, Box::new(Spanned::new(typ, 0..0)))
     }
 
     #[test]
     fn session_type_send_recv_semi() {
         let got = session_type!(!Int; ?Bool; Close);
-        let expected = spanned_session(Session::Semi {
-            first: Box::new(spanned_session(Session::Op(
+        let expected = spanned_session(Type::Semi {
+            first: Box::new(spanned_session(Type::Op(
                 SessionOp::Send,
                 Box::new(Spanned::new(Type::Int, 0..0)),
             ))),
-            second: Box::new(spanned_session(Session::Semi {
-                first: Box::new(spanned_session(Session::Op(
+            second: Box::new(spanned_session(Type::Semi {
+                first: Box::new(spanned_session(Type::Op(
                     SessionOp::Recv,
                     Box::new(Spanned::new(Type::Bool, 0..0)),
                 ))),
-                second: Box::new(spanned_session(Session::End(SessionOp::Send))),
+                second: Box::new(spanned_session(Type::End(SessionOp::Send))),
             })),
         });
 
@@ -1272,9 +1148,9 @@ mod session_type_tests {
     #[test]
     fn session_type_semi_parentheses() {
         let got = session_type!(!Int; (?Bool; !String));
-        let expected = spanned_session(Session::Semi {
+        let expected = spanned_session(Type::Semi {
             first: Box::new(spanned_session(session_op(SessionOp::Send, Type::Int))),
-            second: Box::new(spanned_session(Session::Semi {
+            second: Box::new(spanned_session(Type::Semi {
                 first: Box::new(spanned_session(session_op(SessionOp::Recv, Type::Bool))),
                 second: Box::new(spanned_session(session_op(SessionOp::Send, Type::String))),
             })),
@@ -1286,19 +1162,19 @@ mod session_type_tests {
     #[test]
     fn session_type_choice_offer_select() {
         let got = session_type!(+{ left: !Int, right: ?String });
-        let expected = spanned_session(Session::Choice(
+        let expected = spanned_session(Type::Choice(
             SessionOp::Send,
             vec![
                 (
                     Spanned::new("left".to_string(), 0..0),
-                    spanned_session(Session::Op(
+                    spanned_session(Type::Op(
                         SessionOp::Send,
                         Box::new(Spanned::new(Type::Int, 0..0)),
                     )),
                 ),
                 (
                     Spanned::new("right".to_string(), 0..0),
-                    spanned_session(Session::Op(
+                    spanned_session(Type::Op(
                         SessionOp::Recv,
                         Box::new(Spanned::new(Type::String, 0..0)),
                     )),
@@ -1312,14 +1188,14 @@ mod session_type_tests {
     #[test]
     fn session_type_recursive_and_vars() {
         let got = session_type!(mu X. ?Int; X);
-        let expected = spanned_session(Session::Mu(
+        let expected = spanned_session(Type::Mu(
             Spanned::new("X".to_string(), 0..0),
-            Box::new(spanned_session(Session::Semi {
-                first: Box::new(spanned_session(Session::Op(
+            Box::new(spanned_session(Type::Semi {
+                first: Box::new(spanned_session(Type::Op(
                     SessionOp::Recv,
                     Box::new(Spanned::new(Type::Int, 0..0)),
                 ))),
-                second: Box::new(spanned_session(Session::Var(Spanned::new(
+                second: Box::new(spanned_session(Type::Var(Spanned::new(
                     "X".to_string(),
                     0..0,
                 )))),
@@ -1332,13 +1208,13 @@ mod session_type_tests {
     #[test]
     fn session_type_borrow_and_skip() {
         let got = session_type!(Ret; Skip; Acq; Wait);
-        let expected = spanned_session(Session::Semi {
-            first: Box::new(spanned_session(Session::BorrowEnd(SessionOp::Send))),
-            second: Box::new(spanned_session(Session::Semi {
-                first: Box::new(spanned_session(Session::Skip)),
-                second: Box::new(spanned_session(Session::Semi {
-                    first: Box::new(spanned_session(Session::BorrowEnd(SessionOp::Recv))),
-                    second: Box::new(spanned_session(Session::End(SessionOp::Recv))),
+        let expected = spanned_session(Type::Semi {
+            first: Box::new(spanned_session(Type::BorrowEnd(SessionOp::Send))),
+            second: Box::new(spanned_session(Type::Semi {
+                first: Box::new(spanned_session(Type::Skip)),
+                second: Box::new(spanned_session(Type::Semi {
+                    first: Box::new(spanned_session(Type::BorrowEnd(SessionOp::Recv))),
+                    second: Box::new(spanned_session(Type::End(SessionOp::Recv))),
                 })),
             })),
         });
@@ -1348,17 +1224,17 @@ mod session_type_tests {
 
     #[test]
     fn session_type_verbatim_unknown_tokens() {
-        let sess_type = spanned_session(Session::Op(
+        let sess_type = spanned_session(Type::Op(
             SessionOp::Send,
             Box::new(Spanned::new(Type::Int, 0..0)),
         ));
 
         let got = session_type! { Acq; (sess_type.clone(); Wait) };
-        let expected = spanned_session(Session::Semi {
-            first: Box::new(spanned_session(Session::BorrowEnd(SessionOp::Recv))),
-            second: Box::new(spanned_session(Session::Semi {
+        let expected = spanned_session(Type::Semi {
+            first: Box::new(spanned_session(Type::BorrowEnd(SessionOp::Recv))),
+            second: Box::new(spanned_session(Type::Semi {
                 first: Box::new(sess_type.clone()),
-                second: Box::new(spanned_session(Session::End(SessionOp::Recv))),
+                second: Box::new(spanned_session(Type::End(SessionOp::Recv))),
             })),
         });
 

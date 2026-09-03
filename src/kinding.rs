@@ -1,10 +1,7 @@
 use std::collections::HashSet;
 
 use crate::{
-    syntax::{
-        Id, Kind, Qualification, Quantification, SId, SQualification, SSession, SType, Session,
-        Type,
-    },
+    syntax::{Id, Kind, Qualification, Quantification, SId, SQualification, SType, Type},
     type_alias::AliasEnv,
     type_checker::TypeError,
     type_context::TypeCtx,
@@ -28,10 +25,9 @@ pub(crate) fn check(
 pub(crate) fn check_session(
     ty_ctx: &TypeCtx,
     alias_env: &AliasEnv,
-    session: &SSession,
+    session: &SType,
 ) -> Result<(), TypeError> {
-    let state = KindCheckState::from(ty_ctx.clone(), alias_env);
-    state.check_session_well_formed(session)
+    check(ty_ctx, alias_env, session, Kind::Session)
 }
 
 pub(crate) fn check_qualifications_well_formed<'a>(
@@ -62,18 +58,39 @@ impl KindCheckState<'_> {
     fn infer(&self, ty: &SType) -> Result<Kind, TypeError> {
         match &ty.val {
             Type::Unit | Type::Int | Type::Bool | Type::String => Ok(Kind::Type),
-            Type::Skip
-            | Type::Semi { .. }
-            | Type::End(_)
-            | Type::BorrowEnd(_)
-            | Type::Op(_, _)
-            | Type::Choice(_, _)
-            | Type::Mu(_, _)
-            | Type::Var(_)
-            | Type::UVar(_) => {
-                self.check_session_well_formed(ty)?;
+            Type::Skip | Type::End(_) | Type::BorrowEnd(_) => Ok(Kind::Session),
+            Type::Op(_, payload) => {
+                self.check(payload, Kind::Type)?;
                 Ok(Kind::Session)
             }
+            Type::Choice(_, branches) => {
+                for (_, branch) in branches {
+                    self.check(branch, Kind::Session)?;
+                }
+                Ok(Kind::Session)
+            }
+            Type::Semi { first, second } => {
+                self.check(first, Kind::Session)?;
+                self.check(second, Kind::Session)?;
+                Ok(Kind::Session)
+            }
+            Type::Mu(var, body) => {
+                self.check_contractive(body, var)?;
+                let new_ctx = self.clone().add_rvar(var.val.clone());
+                new_ctx.check(body, Kind::Session)?;
+                Ok(Kind::Session)
+            }
+            Type::Var(id) => {
+                if !self.rvars.contains(&id.val) && !self.alias_env.contains_key(&id.val) {
+                    Err(TypeError::WfSessionNotClosed(ty.clone(), id.clone()))
+                } else {
+                    Ok(Kind::Session)
+                }
+            }
+            // We assume unification variables are well formed
+            // therefore we must check well formedness after unification
+            // variables are solved.
+            Type::UVar(_) => Ok(Kind::Session),
             Type::Variant(variants) => {
                 for (_, ty) in variants {
                     self.infer(ty)?;
@@ -118,80 +135,30 @@ impl KindCheckState<'_> {
         }
     }
 
-    // TODO: Return the kind immediately, instead of check form, work like inference
-    fn check_session_well_formed(&self, session: &SSession) -> Result<(), TypeError> {
+    fn check_contractive(&self, session: &SType, on: &SId) -> Result<(), TypeError> {
         match &session.val {
-            Session::Skip | Session::End(_) | Session::BorrowEnd(_) => Ok(()),
-            Session::Op(_, ty) => self.check(&ty, Kind::Type),
-            Session::Choice(_, branches) => {
-                for (_, branch) in branches {
-                    self.check_session_well_formed(branch)?;
-                }
-                Ok(())
-            }
-            Session::Semi { first, second } => {
-                self.check_session_well_formed(first)?;
-                self.check_session_well_formed(second)
-            }
-            Session::Mu(var, body) => {
-                self.check_contractive(body, var)?;
-                // TODO: Optimize by using functional data structures
-                let new_ctx: KindCheckState = self.clone().add_rvar(var.val.clone());
-                new_ctx.check_session_well_formed(body)
-            }
-            Session::PVar { id, .. } => match self.ty_ctx.vars.get(id) {
-                Some(kind) => {
-                    if kind == &Kind::Session {
-                        Ok(())
-                    } else {
-                        Err(TypeError::KindMismatch(
-                            session.clone(),
-                            Kind::Session,
-                            self.ty_ctx.clone(),
-                        ))
-                    }
-                }
-                None => Err(TypeError::UndefinedPVar(session.clone(), id.clone())),
-            },
-            Session::Var(id) => {
-                if !self.rvars.contains(&id.val) && !self.alias_env.contains_key(&id.val) {
-                    Err(TypeError::WfSessionNotClosed(session.clone(), id.clone()))
-                } else {
-                    Ok(())
-                }
-            }
-            // We assume unifications variables are well formed
-            // therefore we must check well formedness after unification
-            // variables are solved.
-            Session::UVar(_) => Ok(()),
-            _ => unreachable!("Regular type in session well-formed check"),
-        }
-    }
-
-    fn check_contractive(&self, session: &SSession, on: &SId) -> Result<(), TypeError> {
-        match &session.val {
-            Session::Skip
-            | Session::Op(_, _)
-            | Session::Choice(_, _)
-            | Session::End(_)
-            | Session::BorrowEnd(_) => Ok(()),
-            Session::Semi { first, second } => {
+            Type::Skip
+            | Type::Op(_, _)
+            | Type::Choice(_, _)
+            | Type::End(_)
+            | Type::BorrowEnd(_) => Ok(()),
+            Type::Semi { first, second } => {
                 if !first.is_only_skips() {
                     self.check_contractive(first, on)
                 } else {
                     self.check_contractive(second, on)
                 }
             }
-            Session::Mu(_, body) => self.check_contractive(body, on),
-            Session::Var(id) => {
+            Type::Mu(_, body) => self.check_contractive(body, on),
+            Type::Var(id) => {
                 if &on.val == &id.val {
                     Err(TypeError::WfNonContractive(session.clone(), on.clone()))
                 } else {
                     Ok(())
                 }
             }
-            Session::PVar { .. } => Err(TypeError::WfNonContractive(session.clone(), on.clone())),
-            Session::UVar(_) => unreachable!("Should be called after unification!"),
+            Type::PVar { .. } => Err(TypeError::WfNonContractive(session.clone(), on.clone())),
+            Type::UVar(_) => unreachable!("Should be called after unification!"),
             _ => unreachable!("Regular type in contractivity check"),
         }
     }
@@ -304,7 +271,7 @@ mod tests {
 
     #[test]
     fn session_qualifications_of_closed_session() {
-        let s = Session::End(SessionOp::Send);
+        let s = Type::End(SessionOp::Send);
         assert_eq!(
             KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Bounded(s.clone().into()))].iter()
@@ -331,7 +298,7 @@ mod tests {
         );
         assert_eq!(
             KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
-                [fake_span(Qualification::Bounded(Session::Skip.into()))].iter()
+                [fake_span(Qualification::Bounded(Type::Skip.into()))].iter()
             ),
             Ok(())
         );
@@ -344,7 +311,7 @@ mod tests {
                 [
                     fake_span(Qualification::Unr(Type::Unit.into())),
                     fake_span(Qualification::Mobile(Type::Int.into())),
-                    fake_span(Qualification::Bounded(Session::Skip.into())),
+                    fake_span(Qualification::Bounded(Type::Skip.into())),
                 ]
                 .iter()
             ),
@@ -358,7 +325,7 @@ mod tests {
             KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [
                     fake_span(Qualification::Unr(Type::Unit.into())),
-                    fake_span(Qualification::Bounded(Session::PVar {
+                    fake_span(Qualification::Bounded(Type::PVar {
                         id: "a".to_string(),
                         dual: false
                     }.into())),
@@ -381,7 +348,7 @@ mod tests {
     #[test]
     fn free_pvar_in_session_not_well_formed() {
         let q = fake_span(Qualification::Bounded(
-            Session::PVar {
+            Type::PVar {
                 id: "a".to_string(),
                 dual: false,
             }
@@ -399,7 +366,7 @@ mod tests {
             KindCheckState::from(ctx(&[("a".to_string(), Kind::Session)]), &HashMap::new())
                 .check_qualifications_well_formed(
                     [fake_span(Qualification::Bounded(
-                        Session::PVar {
+                        Type::PVar {
                             id: "a".to_string(),
                             dual: false
                         }
@@ -426,7 +393,7 @@ mod tests {
         let result = KindCheckState::from(ctx(&[("a".to_string(), Kind::Type)]), &HashMap::new())
             .check_qualifications_well_formed(
                 [fake_span(Qualification::Bounded(
-                    Session::PVar {
+                    Type::PVar {
                         id: "a".to_string(),
                         dual: false,
                     }
@@ -442,9 +409,9 @@ mod tests {
 
     #[test]
     fn nested_ill_kinded_session_not_well_formed() {
-        let s = Session::Semi {
-            first: Box::new(fake_span(Session::Skip)),
-            second: Box::new(fake_span(Session::PVar {
+        let s = Type::Semi {
+            first: Box::new(fake_span(Type::Skip)),
+            second: Box::new(fake_span(Type::PVar {
                 id: "a".to_string(),
                 dual: false,
             })),
@@ -470,7 +437,7 @@ mod tests {
 
     #[test]
     fn recursive_session_is_well_formed() {
-        let s = Session::Mu(
+        let s = Type::Mu(
             fake_span("X".to_string()),
             Box::new(session_type! { !String; X }),
         );
@@ -499,7 +466,7 @@ mod tests {
     fn new_dualable_nonskip_with_free_pvar_not_well_formed() {
         assert!(matches!(
             KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
-                [fake_span(Qualification::New(Session::PVar {
+                [fake_span(Qualification::New(Type::PVar {
                     id: "4".to_string(),
                     dual: false
                 }.into()))]
@@ -509,7 +476,7 @@ mod tests {
         ));
         assert!(matches!(
             KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
-                [fake_span(Qualification::Dualable(Session::PVar {
+                [fake_span(Qualification::Dualable(Type::PVar {
                     id: "4".to_string(),
                     dual: false
                 }.into()))]
@@ -519,7 +486,7 @@ mod tests {
         ));
         assert!(matches!(
             KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
-                [fake_span(Qualification::NonSkip(Session::PVar {
+                [fake_span(Qualification::NonSkip(Type::PVar {
                     id: "4".to_string(),
                     dual: false
                 }.into()))]
@@ -531,7 +498,7 @@ mod tests {
 
     #[test]
     fn dualable_op_with_ill_kinded_payload_not_well_formed() {
-        let s = Session::Op(
+        let s = Type::Op(
             SessionOp::Send,
             Box::new(fake_span(pvar_chan("9".to_string()))),
         );
@@ -545,9 +512,9 @@ mod tests {
 
     #[test]
     fn non_contrative_mu_not_well_formed() {
-        let s = Session::Mu(
+        let s = Type::Mu(
             fake_span("X".to_string()),
-            Box::new(fake_span(Session::Var(fake_span("X".to_string())))),
+            Box::new(fake_span(Type::Var(fake_span("X".to_string())))),
         );
         let result = KindCheckState::from(ctx(&[]), &HashMap::new())
             .check_qualifications_well_formed([fake_span(Qualification::Bounded(s.into()))].iter());
@@ -559,11 +526,11 @@ mod tests {
 
     #[test]
     fn bounded_mu_with_free_pvar_not_well_formed() {
-        let s = Session::Mu(
+        let s = Type::Mu(
             fake_span("X".to_string()),
-            Box::new(fake_span(Session::Semi {
-                first: Box::new(fake_span(Session::Skip)),
-                second: Box::new(fake_span(Session::PVar {
+            Box::new(fake_span(Type::Semi {
+                first: Box::new(fake_span(Type::Skip)),
+                second: Box::new(fake_span(Type::PVar {
                     id: "9".to_string(),
                     dual: false,
                 })),
@@ -642,7 +609,7 @@ mod tests {
     #[test]
     fn choice_with_free_pvar_in_payload_not_well_formed() {
         let s =
-            session_type! { &{ a: fake_span(Session::PVar { id: "b".to_string(), dual: false }) } };
+            session_type! { &{ a: fake_span(Type::PVar { id: "b".to_string(), dual: false }) } };
         assert!(matches!(
             KindCheckState::from(ctx(&[]), &HashMap::new())
                 .check_qualifications_well_formed([fake_span(Qualification::Bounded(SSemType(s)))].iter()),
@@ -652,7 +619,7 @@ mod tests {
 
     #[test]
     fn session_kind_pvar_well_formed() {
-        let session = Session::PVar {
+        let session = Type::PVar {
             id: "a".to_string(),
             dual: false,
         };
@@ -667,7 +634,7 @@ mod tests {
 
     #[test]
     fn type_kind_pvar_not_well_formed() {
-        let session = Session::PVar {
+        let session = Type::PVar {
             id: "a".to_string(),
             dual: false,
         };
