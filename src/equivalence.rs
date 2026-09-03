@@ -64,10 +64,10 @@ pub fn check_equivalence(
     );
     writeln!(test_file, "right x = x").unwrap();
 
-    println!(
-        "file: {}",
-        std::fs::read_to_string(test_file.path()).unwrap()
-    );
+    // println!(
+    //     "file: {}",
+    //     std::fs::read_to_string(test_file.path()).unwrap()
+    // );
 
     let freest_cmd = Command::new("freest")
         .arg(test_file.path())
