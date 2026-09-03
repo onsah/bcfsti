@@ -1,0 +1,17 @@
+let rec
+    recvTree[a: Type]. unr 'a ^ mbl 'a : (mu x. &{ leaf: Skip, node: ?'a; x; x }) -[m u 1]-> Unit
+    recvTree c =
+        case (branch c) {
+            leaf c1 -> {
+                discard c1
+            }
+            node c1 -> {
+                let cRecv, cRest = lsplit[?'a] c1 in
+                let x = recv['a] cRecv in
+                let cLeft, cRight = lsplit[(mu x. &{ leaf: Skip, node: ?'a; x; x })] cRest in
+                recvTree['a] cLeft;
+                recvTree['a] cRight
+            }
+        }
+in
+unit

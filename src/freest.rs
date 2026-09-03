@@ -47,16 +47,21 @@ pub(crate) enum FreestType {
         kind: Kind,
         body: Box<FreestType>,
     },
-    Var(Label),
+    // Var applied to set of polymorphic variables
+    Var(Label, Vec<Label>),
     PVar(Label, Kind),
 }
 
 impl FreestType {
+    pub fn var(name: Label) -> FreestType {
+        FreestType::Var(name, Vec::default())
+    }
+
     pub fn is_session_type(&self) -> bool {
         match self {
             FreestType::Skip
             | FreestType::End(_)
-            | FreestType::Var(_)
+            | FreestType::Var(_, _)
             | FreestType::Semi { .. }
             | FreestType::Message { .. }
             | FreestType::Choice { .. } => true,
@@ -101,7 +106,10 @@ impl FreestType {
                 free_in_body.remove(var);
                 free_in_body
             }
-            FreestType::Var(_) => HashMap::default(),
+            FreestType::Var(_, pvars) => pvars
+                .iter()
+                .map(|var| (var.clone(), Kind::Session))
+                .collect(),
             FreestType::PVar(label, kind) => HashMap::from([(label.clone(), kind.clone())]),
         }
     }
@@ -162,7 +170,13 @@ impl fmt::Display for FreestType {
             FreestType::Forall { var, body, .. } => {
                 write!(f, "(forall {} -> {})", var, body)
             }
-            FreestType::Var(label) => write!(f, "{}", label),
+            FreestType::Var(label, pvars) => {
+                write!(f, "{}", label)?;
+                for pvar in pvars {
+                    write!(f, " {}", pvar)?;
+                }
+                Ok(())
+            }
             FreestType::PVar(label, _) => write!(f, "{}", label),
         }
     }
@@ -225,7 +239,7 @@ mod tests {
                     free_in_body.remove(var);
                     free_in_body
                 }
-                FreestType::Var(label) => HashSet::from([label.clone()]),
+                FreestType::Var(label, _) => HashSet::from([label.clone()]),
                 FreestType::PVar(_, _) => HashSet::default(),
             }
         }
@@ -287,7 +301,7 @@ mod tests {
         } else {
             prop_oneof![
                 basic_primitives,
-                proptest::sample::select(bound_vars.clone()).prop_map(FreestType::Var)
+                proptest::sample::select(bound_vars.clone()).prop_map(FreestType::var)
             ]
             .prop_map(Box::new)
             .boxed()
@@ -308,7 +322,7 @@ mod tests {
         if !sess_vars.is_empty() {
             strategy = prop_oneof![
                 strategy,
-                proptest::sample::select(sess_vars.clone()).prop_map(FreestType::Var),
+                proptest::sample::select(sess_vars.clone()).prop_map(FreestType::var),
             ]
             .boxed();
         }

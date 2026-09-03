@@ -1,11 +1,11 @@
 use crate::{
     freest::{FreestType, Kind as FreestKind},
-    syntax::{Eff, Kind, Label, Mob, Mult, PVarId, Session, SessionOp, Type},
+    syntax::{Eff, Id, Kind, Label, Mob, Mult, PVarId, Session, SessionOp, Type},
     type_alias::AliasEnv,
     util::span::fake_span,
 };
 
-use std::{collections::HashMap, io::Write, process::Command, ptr::write};
+use std::{collections::HashMap, io::Write, process::Command};
 
 #[allow(dead_code)]
 pub enum EquivalenceResult {
@@ -29,7 +29,8 @@ pub fn check_equivalence(
     let mut defs = Definitions::new();
 
     for (name, session) in alias_env.iter() {
-        let alias_type = convert_session_impl(session, &mut defs, pvar_bindings);
+        let alias_type =
+            convert_session_impl(session, &mut defs, &HashMap::default(), pvar_bindings);
         defs.add(name, alias_type);
     }
 
@@ -63,10 +64,10 @@ pub fn check_equivalence(
     );
     writeln!(test_file, "right x = x").unwrap();
 
-    // println!(
-    //     "file: {}",
-    //     std::fs::read_to_string(test_file.path()).unwrap()
-    // );
+    println!(
+        "file: {}",
+        std::fs::read_to_string(test_file.path()).unwrap()
+    );
 
     let freest_cmd = Command::new("freest")
         .arg(test_file.path())
@@ -212,7 +213,9 @@ fn convert_type_impl(
     let defs: &mut Definitions = defs;
     let pvar_bindings: &HashMap<PVarId, Kind> = pvar_bindings;
     match ty {
-        Type::Chan(session) => convert_session_impl(session, defs, pvar_bindings),
+        Type::Chan(session) => {
+            convert_session_impl(session, defs, &HashMap::default(), pvar_bindings)
+        }
         Type::Arr {
             mob,
             mult,
@@ -296,13 +299,15 @@ fn get_kind(id: &PVarId, pvar_bindings: &HashMap<PVarId, Kind>) -> FreestKind {
 fn convert_session_impl(
     session: &Session,
     defs: &mut Definitions,
+    // Rec var id -> polymorphic variable cardinality
+    rvar_bindings: &HashMap<Id, Vec<PVarId>>,
     pvar_bindings: &HashMap<PVarId, Kind>,
 ) -> FreestType {
     match session {
         Session::Skip => FreestType::Skip,
         Session::Semi { first, second } => {
-            let first = convert_session_impl(&first.val, defs, pvar_bindings);
-            let second = convert_session_impl(&second.val, defs, pvar_bindings);
+            let first = convert_session_impl(&first.val, defs, rvar_bindings, pvar_bindings);
+            let second = convert_session_impl(&second.val, defs, rvar_bindings, pvar_bindings);
             FreestType::Semi {
                 first: Box::new(first),
                 second: Box::new(second),
@@ -311,7 +316,7 @@ fn convert_session_impl(
         Session::End(session_op) => FreestType::End(*session_op),
         Session::BorrowEnd(session_op) => FreestType::Message {
             dir: *session_op,
-            ty: Box::new(FreestType::Var(FreestType::RET.into())),
+            ty: Box::new(FreestType::var(FreestType::RET.into())),
         },
         Session::Op(session_op, ty) => {
             let ty = convert_type_impl(&ty.val, defs, pvar_bindings);
@@ -325,7 +330,7 @@ fn convert_session_impl(
             branches: items
                 .into_iter()
                 .map(|(label, ty)| {
-                    let ty = convert_session_impl(&ty.val, defs, pvar_bindings);
+                    let ty = convert_session_impl(&ty.val, defs, rvar_bindings, pvar_bindings);
                     (label.val.to_uppercase(), Box::new(ty))
                 })
                 .collect(),
@@ -334,11 +339,20 @@ fn convert_session_impl(
             let label = defs.next_label();
             // Subst the definition name to the body
             let body = body.subst(&var.val, &Session::Var(fake_span(label.clone())));
-            let body = convert_session_impl(&body, defs, pvar_bindings);
+            let pvars: Vec<_> = body.poly_variables().collect();
+            let mut rvar_bindings = rvar_bindings.clone();
+            rvar_bindings.insert(label.clone(), pvars.clone());
+            let body = convert_session_impl(&body, defs, &rvar_bindings, pvar_bindings);
             defs.add(&label, body);
-            FreestType::Var(label)
+            FreestType::Var(label, pvars.into_iter().collect())
         }
-        Session::Var(var) => FreestType::Var(var.val.to_owned()),
+        Session::Var(var) => FreestType::Var(
+            var.val.to_owned(),
+            match rvar_bindings.get(&var.val) {
+                Some(pvars) => pvars.clone(),
+                None => Vec::new(),
+            },
+        ),
         Session::UVar(_) => {
             panic!("Unification variables must be solved before translation to FreeST!")
         }
