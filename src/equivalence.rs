@@ -213,9 +213,15 @@ fn convert_type_impl(
     let defs: &mut Definitions = defs;
     let pvar_bindings: &HashMap<PVarId, Kind> = pvar_bindings;
     match ty {
-        Type::Chan(session) => {
-            convert_session_impl(session, defs, &HashMap::default(), pvar_bindings)
-        }
+        Type::Skip
+        | Type::Semi { .. }
+        | Type::End(_)
+        | Type::BorrowEnd(_)
+        | Type::Op(_, _)
+        | Type::Choice(_, _)
+        | Type::Mu(_, _)
+        | Type::Var(_)
+        | Type::UVar(_) => convert_session_impl(ty, defs, &HashMap::default(), pvar_bindings),
         Type::Arr {
             mob,
             mult,
@@ -357,6 +363,7 @@ fn convert_session_impl(
             panic!("Unification variables must be solved before translation to FreeST!")
         }
         Session::PVar { id, .. } => FreestType::PVar(id.clone(), crate::freest::Kind::Session),
+        _ => unreachable!("Value type in session conversion"),
     }
 }
 
@@ -367,16 +374,11 @@ mod tests {
     use crate::{
         equivalence::{EquivalenceResult, check_equivalence},
         session_type,
-        syntax::{Session, Type},
+        syntax::Type,
     };
 
-    fn check_equivalence_sessions(type1: &Session, type2: &Session) -> EquivalenceResult {
-        check_equivalence(
-            &Type::Chan(type1.clone()),
-            &Type::Chan(type2.clone()),
-            &HashMap::new(),
-            &HashMap::new(),
-        )
+    fn check_equivalence_sessions(type1: &Type, type2: &Type) -> EquivalenceResult {
+        check_equivalence(type1, type2, &HashMap::new(), &HashMap::new())
     }
 
     #[inline(always)]

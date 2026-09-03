@@ -117,26 +117,20 @@ mod typechecker_tests {
         let expected_constraints = {
             let mut cs = Constraints::empty();
             cs.equivalences.add((
-                fake_span(Type::Chan(session_type! { Session::UVar(1) })),
-                fake_span(Type::Chan(session_type! { Ret }.val)),
+                fake_span(session_type! { Session::UVar(1) }),
+                session_type! { Ret },
             ));
             cs.equivalences.add((
-                fake_span(Type::Chan(session_type! { !Int; Ret }.val)),
-                fake_span(Type::Chan(
-                    session_type! { !Int; fake_span(Session::UVar(1)) }.val,
-                )),
+                fake_span(session_type! { !Int; Ret }.val),
+                fake_span(session_type! { !Int; fake_span(Session::UVar(1)) }.val),
             ));
             cs.equivalences.add((
-                fake_span(Type::Chan(session_type! { !Int; ?Int }.val)),
-                fake_span(Type::Chan(
-                    session_type! { !Int; fake_span(Session::UVar(0)) }.val,
-                )),
+                fake_span(session_type! { !Int; ?Int }.val),
+                fake_span(session_type! { !Int; fake_span(Session::UVar(0)) }.val),
             ));
             cs.equivalences.add((
-                fake_span(Type::Chan(
-                    session_type! { Acq; fake_span(Session::UVar(0)) }.val,
-                )),
-                fake_span(Type::Chan(session_type! { Acq; ?Int }.val)),
+                fake_span(session_type! { Acq; fake_span(Session::UVar(0)) }.val),
+                fake_span(session_type! { Acq; ?Int }.val),
             ));
             cs
         };
@@ -392,7 +386,7 @@ mod typechecker_tests {
         let Ok((_, Type::Arr { ret, .. }, _, _, _)) = res else {
             unreachable!()
         };
-        assert_eq!(ret.val, Type::Chan(session_type! { ?String }.val));
+        assert_eq!(ret.val, session_type! { ?String }.val);
 
         let src = r#"
             let x = 5 in

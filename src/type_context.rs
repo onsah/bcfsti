@@ -75,11 +75,8 @@ impl TypeCtx {
                     .map(|(_, ty)| &ty.val)
                     .all(|ty| self.unr(ty)),
                 // Q-Mbl-Acq
-                Type::Chan(session @ Session::Semi { .. }) => {
-                    let Session::Semi { first, second } = session else {
-                        unreachable!()
-                    };
-                    first.val == Session::BorrowEnd(SessionOp::Recv) && self.bounded(&second)
+                Type::Semi { first, second } => {
+                    first.val == Type::BorrowEnd(SessionOp::Recv) && self.bounded(&second.val)
                 }
                 Type::Abstraction {
                     quantification, ty, ..

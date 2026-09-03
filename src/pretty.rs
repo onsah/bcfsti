@@ -1,7 +1,7 @@
 use crate::{
     syntax::{
         Clause, Const, Eff, Expr, Kind, Mob, Mult, Op1, Op2, Pattern, Qualification,
-        Quantification, QuantificationType, SKind, SMult, SPVarId, Session, SessionOp, Type,
+        Quantification, QuantificationType, SKind, SMult, SPVarId, SessionOp, Type,
     },
     util::{
         pretty::{Assoc, Pretty, PrettyEnv},
@@ -64,10 +64,6 @@ impl Pretty<UserState> for Type {
                 }
                 p.pp_arg(R, second);
             }),
-            Type::Chan(s) => p.infix(4, N, |p| {
-                p.pp("Chan ");
-                p.pp_arg(R, s);
-            }),
             Type::Variant(cs) => {
                 p.pp("<");
                 for (i, (l, t)) in cs.iter().enumerate() {
@@ -102,39 +98,25 @@ impl Pretty<UserState> for Type {
                     p.pp(ty);
                 }
             },
-            Type::PVar { id, dual } => {
-                p.pp("'");
-                p.pp(id);
-                if *dual {
-                    p.pp("^");
-                }
-            }
-        }
-    }
-}
-
-impl Pretty<UserState> for Session {
-    fn pp(&self, p: &mut PrettyEnv<UserState>) {
-        match self {
-            Session::Op(op, t) => {
+            Type::Op(op, t) => {
                 match op {
                     SessionOp::Send => p.pp("!"),
                     SessionOp::Recv => p.pp("?"),
                 }
                 p.pp_prec(10, t);
             }
-            Session::End(op) => match op {
+            Type::End(op) => match op {
                 SessionOp::Send => p.pp("Close"),
                 SessionOp::Recv => p.pp("Wait"),
             },
-            Session::Var(x) => p.pp(&x.val),
-            Session::Mu(x, s) => p.infix(0, R, |p| {
+            Type::Var(x) => p.pp(&x.val),
+            Type::Mu(x, s) => p.infix(0, R, |p| {
                 p.pp("µ ");
                 p.pp(x);
                 p.pp(". ");
                 p.pp_arg(R, s);
             }),
-            Session::Choice(op, cs) => {
+            Type::Choice(op, cs) => {
                 match op {
                     SessionOp::Send => p.pp("+"),
                     SessionOp::Recv => p.pp("&"),
@@ -150,22 +132,22 @@ impl Pretty<UserState> for Session {
                 }
                 p.pp("}");
             }
-            Session::BorrowEnd(SessionOp::Send) => p.pp("Ret"),
-            Session::BorrowEnd(SessionOp::Recv) => p.pp("Acq"),
-            Session::Skip => p.pp("Skip"),
-            Session::Semi { first, second } => {
+            Type::BorrowEnd(SessionOp::Send) => p.pp("Ret"),
+            Type::BorrowEnd(SessionOp::Recv) => p.pp("Acq"),
+            Type::Skip => p.pp("Skip"),
+            Type::Semi { first, second } => {
                 p.pp("(");
                 p.pp(first);
                 p.pp("; ");
                 p.pp(second);
                 p.pp(")");
             }
-            Session::UVar(id) => {
+            Type::UVar(id) => {
                 p.pp("(uvar ");
                 p.pp(&id.to_string());
                 p.pp(")");
             }
-            Session::PVar { id, dual } => {
+            Type::PVar { id, dual } => {
                 p.pp("'");
                 p.pp(id);
                 if *dual {

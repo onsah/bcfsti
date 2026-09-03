@@ -33,7 +33,15 @@ pub(crate) fn normalise_session(
 
 fn normalise_type(alias_env: &AliasEnv, ty: &Type) -> Type {
     match ty {
-        Type::Chan(session) => Type::Chan(normalise_session_type(alias_env, session)),
+        Type::Skip
+        | Type::Semi { .. }
+        | Type::End(_)
+        | Type::BorrowEnd(_)
+        | Type::Op(_, _)
+        | Type::Choice(_, _)
+        | Type::Mu(_, _)
+        | Type::Var(_)
+        | Type::UVar(_) => normalise_session_type(alias_env, ty),
         _ => ty.clone(),
     }
 }
@@ -132,6 +140,7 @@ fn subst_session(session: &Session, var: &Id, s_new: &Session) -> Session {
         | Session::Skip
         | Session::UVar(_)
         | Session::PVar { .. } => session.clone(),
+        _ => unreachable!("Value type in session substitution"),
     }
 }
 

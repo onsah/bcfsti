@@ -144,12 +144,21 @@ fn check_session_shadowing(session: &SSession, alias_env: &AliasEnv) -> Result<(
         Session::Var(_) => Ok(()),
         Session::UVar(_) => Ok(()),
         Session::PVar { .. } => Ok(()),
+        _ => unreachable!("Regular type in session shadowing check"),
     }
 }
 
 fn check_type_shadowing(ty: &SType, alias_env: &AliasEnv) -> Result<(), TypeError> {
     match &ty.val {
-        Type::Chan(session) => check_session_shadowing(&fake_span(session.clone()), alias_env),
+        Type::Skip
+        | Type::Semi { .. }
+        | Type::End(_)
+        | Type::BorrowEnd(_)
+        | Type::Op(_, _)
+        | Type::Choice(_, _)
+        | Type::Mu(_, _)
+        | Type::Var(_)
+        | Type::UVar(_) => check_session_shadowing(&fake_span(ty.val.clone()), alias_env),
         Type::Arr { param, ret, .. } => {
             check_type_shadowing(param, alias_env)?;
             check_type_shadowing(ret, alias_env)

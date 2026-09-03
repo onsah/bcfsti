@@ -8,7 +8,6 @@ use crate::{
     type_alias::AliasEnv,
     type_checker::TypeError,
     type_context::TypeCtx,
-    util::span::Spanned,
 };
 
 pub(crate) fn infer(ty_ctx: &TypeCtx, alias_env: &AliasEnv, ty: &SType) -> Result<Kind, TypeError> {
@@ -63,8 +62,16 @@ impl KindCheckState<'_> {
     fn infer(&self, ty: &SType) -> Result<Kind, TypeError> {
         match &ty.val {
             Type::Unit | Type::Int | Type::Bool | Type::String => Ok(Kind::Type),
-            Type::Chan(session) => {
-                self.check_session_well_formed(&Spanned::new(session.clone(), ty.span.clone()))?;
+            Type::Skip
+            | Type::Semi { .. }
+            | Type::End(_)
+            | Type::BorrowEnd(_)
+            | Type::Op(_, _)
+            | Type::Choice(_, _)
+            | Type::Mu(_, _)
+            | Type::Var(_)
+            | Type::UVar(_) => {
+                self.check_session_well_formed(ty)?;
                 Ok(Kind::Session)
             }
             Type::Variant(variants) => {
@@ -138,16 +145,13 @@ impl KindCheckState<'_> {
                         Ok(())
                     } else {
                         Err(TypeError::KindMismatch(
-                            session.clone().to_type(),
+                            session.clone(),
                             Kind::Session,
                             self.ty_ctx.clone(),
                         ))
                     }
                 }
-                None => Err(TypeError::UndefinedPVar(
-                    session.clone().to_type(),
-                    id.clone(),
-                )),
+                None => Err(TypeError::UndefinedPVar(session.clone(), id.clone())),
             },
             Session::Var(id) => {
                 if !self.rvars.contains(&id.val) && !self.alias_env.contains_key(&id.val) {
@@ -160,6 +164,7 @@ impl KindCheckState<'_> {
             // therefore we must check well formedness after unification
             // variables are solved.
             Session::UVar(_) => Ok(()),
+            _ => unreachable!("Regular type in session well-formed check"),
         }
     }
 
@@ -187,6 +192,7 @@ impl KindCheckState<'_> {
             }
             Session::PVar { .. } => Err(TypeError::WfNonContractive(session.clone(), on.clone())),
             Session::UVar(_) => unreachable!("Should be called after unification!"),
+            _ => unreachable!("Regular type in contractivity check"),
         }
     }
 
@@ -202,9 +208,7 @@ impl KindCheckState<'_> {
                 Qualification::Bounded(s)
                 | Qualification::New(s)
                 | Qualification::Dualable(s)
-                | Qualification::NonSkip(s) => {
-                    self.check(&SType::from_session(s.0.clone()), Kind::Session)?
-                }
+                | Qualification::NonSkip(s) => self.check(&s.0, Kind::Session)?,
             }
         }
         Ok(())
@@ -240,8 +244,8 @@ mod tests {
 
     use crate::{
         session_type,
-        syntax::{PVarId, QuantificationType, SSemSession, SessionOp},
-        util::span::fake_span,
+        syntax::{PVarId, QuantificationType, SSemType, SessionOp, Type},
+        util::span::{Spanned, fake_span},
     };
 
     use super::*;
@@ -254,7 +258,7 @@ mod tests {
     }
 
     fn pvar_chan(id: PVarId) -> Type {
-        Type::Chan(Session::PVar { id, dual: false })
+        Type::PVar { id, dual: false }
     }
 
     fn variant(case: &str, ty: Type) -> Type {
@@ -292,10 +296,7 @@ mod tests {
         );
         assert_eq!(
             KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
-                [fake_span(Qualification::Unr(
-                    Type::Chan(Session::Skip).into()
-                ))]
-                .iter()
+                [fake_span(Qualification::Unr(Type::Skip.into()))].iter()
             ),
             Ok(())
         );
@@ -435,7 +436,7 @@ mod tests {
             );
         assert!(matches!(
             result,
-            Err(TypeError::KindMismatch(Spanned { val: Type::Chan(Session::PVar { id, .. }), .. }, Kind::Session, _)) if id == "a"
+            Err(TypeError::KindMismatch(Spanned { val: Type::PVar { id, .. }, .. }, Kind::Session, _)) if id == "a"
         ));
     }
 
@@ -632,7 +633,7 @@ mod tests {
         let s = session_type! { +{ a: !Int, b: !Bool } };
         assert_eq!(
             KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
-                [fake_span(Qualification::Bounded(SSemSession(s)))].iter()
+                [fake_span(Qualification::Bounded(SSemType(s)))].iter()
             ),
             Ok(())
         );
@@ -644,7 +645,7 @@ mod tests {
             session_type! { &{ a: fake_span(Session::PVar { id: "b".to_string(), dual: false }) } };
         assert!(matches!(
             KindCheckState::from(ctx(&[]), &HashMap::new())
-                .check_qualifications_well_formed([fake_span(Qualification::Bounded(SSemSession(s)))].iter()),
+                .check_qualifications_well_formed([fake_span(Qualification::Bounded(SSemType(s)))].iter()),
             Err(TypeError::UndefinedPVar(_, id)) if id == "b"
         ));
     }
@@ -676,14 +677,14 @@ mod tests {
             );
         assert!(matches!(
             result,
-            Err(TypeError::KindMismatch(
-                Spanned {
-                    val: Type::Chan(Session::PVar { id, .. }),
-                    ..
-                },
-                Kind::Session,
-                _
-            )) if id == "a"
+                Err(TypeError::KindMismatch(
+                    Spanned {
+                        val: Type::PVar { id, .. },
+                        ..
+                    },
+                    Kind::Session,
+                    _
+                )) if id == "a"
         ));
     }
 }

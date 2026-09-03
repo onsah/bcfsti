@@ -148,11 +148,11 @@ impl TypeChecker {
                 let typ = fake_span(Type::Prod {
                     mult: fake_span(Mult::Lin),
                     first: Box::new(Spanned::new(
-                        Type::Chan(session_type! { Acq; (sess_type.clone(); Close) }.val),
+                        session_type! { Acq; (sess_type.clone(); Close) }.val,
                         sess_type.span.clone(),
                     )),
                     second: Box::new(Spanned::new(
-                        Type::Chan(session_type! { Acq; (fake_span(sess_type.dual()); Wait) }.val),
+                        session_type! { Acq; (fake_span(sess_type.dual()); Wait) }.val,
                         sess_type.span.clone(),
                     )),
                 });
@@ -252,10 +252,7 @@ impl TypeChecker {
                 let (val_cs, _) = self.check(&val_ctx, ty_ctx, val, ty)?;
 
                 let chan_ctx = ctx.restrict(&chan.free_vars());
-                let expected_chan_ty = fake_span(Type::Chan(Session::Op(
-                    SessionOp::Send,
-                    Box::new(ty.clone()),
-                )));
+                let expected_chan_ty = fake_span(Type::Op(SessionOp::Send, Box::new(ty.clone())));
                 let (chan_cs, _) = self.check(&chan_ctx, ty_ctx, chan, &expected_chan_ty)?;
 
                 // ctx must be a subcontext of unordered join of val_ctx and chan_ctx must
@@ -279,10 +276,7 @@ impl TypeChecker {
                 }
 
                 let chan_ctx = ctx.restrict(&chan.free_vars());
-                let expected_chan_ty = fake_span(Type::Chan(Session::Op(
-                    SessionOp::Recv,
-                    Box::new(ty.clone()),
-                )));
+                let expected_chan_ty = fake_span(Type::Op(SessionOp::Recv, Box::new(ty.clone())));
                 let (chan_cs, _) = self.check(&chan_ctx, ty_ctx, chan, &expected_chan_ty)?;
 
                 if !ctx.is_subctx_of(&ty_ctx, &chan_ctx) {
@@ -327,12 +321,8 @@ impl TypeChecker {
                     ));
                 }
 
-                let (chan_cs, chan_eff) = self.check(
-                    &chan_ctx,
-                    ty_ctx,
-                    chan,
-                    &fake_span(Type::Chan(Session::Skip)),
-                )?;
+                let (chan_cs, chan_eff) =
+                    self.check(&chan_ctx, ty_ctx, chan, &fake_span(Type::Skip))?;
 
                 Ok((fake_span(Type::Unit), chan_cs, chan_eff))
             }
@@ -346,7 +336,7 @@ impl TypeChecker {
                     ));
                 }
 
-                let expected_ty = fake_span(Type::Chan(Session::BorrowEnd(*op)));
+                let expected_ty = fake_span(Type::BorrowEnd(*op));
                 let (chan_cs, chan_eff) = self.check(&chan_ctx, ty_ctx, chan, &expected_ty)?;
 
                 Ok((fake_span(Type::Unit), chan_cs, chan_eff))
@@ -361,7 +351,7 @@ impl TypeChecker {
                     ));
                 }
 
-                let expected_ty = fake_span(Type::Chan(Session::End(*op)));
+                let expected_ty = fake_span(Type::End(*op));
                 let (chan_cs, chan_eff) = self.check(&chan_ctx, ty_ctx, chan, &expected_ty)?;
 
                 Ok((fake_span(Type::Unit), chan_cs, chan_eff))
@@ -377,15 +367,14 @@ impl TypeChecker {
                 }
 
                 let uvar = self.new_uvar();
-                let expected_chan_ty = fake_span(Type::Chan(
-                    session_type! { prefix_session.clone(); uvar.clone() }.val,
-                ));
+                let expected_chan_ty =
+                    fake_span(session_type! { prefix_session.clone(); uvar.clone() }.val);
                 let (chan_cs, chan_eff) = self.check(chan_ctx, ty_ctx, chan, &expected_chan_ty)?;
 
                 let ret_ty = Type::Prod {
                     mult: fake_span(Mult::OrdL),
-                    first: Box::new(fake_span(Type::Chan(prefix_session.val.clone()))),
-                    second: Box::new(fake_span(Type::Chan(uvar.val))),
+                    first: Box::new(fake_span(prefix_session.val.clone())),
+                    second: Box::new(fake_span(uvar.val)),
                 };
 
                 Ok((fake_span(ret_ty), chan_cs, chan_eff))
@@ -401,19 +390,14 @@ impl TypeChecker {
                 }
 
                 let uvar = self.new_uvar();
-                let expected_chan_ty = fake_span(Type::Chan(
-                    session_type! { prefix_session.clone(); uvar.clone() }.val,
-                ));
+                let expected_chan_ty =
+                    fake_span(session_type! { prefix_session.clone(); uvar.clone() }.val);
                 let (chan_cs, chan_eff) = self.check(chan_ctx, ty_ctx, chan, &expected_chan_ty)?;
 
                 let ret_ty = Type::Prod {
                     mult: fake_span(Mult::Lin),
-                    first: Box::new(fake_span(Type::Chan(
-                        session_type! { prefix_session.clone(); Ret }.val,
-                    ))),
-                    second: Box::new(fake_span(Type::Chan(
-                        session_type! { Acq; uvar.clone() }.val,
-                    ))),
+                    first: Box::new(fake_span(session_type! { prefix_session.clone(); Ret }.val)),
+                    second: Box::new(fake_span(session_type! { Acq; uvar.clone() }.val)),
                 };
 
                 Ok((fake_span(ret_ty), chan_cs, chan_eff))
@@ -631,23 +615,17 @@ impl TypeChecker {
 
                 let (chan_ty, chan_cs, _chan_eff) = self.infer(&chan_ctx, ty_ctx, chan_expr)?;
 
-                if let Type::Chan(Session::UVar(_)) = &chan_ty.val {
+                if let Type::UVar(_) = &chan_ty.val {
                     return Err(TypeError::TypeAnnotationMissing(*chan_expr.clone()));
                 }
 
-                let Type::Chan(s) = &chan_ty.val else {
-                    return Err(TypeError::Mismatch(
-                        *chan_expr.clone(),
-                        Err("Chan".into()),
-                        chan_ty.clone(),
-                    ));
-                };
+                let s = &chan_ty.val;
 
                 let Session::Choice(SessionOp::Send, branches) = s else {
                     return Err(TypeError::Mismatch(
                         *chan_expr.clone(),
                         Err("Choice<Send>".into()),
-                        fake_span(Type::Chan(s.clone())),
+                        fake_span(s.clone()),
                     ));
                 };
 
@@ -666,7 +644,7 @@ impl TypeChecker {
                         chan_ty.clone(),
                     ))?;
 
-                Ok((fake_span(Type::Chan(label_ty.val)), chan_cs, Eff::Yes))
+                Ok((fake_span(label_ty.val), chan_cs, Eff::Yes))
             }
             Expr::Branch(chan_expr) => {
                 let chan_ctx = ctx.restrict(&chan_expr.free_vars());
@@ -681,14 +659,14 @@ impl TypeChecker {
 
                 let (chan_ty, chan_cs, _chan_eff) = self.infer(&chan_ctx, ty_ctx, chan_expr)?;
 
-                if let Type::Chan(Session::UVar(_)) = &chan_ty.val {
+                if let Type::UVar(_) = &chan_ty.val {
                     return Err(TypeError::TypeAnnotationMissing(*chan_expr.clone()));
                 }
 
-                let Type::Chan(Session::Choice(SessionOp::Recv, branches)) = chan_ty.val else {
+                let Type::Choice(SessionOp::Recv, branches) = chan_ty.val else {
                     return Err(TypeError::Mismatch(
                         *chan_expr.clone(),
-                        Err("Chan<Choice<Recv>>".into()),
+                        Err("Choice<Recv>".into()),
                         chan_ty.clone(),
                     ));
                 };
@@ -696,9 +674,7 @@ impl TypeChecker {
                 let ty = Type::Variant(
                     branches
                         .into_iter()
-                        .map(|(label, Spanned { val, span })| {
-                            (label, Spanned::new(Type::Chan(val), span))
-                        })
+                        .map(|(label, Spanned { val, span })| (label, Spanned::new(val, span)))
                         .collect(),
                 );
                 Ok((fake_span(ty), chan_cs, Eff::Yes))
