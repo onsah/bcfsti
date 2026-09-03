@@ -1,6 +1,6 @@
 use crate::util::span::{Spanned, fake_span};
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
     iter,
     ops::Deref,
@@ -83,8 +83,6 @@ pub enum Session {
 pub type SSession = Spanned<Session>;
 
 impl Session {
-    const ACQ: Session = Session::BorrowEnd(SessionOp::Recv);
-
     pub fn is_only_skips(&self) -> bool {
         match self {
             Session::Skip => true,
@@ -145,24 +143,6 @@ impl Session {
             Session::Var(_) => Box::new(iter::empty()),
             Session::UVar(_) => Box::new(iter::empty()),
             Session::PVar { id, .. } => Box::new(iter::once(id.clone())),
-        }
-    }
-
-    fn is_bounded(&self) -> bool {
-        match self {
-            Session::Semi { first, second } => {
-                second.is_bounded() || (first.is_bounded() && second.is_only_skips())
-            }
-            Session::BorrowEnd(session_op) => session_op == &SessionOp::Send,
-            Session::Choice(_, branches) => branches.iter().all(|(_, branch)| branch.is_bounded()),
-            Session::Mu(_, body) => body.is_bounded(),
-            Session::End(_) => true,
-            Session::Var(_) => true,
-            Session::Op(_, _) => false,
-            // Unification variables are not bounded, as they can be instantiated to any session type.
-            Session::UVar(_) => false,
-            Session::Skip => false,
-            Session::PVar { .. } => todo!(),
         }
     }
 

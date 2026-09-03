@@ -25,7 +25,7 @@ mod typechecker_tests {
 
     use crate::{
         constraint::Constraints,
-        error_reporting::{IErr, report_error},
+        error_reporting::IErr,
         session_type,
         syntax::{Eff, Expr, Mult, Session, Type},
         type_checker::TypeError,

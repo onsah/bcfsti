@@ -234,7 +234,3 @@ impl Pretty<()> for TypeCtx {
         }
     }
 }
-
-fn pvar(id: PVarId) -> Type {
-    Type::Chan(Session::PVar { id, dual: false })
-}

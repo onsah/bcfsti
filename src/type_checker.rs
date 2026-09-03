@@ -1,17 +1,16 @@
-use core::panic;
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    constraint::{Constraints, Equivalences, Mobilities},
+    constraint::Constraints,
     context::{Ctx, JoinOrd, ext},
     equivalence::{EquivalenceResult, check_equivalence},
     kinding,
     normalization::{normalise, normalise_session},
     session_type,
     syntax::{
-        Eff, Expr, Id, Kind, Label, Mob, Mult, Op1, Op2, PVarId, Qualification, Quantification,
-        QuantificationType, SEff, SExpr, SId, SKind, SMult, SPVarId, SPattern, SQualification,
-        SQuantification, SSession, SType, Session, SessionOp, Type, UVarId,
+        Eff, Expr, Id, Kind, Label, Mob, Mult, Op1, Op2, PVarId, Quantification,
+        QuantificationType, SEff, SExpr, SId, SMult, SPattern, SQualification, SQuantification,
+        SSession, SType, Session, SessionOp, Type, UVarId,
     },
     type_alias::AliasEnv,
     type_context::TypeCtx,
@@ -1318,19 +1317,6 @@ impl TypeChecker {
             cs.mobilities.add(expr.clone(), non_mobile_ids, ctx.clone());
         }
         Ok(())
-    }
-}
-
-impl Quantification {
-    fn binding_ids(&self) -> HashSet<PVarId> {
-        self.bindings.iter().map(|(id, _)| id.val.clone()).collect()
-    }
-
-    fn binding_lookup(&self) -> HashMap<PVarId, Kind> {
-        self.bindings
-            .iter()
-            .map(|(sid, skind)| (sid.val.clone(), skind.val.clone()))
-            .collect()
     }
 }
 

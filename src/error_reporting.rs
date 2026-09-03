@@ -2,7 +2,6 @@ use std::{collections::HashSet, ops::Range};
 
 use crate::{
     lexer::LexerError,
-    syntax::SType,
     type_checker::TypeError,
     type_context::TypeCtx,
     util::{pretty::pretty_def, span::Span},
@@ -747,7 +746,7 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     ),
                 )],
             ),
-            TypeError::KindMismatch(spanned, kind, type_ctx) => todo!(),
+            TypeError::KindMismatch(_, _, _) => todo!(),
             TypeError::QualificationNotSatisfied(type_ctx, qualification) => report(
                 &src,
                 qualification.span.clone(),
