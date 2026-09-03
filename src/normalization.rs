@@ -134,3 +134,21 @@ fn subst_session(session: &Session, var: &Id, s_new: &Session) -> Session {
         | Session::PVar { .. } => session.clone(),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use crate::{normalization::normalise_session_type, session_type, type_alias::AliasEnv};
+
+    #[test]
+    fn normalise_rec_idempotency() {
+        let session = session_type! { mu X. !Int; X };
+
+        let normalized1 = normalise_session_type(&AliasEnv::new(), &session);
+
+        assert_eq!(normalized1, session_type! { !Int; (mu X. !Int; X) }.val);
+
+        let normalized2 = normalise_session_type(&AliasEnv::new(), &normalized1);
+
+        assert_eq!(normalized1, normalized2);
+    }
+}
