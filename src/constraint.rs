@@ -2,10 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     context::Ctx,
-    syntax::{PVarId, SExpr, SId, SType, Session, Type, UVarId},
+    syntax::{PVarId, SExpr, SId, SType, Type, UVarId},
     type_checker::TypeError,
     type_context::TypeCtx,
-    util::span::{Spanned, fake_span},
+    util::span::{fake_span, Spanned},
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -38,7 +38,7 @@ impl Eq for Equivalences {}
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Mobilities(Vec<(SExpr, HashSet<SId>, Ctx)>);
 
-type Assignments = HashMap<UVarId, Session>;
+type Assignments = HashMap<UVarId, Type>;
 
 impl Constraints {
     pub fn empty() -> Constraints {
@@ -152,12 +152,7 @@ impl Equivalences {
         loop {
             let Some((result, (ty1, ty2))) = equivelances
                 .iter()
-                .map(|(ty1, ty2)| {
-                    (
-                        Self::unify_type(ty_ctx, ty1, ty2),
-                        (ty1.clone(), ty2.clone()),
-                    )
-                })
+                .map(|(ty1, ty2)| (Self::unify(ty_ctx, ty1, ty2), (ty1.clone(), ty2.clone())))
                 .find(|(result, _)| !matches!(result, Err(SolveError::Check)))
             else {
                 break;
@@ -170,12 +165,7 @@ impl Equivalences {
                     // Substitute assignments to the remaining constraints
                     equivelances = equivelances
                         .into_iter()
-                        .map(|(ty1, ty2)| {
-                            (
-                                subst_type(ty1, &assignments_),
-                                subst_type(ty2, &assignments_),
-                            )
-                        })
+                        .map(|(ty1, ty2)| (subst(ty1, &assignments_), subst(ty2, &assignments_)))
                         .collect();
                     assignments.extend(assignments_);
                 }
@@ -187,9 +177,9 @@ impl Equivalences {
         (assignments, Equivalences(equivelances))
     }
 
-    /// Unifies two regular types. When structures match, further subconstraints are generated.
+    /// Unifies two types. When structures match, further subconstraints are generated.
     /// When a unification variable on one side is found, it's converted to an assignment.
-    fn unify_type(ty_ctx: &TypeCtx, ty1: &Type, ty2: &Type) -> Result<Assignments, SolveError> {
+    fn unify(ty_ctx: &TypeCtx, ty1: &Type, ty2: &Type) -> Result<Assignments, SolveError> {
         if ty1.sem_eq(ty2) {
             Ok(HashMap::new())
         } else {
@@ -256,99 +246,75 @@ impl Equivalences {
                         dual: *dual,
                     },
                 )])),
+                (Type::Skip, Type::Skip) => Ok(HashMap::new()),
+                (Type::End(op1), Type::End(op2)) if op1 == op2 => Ok(HashMap::new()),
+                (Type::BorrowEnd(op1), Type::BorrowEnd(op2)) if op1 == op2 => Ok(HashMap::new()),
+                (Type::Var(id1), Type::Var(id2)) if id1 == id2 => Ok(HashMap::new()),
                 (
-                    Type::Skip
-                    | Type::Semi { .. }
-                    | Type::End(_)
-                    | Type::BorrowEnd(_)
-                    | Type::Op(_, _)
-                    | Type::Choice(_, _)
-                    | Type::Mu(_, _)
-                    | Type::Var(_)
-                    | Type::UVar(_),
-                    Type::Skip
-                    | Type::Semi { .. }
-                    | Type::End(_)
-                    | Type::BorrowEnd(_)
-                    | Type::Op(_, _)
-                    | Type::Choice(_, _)
-                    | Type::Mu(_, _)
-                    | Type::Var(_)
-                    | Type::UVar(_),
-                ) => Self::unify_session(ty_ctx, ty1, ty2),
+                    Type::Semi {
+                        first: first1,
+                        second: second1,
+                    },
+                    Type::Semi {
+                        first: first2,
+                        second: second2,
+                    },
+                ) => {
+                    let mut assignments = Self::unify(ty_ctx, &first1.val, &first2.val)?;
+                    assignments.extend(Self::unify(ty_ctx, &second1.val, &second2.val)?);
+                    Ok(assignments)
+                }
+                (Type::Op(op1, t1), Type::Op(op2, t2)) if op1 == op2 => {
+                    Self::unify(ty_ctx, &t1.val, &t2.val).map_err(|_| SolveError::Check)
+                }
+                (Type::Choice(op1, branches1), Type::Choice(op2, branches2)) if op1 == op2 => {
+                    if branches1.len() != branches2.len() {
+                        return Err(SolveError::Check);
+                    }
+
+                    let mut assignments = HashMap::new();
+                    for (label, branch1) in branches1.iter() {
+                        let Some(branch2) = branches2.iter().find_map(|(label_, branch)| {
+                            if &label_.val == &label.val {
+                                Some(branch)
+                            } else {
+                                None
+                            }
+                        }) else {
+                            return Err(SolveError::Check);
+                        };
+
+                        assignments.extend(Self::unify(ty_ctx, &branch1.val, &branch2.val)?);
+                    }
+
+                    Ok(assignments)
+                }
+                (Type::Mu(id1, body1), Type::Mu(id2, body2)) if id1 == id2 => {
+                    Self::unify(ty_ctx, &body1.val, &body2.val).map_err(|_| SolveError::Check)
+                }
+                (Type::UVar(id), other) | (other, Type::UVar(id))
+                    if Self::is_assignable_session_structure(other) =>
+                {
+                    Ok(HashMap::from([(*id, other.clone())]))
+                }
                 _ => Err(SolveError::Check),
             }
         }
     }
 
-    /// Unifies two session types. Unlike regular types we can't further generate subconstraints
-    /// due to associativity of sequencing operators. So either two types fully match modulo unification variables
-    /// or the equivalence constraint should be checked by FreeST.
-    ///
-    /// 1. When one part is a unification variable and the other side is not, generates an assignment
-    /// 2. When both side structurally match, further substructures are unified.
-    ///    - If all substructures generate assignment, the result is the union of those assignments
-    ///    - Otherwise, equivalence constraint can't be unified
-    fn unify_session(
-        ty_ctx: &TypeCtx,
-        session1: &Session,
-        session2: &Session,
-    ) -> Result<Assignments, SolveError> {
-        match (session1, session2) {
-            (Session::UVar(id), session) | (session, Session::UVar(id))
-                if !matches!(session, Session::UVar(_)) =>
-            {
-                Ok(HashMap::from([(*id, session.clone())]))
-            }
-            (Session::Skip, Session::Skip) => Ok(HashMap::new()),
-            (Session::End(op1), Session::End(op2)) if op1 == op2 => Ok(HashMap::new()),
-            (Session::BorrowEnd(op1), Session::BorrowEnd(op2)) if op1 == op2 => Ok(HashMap::new()),
-            (Session::Var(id1), Session::Var(id2)) if id1 == id2 => Ok(HashMap::new()),
-            (
-                Session::Semi {
-                    first: first1,
-                    second: second1,
-                },
-                Session::Semi {
-                    first: first2,
-                    second: second2,
-                },
-            ) => {
-                let mut assignments = Self::unify_session(ty_ctx, first1, first2)?;
-                assignments.extend(Self::unify_session(ty_ctx, second1, second2)?);
-                Ok(assignments)
-            }
-            (Session::Op(op1, session1), Session::Op(op2, session2)) if op1 == op2 => {
-                Self::unify_type(ty_ctx, &session1.val, &session2.val)
-                    .map_err(|_| SolveError::Check)
-            }
-            (Session::Choice(op1, branches1), Session::Choice(op2, branches2)) if op1 == op2 => {
-                if branches1.len() != branches2.len() {
-                    return Err(SolveError::Check);
-                }
-
-                let mut assignments = HashMap::new();
-                for (label, branch1) in branches1.iter() {
-                    let Some(branch2) = branches2.iter().find_map(|(label_, branch)| {
-                        if &label_.val == &label.val {
-                            Some(branch)
-                        } else {
-                            None
-                        }
-                    }) else {
-                        return Err(SolveError::Check);
-                    };
-
-                    assignments.extend(Self::unify_session(ty_ctx, branch1, branch2)?);
-                }
-
-                Ok(assignments)
-            }
-            (Session::Mu(id1, session1), Session::Mu(id2, session2)) if id1 == id2 => {
-                Self::unify_session(ty_ctx, session1, session2).map_err(|_| SolveError::Check)
-            }
-            _ => Err(SolveError::Check),
-        }
+    fn is_assignable_session_structure(ty: &Type) -> bool {
+        matches!(
+            ty,
+            Type::Skip
+                | Type::Semi { .. }
+                | Type::End(_)
+                | Type::BorrowEnd(_)
+                | Type::Op(_, _)
+                | Type::Choice(_, _)
+                | Type::Mu(_, _)
+                | Type::Var(_)
+                | Type::PVar { .. }
+        )
     }
 
     fn unsolved_variables(&self) -> HashSet<UVarId> {
@@ -399,9 +365,10 @@ impl Mobilities {
     }
 }
 
-fn subst_type(ty: SType, assignments: &Assignments) -> SType {
+fn subst(ty: SType, assignments: &Assignments) -> SType {
     let span = ty.span.clone();
     let val = match ty.val {
+        Type::UVar(var) => assignments.get(&var).cloned().unwrap_or(Type::UVar(var)),
         Type::Abstraction {
             typ,
             quantification,
@@ -409,27 +376,26 @@ fn subst_type(ty: SType, assignments: &Assignments) -> SType {
         } => Type::Abstraction {
             typ,
             quantification,
-            ty: Box::new(subst_type(*ty, assignments)),
+            ty: Box::new(subst(*ty, assignments)),
         },
-        Type::Skip
-        | Type::Semi { .. }
-        | Type::End(_)
-        | Type::BorrowEnd(_)
-        | Type::Op(_, _)
-        | Type::Choice(_, _)
-        | Type::Mu(_, _)
-        | Type::Var(_)
-        | Type::UVar(_) => subst_session(ty.val, assignments),
-        Type::Bool | Type::Int | Type::String => ty.val,
-        Type::Prod {
-            mult,
-            first,
-            second,
-        } => Type::Prod {
-            mult,
-            first: Box::new(subst_type(*first, assignments)),
-            second: Box::new(subst_type(*second, assignments)),
+        Type::PVar { id, dual } => Type::PVar { id, dual },
+        Type::Skip => Type::Skip,
+        Type::Semi { first, second } => Type::Semi {
+            first: Box::new(subst(*first, assignments)),
+            second: Box::new(subst(*second, assignments)),
         },
+        Type::End(op) => Type::End(op),
+        Type::BorrowEnd(op) => Type::BorrowEnd(op),
+        Type::Op(op, ty) => Type::Op(op, Box::new(subst(*ty, assignments))),
+        Type::Choice(op, items) => Type::Choice(
+            op,
+            items
+                .into_iter()
+                .map(|(label, ty)| (label, subst(ty, assignments)))
+                .collect(),
+        ),
+        Type::Mu(id, body) => Type::Mu(id, Box::new(subst(*body, assignments))),
+        Type::Var(id) => Type::Var(id),
         Type::Arr {
             mob,
             mult,
@@ -440,60 +406,35 @@ fn subst_type(ty: SType, assignments: &Assignments) -> SType {
             mob,
             mult,
             eff,
-            param: Box::new(subst_type(*param, assignments)),
-            ret: Box::new(subst_type(*ret, assignments)),
+            param: Box::new(subst(*param, assignments)),
+            ret: Box::new(subst(*ret, assignments)),
+        },
+        Type::Prod {
+            mult,
+            first,
+            second,
+        } => Type::Prod {
+            mult,
+            first: Box::new(subst(*first, assignments)),
+            second: Box::new(subst(*second, assignments)),
         },
         Type::Variant(items) => Type::Variant(
             items
                 .into_iter()
-                .map(|(label, ty)| (label, subst_type(ty, assignments)))
+                .map(|(label, ty)| (label, subst(ty, assignments)))
                 .collect(),
         ),
         Type::Unit => Type::Unit,
-        Type::PVar { id, dual } => Type::PVar { id, dual },
+        Type::Int => Type::Int,
+        Type::Bool => Type::Bool,
+        Type::String => Type::String,
     };
     Spanned::new(val, span)
 }
 
-fn subst_session(ty: Session, assignments: &Assignments) -> Session {
-    match ty {
-        Session::UVar(var) => {
-            if let Some(ty) = assignments.get(&var) {
-                ty.clone()
-            } else {
-                Session::UVar(var)
-            }
-        }
-        Session::PVar { .. } => ty,
-        Session::Skip => Session::Skip,
-        Session::Semi { first, second } => Session::Semi {
-            first: Box::new(fake_span(subst_session(first.val, assignments))),
-            second: Box::new(fake_span(subst_session(second.val, assignments))),
-        },
-        Session::End(session_op) => Session::End(session_op),
-        Session::BorrowEnd(session_op) => Session::BorrowEnd(session_op),
-        Session::Op(session_op, ty) => {
-            Session::Op(session_op, Box::new(subst_type(*ty, assignments)))
-        }
-        Session::Choice(session_op, items) => Session::Choice(
-            session_op,
-            items
-                .into_iter()
-                .map(|(label, s)| (label, fake_span(subst_session(s.val, assignments))))
-                .collect(),
-        ),
-        Session::Mu(id, body) => Session::Mu(
-            id,
-            Box::new(fake_span(subst_session(body.val, assignments))),
-        ),
-        Session::Var(id) => Session::Var(id),
-        _ => unreachable!("Value type in session substitution"),
-    }
-}
-
 fn subst_ctx(ctx: &mut Ctx, assignments: &Assignments) {
     ctx.map_binds_mut(&mut |_, ty| {
-        *ty = subst_type(fake_span(ty.clone()), assignments).val;
+        *ty = subst(fake_span(ty.clone()), assignments).val;
     })
 }
 
