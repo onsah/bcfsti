@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::context::Ctx;
-use crate::syntax::{Kind, Mult, PVarId, Qualification, Quantification, Session, SessionOp, Type};
+use crate::syntax::{Kind, Mult, PVarId, Qualification, Quantification, SessionOp, Type};
 use crate::util::pretty::{Pretty, PrettyEnv};
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -108,57 +108,57 @@ impl TypeCtx {
         }
     }
 
-    fn bounded(&self, session: &Session) -> bool {
+    fn bounded(&self, session: &Type) -> bool {
         self.or_assumed(
             || Qualification::Bounded(session.clone().into()),
             match session {
-                Session::End(_) | Session::BorrowEnd(SessionOp::Send) => true,
-                Session::Semi { first, second } => {
+                Type::End(_) | Type::BorrowEnd(SessionOp::Send) => true,
+                Type::Semi { first, second } => {
                     (self.bounded(first) && second.is_only_skips()) || self.bounded(second)
                 }
-                Session::Mu(_, session) => self.bounded(session),
-                Session::Var(_) => true,
-                Session::Choice(_, branches) => branches.iter().all(|(_, s)| self.bounded(s)),
+                Type::Mu(_, session) => self.bounded(session),
+                Type::Var(_) => true,
+                Type::Choice(_, branches) => branches.iter().all(|(_, s)| self.bounded(s)),
                 _ => false,
             },
         )
     }
 
-    fn dualable(&self, session: &Session) -> bool {
+    fn dualable(&self, session: &Type) -> bool {
         self.or_assumed(
             || Qualification::Dualable(session.clone().into()),
             match session {
-                Session::Skip | Session::Op(_, _) | Session::End(_) | Session::Var(_) => true,
-                Session::PVar { .. } => self.new(session),
-                Session::Semi { first, second } => {
+                Type::Skip | Type::Op(_, _) | Type::End(_) | Type::Var(_) => true,
+                Type::PVar { .. } => self.new(session),
+                Type::Semi { first, second } => {
                     self.dualable(&first.val) && self.dualable(&second.val)
                 }
-                Session::Choice(_, items) => items.iter().all(|(_, s)| self.dualable(s)),
-                Session::Mu(_, body) => self.dualable(body),
+                Type::Choice(_, items) => items.iter().all(|(_, s)| self.dualable(s)),
+                Type::Mu(_, body) => self.dualable(body),
                 _ => false,
             },
         )
     }
 
-    fn nonskip(&self, session: &Session) -> bool {
+    fn nonskip(&self, session: &Type) -> bool {
         if session.poly_variables().count() == 0 && !session.is_only_skips() {
             true
-        } else if let Session::Semi { first, second } = session {
+        } else if let Type::Semi { first, second } = session {
             self.nonskip(first) || self.nonskip(second)
         } else {
             false
         }
     }
 
-    pub fn new(&self, session: &Session) -> bool {
+    pub fn new(&self, session: &Type) -> bool {
         self.or_assumed(
             || Qualification::New(session.clone().into()),
             match session {
-                Session::Skip | Session::Op(_, _) | Session::Var(_) => true,
+                Type::Skip | Type::Op(_, _) | Type::Var(_) => true,
 
-                Session::Semi { first, second } => self.new(&first.val) && self.new(&second.val),
-                Session::Choice(_, items) => items.iter().all(|(_, s)| self.new(s)),
-                Session::Mu(_, body) => self.new(body),
+                Type::Semi { first, second } => self.new(&first.val) && self.new(&second.val),
+                Type::Choice(_, items) => items.iter().all(|(_, s)| self.new(s)),
+                Type::Mu(_, body) => self.new(body),
                 _ => false,
             },
         )
