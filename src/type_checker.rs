@@ -140,7 +140,7 @@ impl TypeChecker {
                     return Err(TypeError::LeftOverCtx(e.clone(), ctx.clone()));
                 }
                 let sess_type = normalise(ty_ctx, &self.alias_env, sess_type)?;
-                kinding::check_session(ty_ctx, &self.alias_env, &sess_type)?;
+                kinding::check(ty_ctx, &self.alias_env, &sess_type, Kind::Session)?;
 
                 if !ty_ctx.new(&sess_type.val) {
                     return Err(TypeError::TypeNotValidForNew(sess_type.clone()));
@@ -357,6 +357,8 @@ impl TypeChecker {
                 Ok((fake_span(Type::Unit), chan_cs, chan_eff))
             }
             Expr::LSplit(prefix_session, chan) => {
+                kinding::check(ty_ctx, &self.alias_env, prefix_session, Kind::Session)?;
+
                 let chan_ctx = &ctx.restrict(&chan.free_vars());
                 if !ctx.is_subctx_of(&ty_ctx, &chan_ctx) {
                     return Err(TypeError::CtxSplitFailed(
@@ -380,6 +382,8 @@ impl TypeChecker {
                 Ok((fake_span(ret_ty), chan_cs, chan_eff))
             }
             Expr::RSplit(prefix_session, chan) => {
+                kinding::check(ty_ctx, &self.alias_env, prefix_session, Kind::Session)?;
+
                 let chan_ctx = &ctx.restrict(&chan.free_vars());
                 if !ctx.is_subctx_of(&ty_ctx, &chan_ctx) {
                     return Err(TypeError::CtxSplitFailed(
@@ -621,7 +625,7 @@ impl TypeChecker {
 
                 let s = &chan_ty.val;
 
-                let Session::Choice(SessionOp::Send, branches) = s else {
+                let Type::Choice(SessionOp::Send, branches) = s else {
                     return Err(TypeError::Mismatch(
                         *chan_expr.clone(),
                         Err("Choice<Send>".into()),
@@ -671,12 +675,7 @@ impl TypeChecker {
                     ));
                 };
 
-                let ty = Type::Variant(
-                    branches
-                        .into_iter()
-                        .map(|(label, Spanned { val, span })| (label, Spanned::new(val, span)))
-                        .collect(),
-                );
+                let ty = Type::Variant(branches);
                 Ok((fake_span(ty), chan_cs, Eff::Yes))
             }
             Expr::Ann(expr, ty) => {
@@ -1241,10 +1240,10 @@ impl TypeChecker {
         Ok(())
     }
 
-    fn new_uvar(&mut self) -> SSession {
+    fn new_uvar(&mut self) -> SType {
         let id = self.uvar_counter;
         self.uvar_counter += 1;
-        fake_span(Session::UVar(id))
+        fake_span(Type::UVar(id))
     }
 
     fn check_equivalence(

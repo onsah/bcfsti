@@ -359,7 +359,7 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::{
-        equivalence::{check_equivalence, EquivalenceResult},
+        equivalence::{EquivalenceResult, check_equivalence},
         session_type,
         syntax::Type,
     };

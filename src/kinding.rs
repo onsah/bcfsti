@@ -22,14 +22,6 @@ pub(crate) fn check(
     state.check(ty, expected)
 }
 
-pub(crate) fn check_session(
-    ty_ctx: &TypeCtx,
-    alias_env: &AliasEnv,
-    session: &SType,
-) -> Result<(), TypeError> {
-    check(ty_ctx, alias_env, session, Kind::Session)
-}
-
 pub(crate) fn check_qualifications_well_formed<'a>(
     ty_ctx: &TypeCtx,
     alias_env: &AliasEnv,

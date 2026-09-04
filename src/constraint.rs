@@ -5,7 +5,7 @@ use crate::{
     syntax::{PVarId, SExpr, SId, SType, Type, UVarId},
     type_checker::TypeError,
     type_context::TypeCtx,
-    util::span::{fake_span, Spanned},
+    util::span::{Spanned, fake_span},
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
