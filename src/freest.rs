@@ -167,8 +167,8 @@ impl fmt::Display for FreestType {
                 }
                 write!(f, "}}")
             }
-            FreestType::Forall { var, body, .. } => {
-                write!(f, "(forall {} -> {})", var, body)
+            FreestType::Forall { var, kind, body } => {
+                write!(f, "(forall ({var} : {kind}) -> {body})")
             }
             FreestType::Var(label, pvars) => {
                 write!(f, "{}", label)?;
@@ -178,6 +178,15 @@ impl fmt::Display for FreestType {
                 Ok(())
             }
             FreestType::PVar(label, _) => write!(f, "{}", label),
+        }
+    }
+}
+
+impl fmt::Display for Kind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Kind::Type => write!(f, "1T"),
+            Kind::Session => write!(f, "1S"),
         }
     }
 }
