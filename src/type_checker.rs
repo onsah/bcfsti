@@ -5,7 +5,7 @@ use crate::{
     context::{Ctx, JoinOrd, ext},
     equivalence::{EquivalenceResult, check_equivalence},
     kinding,
-    normalization::{normalise, normalise_session},
+    normalization::normalise,
     session_type,
     syntax::{
         Eff, Expr, Id, Kind, Label, Mob, Mult, Op1, Op2, PVarId, Quantification,
@@ -139,7 +139,7 @@ impl TypeChecker {
                 if !ctx.is_unr(ty_ctx) {
                     return Err(TypeError::LeftOverCtx(e.clone(), ctx.clone()));
                 }
-                let sess_type = normalise_session(ty_ctx, &self.alias_env, sess_type)?;
+                let sess_type = normalise(ty_ctx, &self.alias_env, sess_type)?;
                 kinding::check_session(ty_ctx, &self.alias_env, &sess_type)?;
 
                 if !ty_ctx.new(&sess_type.val) {
