@@ -1,10 +1,10 @@
 use std::collections::HashMap;
 
-use crate::syntax::{Expr, Id, SExpr, SSession, SType, Session, Type};
+use crate::syntax::{Expr, Id, SExpr, SType, Session, Type};
 use crate::type_checker::TypeError;
-use crate::util::span::{Spanned, fake_span};
+use crate::util::span::Spanned;
 
-pub type AliasEnv = HashMap<Id, SSession>;
+pub type AliasEnv = HashMap<Id, SType>;
 
 pub fn get_alias_env(e: SExpr) -> (SExpr, AliasEnv) {
     let mut env = HashMap::new();
@@ -30,85 +30,85 @@ pub fn get_alias_env(e: SExpr) -> (SExpr, AliasEnv) {
 pub fn check_shadowing(e: &SExpr, alias_env: &AliasEnv) -> Result<(), TypeError> {
     match &e.val {
         Expr::Const(_) => Ok(()),
-        Expr::New(session) => check_session_shadowing(session, alias_env),
-        Expr::Fork(spanned) => check_shadowing(spanned, alias_env),
-        Expr::End(_, spanned) => check_shadowing(spanned, alias_env),
-        Expr::Send(spanned, spanned1, spanned2) => {
-            check_type_shadowing(spanned, alias_env)?;
-            check_shadowing(spanned1, alias_env)?;
-            check_shadowing(spanned2, alias_env)
+        Expr::New(sess_type) => check_type_shadowing(sess_type, alias_env),
+        Expr::Fork(func) => check_shadowing(func, alias_env),
+        Expr::End(_, chan) => check_shadowing(chan, alias_env),
+        Expr::Send(ty, val, chan) => {
+            check_type_shadowing(ty, alias_env)?;
+            check_shadowing(val, alias_env)?;
+            check_shadowing(chan, alias_env)
         }
-        Expr::Recv(spanned, spanned1) => {
-            check_type_shadowing(spanned, alias_env)?;
-            check_shadowing(spanned1, alias_env)
+        Expr::Recv(ty, chan) => {
+            check_type_shadowing(ty, alias_env)?;
+            check_shadowing(chan, alias_env)
         }
-        Expr::LSplit(spanned, spanned1) => {
-            check_session_shadowing(spanned, alias_env)?;
-            check_shadowing(spanned1, alias_env)
+        Expr::LSplit(prefix_session, chan) => {
+            check_type_shadowing(prefix_session, alias_env)?;
+            check_shadowing(chan, alias_env)
         }
-        Expr::RSplit(spanned, spanned1) => {
-            check_session_shadowing(spanned, alias_env)?;
-            check_shadowing(spanned1, alias_env)
+        Expr::RSplit(prefix_session, chan) => {
+            check_type_shadowing(prefix_session, alias_env)?;
+            check_shadowing(chan, alias_env)
         }
-        Expr::BorrowEnd(_, spanned) => check_shadowing(spanned, alias_env),
-        Expr::Discard(spanned) => check_shadowing(spanned, alias_env),
+        Expr::BorrowEnd(_, chan) => check_shadowing(chan, alias_env),
+        Expr::Discard(chan) => check_shadowing(chan, alias_env),
         Expr::Var(_) => Ok(()),
-        Expr::Abs(_, spanned1) => check_shadowing(spanned1, alias_env),
-        Expr::App(spanned, spanned1) => {
-            check_shadowing(spanned, alias_env)?;
-            check_shadowing(spanned1, alias_env)
+        Expr::Abs(_, body) => check_shadowing(body, alias_env),
+        Expr::App(abs, arg) => {
+            check_shadowing(abs, alias_env)?;
+            check_shadowing(arg, alias_env)
         }
-        Expr::Seq(spanned, spanned1) => {
-            check_shadowing(spanned, alias_env)?;
-            check_shadowing(spanned1, alias_env)
+        Expr::Seq(e1, e2) => {
+            check_shadowing(e1, alias_env)?;
+            check_shadowing(e2, alias_env)
         }
-        Expr::Pair(spanned, spanned1) => {
-            check_shadowing(spanned, alias_env)?;
-            check_shadowing(spanned1, alias_env)
+        Expr::Pair(first, second) => {
+            check_shadowing(first, alias_env)?;
+            check_shadowing(second, alias_env)
         }
-        Expr::Let(_, spanned1, spanned2, _) => {
-            check_shadowing(spanned1, alias_env)?;
-            check_shadowing(spanned2, alias_env)
+        Expr::Let(_, var_expr, body_expr, _) => {
+            check_shadowing(var_expr, alias_env)?;
+            check_shadowing(body_expr, alias_env)
         }
         Expr::LetDecl(_, ty, _, clause, body, _) => {
             check_type_shadowing(ty, alias_env)?;
             check_shadowing(&clause.val.body, alias_env)?;
             check_shadowing(body, alias_env)
         }
-        Expr::LetPair(_, _, spanned2, spanned3) => {
-            check_shadowing(spanned2, alias_env)?;
-            check_shadowing(spanned3, alias_env)
+        Expr::LetPair(_, _, expr, body) => {
+            check_shadowing(expr, alias_env)?;
+            check_shadowing(body, alias_env)
         }
-        Expr::TypeDef(_, spanned1, spanned2, _) => {
-            check_session_shadowing(spanned1, alias_env)?;
-            check_shadowing(spanned2, alias_env)
+        Expr::TypeDef(_, ty, body, _) => {
+            check_type_shadowing(ty, alias_env)?;
+            check_shadowing(body, alias_env)
         }
-        Expr::Inj(_, spanned1) => check_shadowing(spanned1, alias_env),
-        Expr::CaseSum(spanned, items) => {
-            check_shadowing(spanned, alias_env)?;
-            for (_, _, expr) in items {
-                check_shadowing(expr, alias_env)?;
+        Expr::Inj(_, expr) => check_shadowing(expr, alias_env),
+        Expr::CaseSum(expr, items) => {
+            check_shadowing(expr, alias_env)?;
+            for (_, _, case_expr) in items {
+                check_shadowing(case_expr, alias_env)?;
             }
             Ok(())
         }
-        Expr::Select(_, spanned1) => check_shadowing(spanned1, alias_env),
-        Expr::Branch(spanned) => check_shadowing(spanned, alias_env),
-        Expr::Ann(spanned, spanned1) => {
-            check_shadowing(spanned, alias_env)?;
-            check_type_shadowing(spanned1, alias_env)
+        Expr::Select(_, chan_expr) => check_shadowing(chan_expr, alias_env),
+        Expr::Branch(chan_expr) => check_shadowing(chan_expr, alias_env),
+        Expr::Ann(expr, ty) => {
+            check_shadowing(expr, alias_env)?;
+            check_type_shadowing(ty, alias_env)
         }
-        Expr::Op1(_, spanned) => check_shadowing(spanned, alias_env),
-        Expr::Op2(_, spanned, spanned1) => {
-            check_shadowing(spanned, alias_env)?;
-            check_shadowing(spanned1, alias_env)
+        Expr::Op1(_, expr) => check_shadowing(expr, alias_env),
+        Expr::Op2(_, expr1, expr2) => {
+            check_shadowing(expr1, alias_env)?;
+            check_shadowing(expr2, alias_env)
         }
-        Expr::If(spanned, spanned1, spanned2) => {
-            check_shadowing(spanned, alias_env)?;
-            check_shadowing(spanned1, alias_env)?;
-            check_shadowing(spanned2, alias_env)
+        Expr::If(cond_expr, then_expr, else_expr) => {
+            check_shadowing(cond_expr, alias_env)?;
+            check_shadowing(then_expr, alias_env)?;
+            check_shadowing(else_expr, alias_env)
         }
-        Expr::TyApp(e, tys) => {
-            check_shadowing(e, alias_env)?;
+        Expr::TyApp(expr, tys) => {
+            check_shadowing(expr, alias_env)?;
             for ty in tys {
                 check_type_shadowing(ty, alias_env)?;
             }
@@ -118,47 +118,32 @@ pub fn check_shadowing(e: &SExpr, alias_env: &AliasEnv) -> Result<(), TypeError>
     }
 }
 
-fn check_session_shadowing(session: &SSession, alias_env: &AliasEnv) -> Result<(), TypeError> {
-    match &session.val {
-        Session::Skip => Ok(()),
-        Session::Semi { first, second } => {
-            check_session_shadowing(first, alias_env)?;
-            check_session_shadowing(second, alias_env)
+fn check_type_shadowing(ty: &SType, alias_env: &AliasEnv) -> Result<(), TypeError> {
+    match &ty.val {
+        Type::Skip => Ok(()),
+        Type::Semi { first, second } => {
+            check_type_shadowing(first, alias_env)?;
+            check_type_shadowing(second, alias_env)
         }
-        Session::End(_) => Ok(()),
-        Session::BorrowEnd(_) => Ok(()),
-        Session::Op(_, ty) => check_type_shadowing(ty, alias_env),
-        Session::Choice(_, items) => {
-            for (_, session) in items {
-                check_session_shadowing(session, alias_env)?;
+        Type::End(_) => Ok(()),
+        Type::BorrowEnd(_) => Ok(()),
+        Type::Op(_, payload_ty) => check_type_shadowing(payload_ty, alias_env),
+        Type::Choice(_, items) => {
+            for (_, branch) in items {
+                check_type_shadowing(branch, alias_env)?;
             }
             Ok(())
         }
-        Session::Mu(id, body) => {
+        Type::Mu(id, body) => {
             if alias_env.contains_key(&id.val) {
-                Err(TypeError::WfSessionShadowing(session.clone(), id.clone()))
+                Err(TypeError::WfSessionShadowing(ty.clone(), id.clone()))
             } else {
-                check_session_shadowing(body, alias_env)
+                check_type_shadowing(body, alias_env)
             }
         }
-        Session::Var(_) => Ok(()),
-        Session::UVar(_) => Ok(()),
-        Session::PVar { .. } => Ok(()),
-        _ => unreachable!("Regular type in session shadowing check"),
-    }
-}
-
-fn check_type_shadowing(ty: &SType, alias_env: &AliasEnv) -> Result<(), TypeError> {
-    match &ty.val {
-        Type::Skip
-        | Type::Semi { .. }
-        | Type::End(_)
-        | Type::BorrowEnd(_)
-        | Type::Op(_, _)
-        | Type::Choice(_, _)
-        | Type::Mu(_, _)
-        | Type::Var(_)
-        | Type::UVar(_) => check_session_shadowing(&fake_span(ty.val.clone()), alias_env),
+        Type::Var(_) => Ok(()),
+        Type::UVar(_) => Ok(()),
+        Type::PVar { .. } => Ok(()),
         Type::Arr { param, ret, .. } => {
             check_type_shadowing(param, alias_env)?;
             check_type_shadowing(ret, alias_env)
@@ -175,6 +160,5 @@ fn check_type_shadowing(ty: &SType, alias_env: &AliasEnv) -> Result<(), TypeErro
         }
         Type::Unit | Type::Int | Type::Bool | Type::String => Ok(()),
         Type::Abstraction { ty, .. } => check_type_shadowing(ty, alias_env),
-        Type::PVar { .. } => Ok(()),
     }
 }
