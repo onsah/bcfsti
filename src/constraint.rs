@@ -285,29 +285,13 @@ impl Equivalences {
                     Self::unify(ty_ctx, &body1.val, &body2.val).map_err(|_| SolveError::Check)
                 }
                 (Type::UVar(id), other) | (other, Type::UVar(id))
-                    if Self::is_assignable_session_structure(other)
-                        && !other.unification_variables().contains(&id) =>
+                    if !matches!(other, Type::UVar(_)) =>
                 {
                     Ok(HashMap::from([(*id, other.clone())]))
                 }
                 _ => Err(SolveError::Check),
             }
         }
-    }
-
-    fn is_assignable_session_structure(ty: &Type) -> bool {
-        matches!(
-            ty,
-            Type::Skip
-                | Type::Semi { .. }
-                | Type::End(_)
-                | Type::BorrowEnd(_)
-                | Type::Op(_, _)
-                | Type::Choice(_, _)
-                | Type::Mu(_, _)
-                | Type::Var(_)
-                | Type::PVar { .. }
-        )
     }
 
     fn unsolved_variables(&self) -> HashSet<UVarId> {
