@@ -16,6 +16,7 @@
         rustc = rust-toolchain;
       };
       buildInputs = with pkgs; [
+        ast-grep
       ];
       nativeBuildInputs = with pkgs; [
       ];
