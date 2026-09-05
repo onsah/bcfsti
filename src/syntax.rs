@@ -1,4 +1,4 @@
-use crate::util::span::{Spanned, fake_span};
+use crate::util::span::{fake_span, Spanned};
 use std::{
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
@@ -112,9 +112,6 @@ pub enum Type {
     String,
 }
 pub type SType = Spanned<Type>;
-
-pub type Session = Type;
-pub type SSession = SType;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Quantification {
@@ -267,7 +264,11 @@ impl Type {
             Type::PVar { id, dual } => {
                 if let Some(ty) = bindings.get(id) {
                     let ty = ty.val.clone();
-                    if *dual { ty.dual() } else { ty }
+                    if *dual {
+                        ty.dual()
+                    } else {
+                        ty
+                    }
                 } else {
                     self.clone()
                 }
@@ -525,36 +526,6 @@ impl Type {
             _ => false,
         }
     }
-
-    pub fn is_contractive_on(&self, var: &SId) -> bool {
-        match self {
-            Type::Skip => true,
-            Type::Semi { first, second } => match first.is_only_skips() {
-                true => second.is_contractive_on(var),
-                false => first.is_contractive_on(var),
-            },
-            Type::End(_) => true,
-            Type::BorrowEnd(_) => true,
-            Type::Op(_, _) => true,
-            Type::Choice(_, _) => true,
-            Type::Mu(_, body) => body.is_contractive_on(var),
-            Type::Var(id) => id != var,
-            Type::UVar(_) => true,
-            Type::PVar { .. } => todo!(),
-            _ => true,
-        }
-    }
-
-    fn unfold(&self, x: &SId) -> Self {
-        self.subst(x, &Type::Mu(x.clone(), Box::new(fake_span(self.clone()))))
-    }
-
-    pub fn unfold_if_mu(&self) -> Self {
-        match self {
-            Type::Mu(x, s) => s.unfold(x).unfold_if_mu(),
-            _ => self.clone(),
-        }
-    }
 }
 
 fn merge_clauses<T: Clone>(
@@ -722,7 +693,7 @@ pub type SQualification = Spanned<Qualification>;
 pub enum Expr {
     Const(Const),
 
-    New(SSession),
+    New(SType),
     Fork(Box<SExpr>),
 
     End(SessionOp, Box<SExpr>),
@@ -730,8 +701,8 @@ pub enum Expr {
     Send(SType, Box<SExpr>, Box<SExpr>),
     Recv(SType, Box<SExpr>),
 
-    LSplit(SSession, Box<SExpr>),
-    RSplit(SSession, Box<SExpr>),
+    LSplit(SType, Box<SExpr>),
+    RSplit(SType, Box<SExpr>),
     BorrowEnd(SessionOp, Box<SExpr>),
     Discard(Box<SExpr>),
 
@@ -753,7 +724,7 @@ pub enum Expr {
     ),
     LetPair(SId, SId, Box<SExpr>, Box<SExpr>),
 
-    TypeDef(SId, SSession, Box<SExpr>, bool),
+    TypeDef(SId, SType, Box<SExpr>, bool),
 
     Inj(SLabel, Box<SExpr>),
     CaseSum(Box<SExpr>, Vec<(SLabel, SId, SExpr)>),
@@ -1114,14 +1085,14 @@ macro_rules! session_type {
 
 #[cfg(test)]
 mod session_type_tests {
-    use super::{SSession, Session, SessionOp, Type};
+    use super::{SType, SessionOp, Type};
     use crate::util::span::Spanned;
 
-    fn spanned_session(session: Session) -> SSession {
+    fn spanned_session(session: Type) -> SType {
         Spanned::new(session, 0..0)
     }
 
-    fn session_op(session_op: SessionOp, typ: Type) -> Session {
+    fn session_op(session_op: SessionOp, typ: Type) -> Type {
         Type::Op(session_op, Box::new(Spanned::new(typ, 0..0)))
     }
 

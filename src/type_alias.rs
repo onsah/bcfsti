@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::syntax::{Expr, Id, SExpr, SType, Session, Type};
+use crate::syntax::{Expr, Id, SExpr, SType, Type};
 use crate::type_checker::TypeError;
 use crate::util::span::Spanned;
 
@@ -15,7 +15,7 @@ pub fn get_alias_env(e: SExpr) -> (SExpr, AliasEnv) {
                 env.insert(
                     name.val.clone(),
                     Spanned::new(
-                        Session::Mu(name.clone(), Box::new(t.clone())),
+                        Type::Mu(name.clone(), Box::new(t.clone())),
                         current_expr.span.clone(),
                     ),
                 );

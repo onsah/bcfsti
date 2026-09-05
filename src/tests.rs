@@ -27,7 +27,7 @@ mod typechecker_tests {
         constraint::Constraints,
         error_reporting::IErr,
         session_type,
-        syntax::{Eff, Expr, Mult, Session, Type},
+        syntax::{Eff, Expr, Mult, Type},
         type_checker::TypeError,
         typecheck,
         util::{pretty::pretty_def, span::fake_span},
@@ -117,19 +117,19 @@ mod typechecker_tests {
         let expected_constraints = {
             let mut cs = Constraints::empty();
             cs.equivalences.add((
-                fake_span(session_type! { Session::UVar(1) }),
+                fake_span(session_type! { Type::UVar(1) }),
                 session_type! { Ret },
             ));
             cs.equivalences.add((
                 fake_span(session_type! { !Int; Ret }.val),
-                fake_span(session_type! { !Int; fake_span(Session::UVar(1)) }.val),
+                fake_span(session_type! { !Int; fake_span(Type::UVar(1)) }.val),
             ));
             cs.equivalences.add((
                 fake_span(session_type! { !Int; ?Int }.val),
-                fake_span(session_type! { !Int; fake_span(Session::UVar(0)) }.val),
+                fake_span(session_type! { !Int; fake_span(Type::UVar(0)) }.val),
             ));
             cs.equivalences.add((
-                fake_span(session_type! { Acq; fake_span(Session::UVar(0)) }.val),
+                fake_span(session_type! { Acq; fake_span(Type::UVar(0)) }.val),
                 fake_span(session_type! { Acq; ?Int }.val),
             ));
             cs
@@ -623,14 +623,13 @@ mod typechecker_tests {
             unreachable!()
         };
 
-        assert!(
-            cs.equivalences
-                .into_iter()
-                .any(
-                    |(ty1, ty2)| (ty1.val == Type::Int && ty2.val == Type::String)
-                        || (ty1.val == Type::String && ty2.val == Type::Int)
-                )
-        );
+        assert!(cs
+            .equivalences
+            .into_iter()
+            .any(
+                |(ty1, ty2)| (ty1.val == Type::Int && ty2.val == Type::String)
+                    || (ty1.val == Type::String && ty2.val == Type::Int)
+            ));
     }
 
     #[test]

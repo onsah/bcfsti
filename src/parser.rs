@@ -7,8 +7,8 @@ use crate::util::peg_logos::SpannedToks;
 use crate::util::span::fake_span;
 use crate::util::span::{Span, Spanned};
 
-use Braced::Token as Tok;
 use peg::error::ParseError;
+use Braced::Token as Tok;
 
 pub type Toks<'a> = SpannedToks<'a, Braced<Token<'a>>>;
 
@@ -81,29 +81,29 @@ peg::parser! {
         // Types
 
         #[cache_left_rec]
-        pub rule session() -> Session
+        pub rule session() -> Type
             = s1:ssession() tok(Semicolon) s2:ssession()
-              { Session::Semi { first: Box::new(s1), second: Box::new(s2) } }
-            / tok(Return) { Session::BorrowEnd(SessionOp::Send) }
-            / tok(AcqT) { Session::BorrowEnd(SessionOp::Recv) }
-            / tok(Wait) { Session::End(SessionOp::Recv) }
-            / tok(Close) { Session::End(SessionOp::Send) }
-            / tok(Skip) { Session::Skip }
+              { Type::Semi { first: Box::new(s1), second: Box::new(s2) } }
+            / tok(Return) { Type::BorrowEnd(SessionOp::Send) }
+            / tok(AcqT) { Type::BorrowEnd(SessionOp::Recv) }
+            / tok(Wait) { Type::End(SessionOp::Recv) }
+            / tok(Close) { Type::End(SessionOp::Send) }
+            / tok(Skip) { Type::Skip }
             / tok(Bang) t:stype_atom()
-              { Session::Op(SessionOp::Send, Box::new(t)) }
+              { Type::Op(SessionOp::Send, Box::new(t)) }
             / tok(QuestionMark) t:stype_atom()
-              { Session::Op(SessionOp::Recv, Box::new(t)) }
+              { Type::Op(SessionOp::Recv, Box::new(t)) }
             / tok(Amp) tok(BraceL) cs:((l:sid() tok(Colon) s:ssession() { (l, s) })** tok(Comma)) tok(Comma)? tok(BraceR)
-              { Session::Choice(SessionOp::Recv, cs) }
+              { Type::Choice(SessionOp::Recv, cs) }
             / tok(Plus) tok(BraceL) cs:((l:sid() tok(Colon) s:ssession() { (l, s) })** tok(Comma)) tok(Comma)? tok(BraceR)
-              { Session::Choice(SessionOp::Send, cs) }
+              { Type::Choice(SessionOp::Send, cs) }
             / tok(Mu) x:sid() tok(Period) s:ssession()
-              { Session::Mu(x, Box::new(s)) }
+              { Type::Mu(x, Box::new(s)) }
             / x:sid()
-              { Session::Var(x) }
-            / id:polyid() { Session::PVar { id, dual: false } }
+              { Type::Var(x) }
+            / id:polyid() { Type::PVar { id, dual: false } }
             / tok(ParenL) s:session() tok(ParenR) { s }
-        pub rule ssession() -> SSession = spanned(<session()>)
+        pub rule ssession() -> SType = spanned(<session()>)
 
         pub rule type_() -> Type = t:type_quantify() { t }
         pub rule stype() -> SType = spanned(<type_()>)

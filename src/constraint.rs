@@ -5,7 +5,7 @@ use crate::{
     syntax::{PVarId, SExpr, SId, SType, Type, UVarId},
     type_checker::TypeError,
     type_context::TypeCtx,
-    util::span::{Spanned, fake_span},
+    util::span::{fake_span, Spanned},
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -445,15 +445,15 @@ mod tests {
     use crate::{
         constraint::Constraints,
         session_type,
-        syntax::{Eff, Mob, Mult, Session, Type},
+        syntax::{Eff, Mob, Mult, Type},
         type_checker::TypeError,
         util::span::fake_span,
     };
 
     #[test]
     fn test_simple_cs() {
-        let uvar1 = fake_span(Session::UVar(1));
-        let uvar2 = fake_span(Session::UVar(2));
+        let uvar1 = fake_span(Type::UVar(1));
+        let uvar2 = fake_span(Type::UVar(2));
 
         let session1 = fake_span(session_type! { !Int }.val);
         let session2 = fake_span(session_type! { ?Int }.val);
@@ -481,9 +481,9 @@ mod tests {
 
     #[test]
     fn test_two_iterations() {
-        let uvar1 = fake_span(Session::UVar(1));
-        let uvar2 = fake_span(Session::UVar(2));
-        let uvar3 = fake_span(Session::UVar(3));
+        let uvar1 = fake_span(Type::UVar(1));
+        let uvar2 = fake_span(Type::UVar(2));
+        let uvar3 = fake_span(Type::UVar(3));
 
         let session1 = fake_span(session_type! { !Int }.val);
         let session2 = fake_span(session_type! { ?Int }.val);
@@ -510,8 +510,8 @@ mod tests {
 
     #[test]
     fn test_unsolvable_constraints() {
-        let uvar1 = Session::UVar(1);
-        let uvar2 = Session::UVar(2);
+        let uvar1 = Type::UVar(1);
+        let uvar2 = Type::UVar(2);
 
         let mut constraints = Constraints::empty();
         constraints
@@ -530,8 +530,8 @@ mod tests {
 
     #[test]
     fn test_prod() {
-        let uvar1 = fake_span(Session::UVar(1));
-        let uvar2 = fake_span(Session::UVar(2));
+        let uvar1 = fake_span(Type::UVar(1));
+        let uvar2 = fake_span(Type::UVar(2));
 
         let mut constraints = Constraints::empty();
         constraints.equivalences.add((
@@ -590,8 +590,8 @@ mod tests {
 
     #[test]
     fn test_arr() {
-        let uvar1 = fake_span(Session::UVar(1));
-        let uvar2 = fake_span(Session::UVar(2));
+        let uvar1 = fake_span(Type::UVar(1));
+        let uvar2 = fake_span(Type::UVar(2));
 
         let mut constraints = Constraints::empty();
         constraints.equivalences.add((
@@ -656,8 +656,8 @@ mod tests {
 
     #[test]
     fn test_variant() {
-        let uvar1 = fake_span(Session::UVar(1));
-        let uvar2 = fake_span(Session::UVar(2));
+        let uvar1 = fake_span(Type::UVar(1));
+        let uvar2 = fake_span(Type::UVar(2));
 
         let mut constraints = Constraints::empty();
         constraints.equivalences.add((
@@ -713,13 +713,13 @@ mod tests {
 
     #[test]
     fn test_semicolon() {
-        let uvar1 = Session::UVar(1);
-        let uvar2 = Session::UVar(2);
+        let uvar1 = Type::UVar(1);
+        let uvar2 = Type::UVar(2);
 
         let mut constraints = Constraints::empty();
         constraints.equivalences.add((
-            fake_span(session_type! { fake_span(Session::UVar(1)); !Int }.val),
-            fake_span(session_type! { ?String; fake_span(Session::UVar(2)) }.val),
+            fake_span(session_type! { fake_span(Type::UVar(1)); !Int }.val),
+            fake_span(session_type! { ?String; fake_span(Type::UVar(2)) }.val),
         ));
         constraints.equivalences.add((
             fake_span(uvar1.clone()),
@@ -736,7 +736,7 @@ mod tests {
 
     #[test]
     fn test_choice() {
-        let uvar1 = Session::UVar(1);
+        let uvar1 = Type::UVar(1);
 
         let mut constraints = Constraints::empty();
         constraints.equivalences.add((
@@ -750,7 +750,7 @@ mod tests {
 
     #[test]
     fn test_recursion() {
-        let uvar1 = Session::UVar(1);
+        let uvar1 = Type::UVar(1);
 
         let mut constraints = Constraints::empty();
         constraints.equivalences.add((
@@ -764,8 +764,8 @@ mod tests {
 
     #[test]
     fn test_complex_composite() {
-        let uvar1 = Session::UVar(1);
-        let uvar2 = Session::UVar(2);
+        let uvar1 = Type::UVar(1);
+        let uvar2 = Type::UVar(2);
 
         let mut constraints = Constraints::empty();
         // mu X. +{ a: !Int; X, b: !Bool; fake_span(uvar1) }
@@ -790,8 +790,8 @@ mod tests {
 
     #[test]
     fn test_uvar_inside() {
-        let uvar1 = Session::UVar(1);
-        let uvar2 = Session::UVar(2);
+        let uvar1 = Type::UVar(1);
+        let uvar2 = Type::UVar(2);
 
         let mut constraints = Constraints::empty();
         constraints.equivalences.add((
