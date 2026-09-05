@@ -5,7 +5,7 @@ use crate::{
     syntax::{PVarId, SExpr, SId, SType, Type, UVarId},
     type_checker::TypeError,
     type_context::TypeCtx,
-    util::span::{fake_span, Spanned},
+    util::span::{Spanned, fake_span},
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -238,14 +238,6 @@ impl Equivalences {
                             .collect::<Vec<(SType, SType)>>(),
                     ))
                 }
-                (Type::UVar(uvar_id), Type::PVar { id, dual })
-                | (Type::PVar { id, dual }, Type::UVar(uvar_id)) => Ok(HashMap::from([(
-                    *uvar_id,
-                    Type::PVar {
-                        id: id.clone(),
-                        dual: *dual,
-                    },
-                )])),
                 (Type::Skip, Type::Skip) => Ok(HashMap::new()),
                 (Type::End(op1), Type::End(op2)) if op1 == op2 => Ok(HashMap::new()),
                 (Type::BorrowEnd(op1), Type::BorrowEnd(op2)) if op1 == op2 => Ok(HashMap::new()),
@@ -293,7 +285,8 @@ impl Equivalences {
                     Self::unify(ty_ctx, &body1.val, &body2.val).map_err(|_| SolveError::Check)
                 }
                 (Type::UVar(id), other) | (other, Type::UVar(id))
-                    if Self::is_assignable_session_structure(other) =>
+                    if Self::is_assignable_session_structure(other)
+                        && !other.unification_variables().contains(&id) =>
                 {
                     Ok(HashMap::from([(*id, other.clone())]))
                 }
