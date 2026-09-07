@@ -10,7 +10,7 @@ use crate::{
     syntax::{
         Eff, Expr, Id, Kind, Label, Mob, Mult, Op1, Op2, PVarId, Quantification,
         QuantificationType, SEff, SExpr, SId, SMult, SPattern, SQualification, SQuantification,
-        SType, SessionOp, Type, UVarId,
+        SType, SessionOp, Type, UVarId, union,
     },
     type_alias::AliasEnv,
     type_context::TypeCtx,
@@ -1167,16 +1167,22 @@ impl TypeChecker {
                     ty_ctx.extend_qualifications(qualifications.into_iter().map(|q| q.val));
                 let (cs, eff) = self.check(&ctx, &ty_ctx, expr, expr_ty)?;
 
-                // Partition generated constraint into local and nonlocal ones depending on
-                // poly variable bindings
                 let (cs_local, cs_other) = Self::partition_constraints(cs, &local_poly_bindings);
-                let (cs_local, assignments) = cs_local.solve()?;
-                Self::check_assignments_escape(
-                    &assignments,
+                // println!("Local constraints:");
+                // for (ty1, ty2) in cs_local.equivalences.iter() {
+                //     println!("{} = {}", pretty_def(&ty1), pretty_def(&ty2));
+                // }
+                // println!("Other constraints:");
+                // for (ty1, ty2) in cs_other.equivalences.iter() {
+                //     println!("{} = {}", pretty_def(&ty1), pretty_def(&ty2));
+                // }
+                Self::check_constraints_escape(
+                    &cs_local,
                     nonlocal_uvar_limit,
                     &local_poly_bindings,
                     expr.span.clone(),
                 )?;
+                let (cs_local, _) = cs_local.solve()?;
                 self.check_equivalence(&cs_local, &ty_ctx.vars)?;
                 Ok((cs_other, eff))
             }
@@ -1296,7 +1302,7 @@ impl TypeChecker {
         constraints: Constraints,
         local_poly_bindings: &HashSet<PVarId>,
     ) -> (Constraints, Constraints) {
-        let (eqs_local, eqs_other): (Equivalences, Equivalences) = constraints
+        let (mut eqs_local, mut eqs_other): (Equivalences, Equivalences) = constraints
             .equivalences
             .into_iter()
             .partition(|(ty1, ty2)| {
@@ -1306,9 +1312,37 @@ impl TypeChecker {
                         .poly_variables()
                         .any(|v| local_poly_bindings.contains(&v))
             });
+        // Keep partitioning until fixpoint reached under transitive closure
+        loop {
+            let uvars: HashSet<UVarId> =
+                eqs_local.iter().fold(HashSet::new(), |uvars, (ty1, ty2)| {
+                    union(
+                        union(uvars, ty1.val.unification_variables()),
+                        ty2.val.unification_variables(),
+                    )
+                });
+
+            let (more_eqs_local, other): (HashSet<_>, HashSet<_>) =
+                eqs_other.into_iter().partition(|(ty1, ty2)| {
+                    ty1.unification_variables()
+                        .intersection(&uvars)
+                        .any(|_| true)
+                        || ty2
+                            .unification_variables()
+                            .intersection(&uvars)
+                            .any(|_| true)
+                });
+
+            eqs_other = Equivalences::from(other);
+            if more_eqs_local.is_empty() {
+                break;
+            } else {
+                eqs_local.extend(more_eqs_local);
+            }
+        }
 
         let (mobs_local, mobs_other): (Mobilities, Mobilities) =
-            constraints.mobilities.into_iter().partition(|(ty)| {
+            constraints.mobilities.into_iter().partition(|ty| {
                 ty.poly_variables()
                     .any(|v| local_poly_bindings.contains(&v))
             });
@@ -1326,24 +1360,33 @@ impl TypeChecker {
     }
 
     /// * `nonlocal_uvar_limit`: Minimum index value for local uvars.
-    fn check_assignments_escape(
-        assignments: &HashMap<UVarId, Type>,
+    fn check_constraints_escape(
+        constraints: &Constraints,
         min_local_uvar_idx: UVarId,
         poly_bindings: &HashSet<PVarId>,
         span: Span,
     ) -> Result<(), TypeError> {
-        let mut nonlocal_assx = assignments
-            .iter()
-            .filter(|(id, _)| **id < min_local_uvar_idx);
-
-        match nonlocal_assx.find_map(|(id, ty)| {
-            ty.poly_variables()
-                .find(|v| poly_bindings.contains(v))
-                .map(|_| (id, ty))
+        match constraints.equivalences.iter().find_map(|(ty1, ty2)| {
+            ty1.unification_variables()
+                .iter()
+                .find_map(|id| {
+                    if *id < min_local_uvar_idx {
+                        Some((*id, ty1))
+                    } else {
+                        None
+                    }
+                })
+                .or(ty2.unification_variables().iter().find_map(|id| {
+                    if *id < min_local_uvar_idx {
+                        Some((*id, ty1))
+                    } else {
+                        None
+                    }
+                }))
         }) {
             Some((id, ty)) => Err(TypeError::PolyVarEscapesViaUnification {
-                uvar_id: *id,
-                ty: ty.clone(),
+                uvar_id: id,
+                ty: ty.val.clone(),
                 span,
             }),
             None => Ok(()),

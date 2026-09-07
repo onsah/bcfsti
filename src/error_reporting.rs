@@ -718,7 +718,20 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     ),
                 )],
             ),
-            TypeError::KindMismatch(_, _, _) => todo!(),
+            TypeError::KindMismatch(ty, kind, ty_ctx) => report(
+                &src,
+                ty.span.clone(),
+                "Type Error",
+                [label(
+                    ty.span,
+                    format!(
+                        "Type {} doesn't have kind {} in type context {}",
+                        pretty_def(&ty.val),
+                        pretty_def(&kind),
+                        pretty_def(&ty_ctx)
+                    ),
+                )],
+            ),
             TypeError::QualificationNotSatisfied(type_ctx, qualification) => report(
                 &src,
                 qualification.span.clone(),
