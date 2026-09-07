@@ -1,0 +1,14 @@
+let
+    foo : !Int -[m u 1]-> Unit
+    foo c =
+        let c1, c2 = lsplit[Skip] c in
+        discard c1;
+        let
+            bar[b: Type]. unr 'b : 'b -[s p 1]-> Unit
+            bar x =
+                send[String] "foo" c2;
+                unit
+        in
+            bar[Unit] unit
+in
+unit
