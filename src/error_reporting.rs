@@ -784,7 +784,11 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     )],
                 );
             }
-            TypeError::PolyVarEscapesViaUnification { uvar_id, ty, span } => {
+            TypeError::PolyVarEscapesViaUnification {
+                uvar_id,
+                constraints,
+                span,
+            } => {
                 report(
                     &src,
                     0..1,
@@ -792,9 +796,9 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     [label(
                         span,
                         format!(
-                            "Unification variable {} is assigned to type {} which has escaping polymorphic variables",
+                            "At least one of the polymorphic variables leaks because the unification variable {} is non-local in constraints {}",
                             uvar_id,
-                            pretty_def(&ty),
+                            pretty_def(&constraints),
                         ),
                     )],
                 );

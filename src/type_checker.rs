@@ -83,9 +83,10 @@ pub enum TypeError {
         ty2: SType,
         reason: String,
     },
+    // TODO: add polymorphic variables
     PolyVarEscapesViaUnification {
         uvar_id: UVarId,
-        ty: Type,
+        constraints: Constraints,
         span: Span,
     },
 }
@@ -1167,7 +1168,8 @@ impl TypeChecker {
                     ty_ctx.extend_qualifications(qualifications.into_iter().map(|q| q.val));
                 let (cs, eff) = self.check(&ctx, &ty_ctx, expr, expr_ty)?;
 
-                let (cs_local, cs_other) = Self::partition_constraints(cs, &local_poly_bindings);
+                let (cs_local, cs_other, uvars) =
+                    Self::partition_constraints(cs, &local_poly_bindings);
                 // println!("Local constraints:");
                 // for (ty1, ty2) in cs_local.equivalences.iter() {
                 //     println!("{} = {}", pretty_def(&ty1), pretty_def(&ty2));
@@ -1176,25 +1178,24 @@ impl TypeChecker {
                 // for (ty1, ty2) in cs_other.equivalences.iter() {
                 //     println!("{} = {}", pretty_def(&ty1), pretty_def(&ty2));
                 // }
-                Self::check_constraints_escape(
-                    &cs_local,
-                    nonlocal_uvar_limit,
-                    &local_poly_bindings,
-                    expr.span.clone(),
-                )?;
+
+                // Check if any unification in local constraints is outside of limits
+                if let Some(uvar) = uvars.iter().find(|uvar| **uvar < nonlocal_uvar_limit) {
+                    return Err(TypeError::PolyVarEscapesViaUnification {
+                        uvar_id: *uvar,
+                        constraints: cs_local,
+                        span: quantification.span.clone(),
+                    });
+                }
                 let (cs_local, _) = cs_local.solve()?;
                 self.check_equivalence(&cs_local, &ty_ctx.vars)?;
                 Ok((cs_other, eff))
             }
             _ => {
                 let (inferred_ty, mut cs, eff) = self.infer(ctx, ty_ctx, e)?;
-                // let inferred_ty = self.expand_type(ty_ctx, &inferred_ty)?;
-                // let expected_ty = self.expand_type(ty_ctx, expected_ty)?;
-
                 if !inferred_ty.sem_eq(&expected_ty) {
                     cs.equivalences.add((inferred_ty, expected_ty.clone()));
                 }
-
                 Ok((cs, eff))
             }
         }
@@ -1301,7 +1302,7 @@ impl TypeChecker {
     fn partition_constraints(
         constraints: Constraints,
         local_poly_bindings: &HashSet<PVarId>,
-    ) -> (Constraints, Constraints) {
+    ) -> (Constraints, Constraints, HashSet<UVarId>) {
         let (mut eqs_local, mut eqs_other): (Equivalences, Equivalences) = constraints
             .equivalences
             .into_iter()
@@ -1313,7 +1314,7 @@ impl TypeChecker {
                         .any(|v| local_poly_bindings.contains(&v))
             });
         // Keep partitioning until fixpoint reached under transitive closure
-        loop {
+        let uvars = loop {
             let uvars: HashSet<UVarId> =
                 eqs_local.iter().fold(HashSet::new(), |uvars, (ty1, ty2)| {
                     union(
@@ -1335,11 +1336,11 @@ impl TypeChecker {
 
             eqs_other = Equivalences::from(other);
             if more_eqs_local.is_empty() {
-                break;
+                break uvars;
             } else {
                 eqs_local.extend(more_eqs_local);
             }
-        }
+        };
 
         let (mobs_local, mobs_other): (Mobilities, Mobilities) =
             constraints.mobilities.into_iter().partition(|ty| {
@@ -1356,41 +1357,8 @@ impl TypeChecker {
                 equivalences: eqs_other,
                 mobilities: mobs_other,
             },
+            uvars,
         )
-    }
-
-    /// * `nonlocal_uvar_limit`: Minimum index value for local uvars.
-    fn check_constraints_escape(
-        constraints: &Constraints,
-        min_local_uvar_idx: UVarId,
-        poly_bindings: &HashSet<PVarId>,
-        span: Span,
-    ) -> Result<(), TypeError> {
-        match constraints.equivalences.iter().find_map(|(ty1, ty2)| {
-            ty1.unification_variables()
-                .iter()
-                .find_map(|id| {
-                    if *id < min_local_uvar_idx {
-                        Some((*id, ty1))
-                    } else {
-                        None
-                    }
-                })
-                .or(ty2.unification_variables().iter().find_map(|id| {
-                    if *id < min_local_uvar_idx {
-                        Some((*id, ty1))
-                    } else {
-                        None
-                    }
-                }))
-        }) {
-            Some((id, ty)) => Err(TypeError::PolyVarEscapesViaUnification {
-                uvar_id: id,
-                ty: ty.val.clone(),
-                span,
-            }),
-            None => Ok(()),
-        }
     }
 }
 

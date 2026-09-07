@@ -2,10 +2,13 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     context::Ctx,
-    syntax::{PVarId, SExpr, SId, SType, Type, UVarId},
+    syntax::{PVarId, SType, Type, UVarId},
     type_checker::TypeError,
     type_context::TypeCtx,
-    util::span::{Spanned, fake_span},
+    util::{
+        pretty::{Pretty, PrettyEnv},
+        span::{fake_span, Spanned},
+    },
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -339,6 +342,19 @@ impl From<HashSet<(SType, SType)>> for Equivalences {
     }
 }
 
+impl Pretty<()> for Equivalences {
+    fn pp(&self, p: &mut PrettyEnv<()>) {
+        for (i, (ty1, ty2)) in self.0.iter().enumerate() {
+            if i != 0 {
+                p.pp(", ");
+            }
+            p.pp(ty1);
+            p.pp(" ~= ");
+            p.pp(ty2);
+        }
+    }
+}
+
 impl Mobilities {
     pub fn new() -> Mobilities {
         Mobilities(Vec::new())
@@ -377,6 +393,34 @@ impl IntoIterator for Mobilities {
 impl Extend<SType> for Mobilities {
     fn extend<T: IntoIterator<Item = SType>>(&mut self, iter: T) {
         self.0.extend(iter);
+    }
+}
+
+impl Pretty<()> for Mobilities {
+    fn pp(&self, p: &mut PrettyEnv<()>) {
+        for (i, ty) in self.0.iter().enumerate() {
+            if i != 0 {
+                p.pp(", ");
+            }
+            p.pp("mbl ");
+            p.pp(ty);
+        }
+    }
+}
+
+impl Pretty<()> for Constraints {
+    fn pp(&self, p: &mut PrettyEnv<()>) {
+        let mut first = true;
+        if !self.equivalences.0.is_empty() {
+            p.pp(&self.equivalences);
+            first = false;
+        }
+        if !self.mobilities.0.is_empty() {
+            if !first {
+                p.pp(", ");
+            }
+            p.pp(&self.mobilities);
+        }
     }
 }
 
