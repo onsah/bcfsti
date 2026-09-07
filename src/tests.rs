@@ -623,13 +623,14 @@ mod typechecker_tests {
             unreachable!()
         };
 
-        assert!(cs
-            .equivalences
-            .into_iter()
-            .any(
-                |(ty1, ty2)| (ty1.val == Type::Int && ty2.val == Type::String)
-                    || (ty1.val == Type::String && ty2.val == Type::Int)
-            ));
+        assert!(
+            cs.equivalences
+                .into_iter()
+                .any(
+                    |(ty1, ty2)| (ty1.val == Type::Int && ty2.val == Type::String)
+                        || (ty1.val == Type::String && ty2.val == Type::Int)
+                )
+        );
     }
 
     #[test]

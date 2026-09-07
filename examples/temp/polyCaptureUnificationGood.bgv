@@ -1,8 +1,12 @@
 let
-    bar[a: Session] : !Int; Skip; 'a -[m u 1]-> 'a
-    bar c =
+    foo : !Int; !Int -[m u 1]-> !String
+    foo c =
         let c1, c2 = lsplit[!Int] c in
         send[Int] 42 c1;
-       	c2
+        let
+            bar[b: Session] : Unit -[s p 1]-> 'b
+            bar x = c2
+        in
+            bar[!String] unit
 in
-    unit
+unit

@@ -1,4 +1,4 @@
-use crate::util::span::{fake_span, Spanned};
+use crate::util::span::{Spanned, fake_span};
 use std::{
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
@@ -264,11 +264,7 @@ impl Type {
             Type::PVar { id, dual } => {
                 if let Some(ty) = bindings.get(id) {
                     let ty = ty.val.clone();
-                    if *dual {
-                        ty.dual()
-                    } else {
-                        ty
-                    }
+                    if *dual { ty.dual() } else { ty }
                 } else {
                     self.clone()
                 }

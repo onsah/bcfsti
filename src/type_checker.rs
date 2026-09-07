@@ -17,7 +17,7 @@ use crate::{
     util::{
         boxed::Boxed,
         pretty::pretty_def,
-        span::{Spanned, fake_span},
+        span::{Span, Spanned, fake_span},
     },
 };
 
@@ -59,7 +59,6 @@ pub enum TypeError {
     VariantDuplicateLabel(SExpr, SType, Label),
     RecursiveNonFunctionBinding(SExpr, SId),
     RecursiveFunctionMustBeUnrestricted(SType, SId),
-    PolymorphicFunctionMustBeUnrestricted(SType, SId),
     WfNonContractive(SType, SId),
     WfEmptyChoice(SType),
     WfEmptyVariant(SType),
@@ -86,6 +85,11 @@ pub enum TypeError {
         ty1: SType,
         ty2: SType,
         reason: String,
+    },
+    PolyVarEscapesViaUnification {
+        uvar_id: UVarId,
+        ty: Type,
+        span: Span,
     },
 }
 
@@ -485,16 +489,6 @@ impl TypeChecker {
                     && mult.val != Mult::Unr
                 {
                     return Err(TypeError::RecursiveFunctionMustBeUnrestricted(
-                        var_ty.clone(),
-                        id.clone(),
-                    ));
-                }
-
-                if quant.is_some()
-                    && let Type::Arr { mult, .. } = &var_ty.val
-                    && mult.val != Mult::Unr
-                {
-                    return Err(TypeError::PolymorphicFunctionMustBeUnrestricted(
                         var_ty.clone(),
                         id.clone(),
                     ));
@@ -1111,6 +1105,8 @@ impl TypeChecker {
                     bindings,
                     qualifications,
                 } = quantification.val.clone();
+                let local_poly_bindings: HashSet<_> =
+                    bindings.iter().map(|(sid, _)| sid.val.clone()).collect();
                 let ty_ctx = ty_ctx.extend_bindings(Quantification::bindings(bindings.into_iter()));
                 if kinding::check_qualifications_well_formed(
                     &ty_ctx,
@@ -1165,12 +1161,23 @@ impl TypeChecker {
                     ));
                 }
 
+                // Uvars with ids smaller or equal are generated
+                // outside of the type abstraction, therefore assigning
+                // a polymorphic variable to those would be wrong.
+                let nonlocal_uvar_limit = self.uvar_counter;
+
                 let ty_ctx =
                     ty_ctx.extend_qualifications(qualifications.into_iter().map(|q| q.val));
                 let (cs, eff) = self.check(&ctx, &ty_ctx, expr, expr_ty)?;
 
-                let cs = cs.solve()?;
+                let (cs, assignments) = cs.solve()?;
                 self.check_equivalence(&cs, &ty_ctx.vars)?;
+                Self::check_assignments_escape(
+                    &assignments,
+                    nonlocal_uvar_limit,
+                    &local_poly_bindings,
+                    expr.span.clone(),
+                )?;
 
                 Ok((Constraints::empty(), eff))
             }
@@ -1292,6 +1299,31 @@ impl TypeChecker {
             cs.mobilities.add(expr.clone(), non_mobile_ids, ctx.clone());
         }
         Ok(())
+    }
+
+    /// * `nonlocal_uvar_limit`: Minimum index value for local uvars.
+    fn check_assignments_escape(
+        assignments: &HashMap<UVarId, Type>,
+        min_local_uvar_idx: UVarId,
+        poly_bindings: &HashSet<PVarId>,
+        span: Span,
+    ) -> Result<(), TypeError> {
+        let mut nonlocal_assx = assignments
+            .iter()
+            .filter(|(id, _)| **id < min_local_uvar_idx);
+
+        match nonlocal_assx.find_map(|(id, ty)| {
+            ty.poly_variables()
+                .find(|v| poly_bindings.contains(v))
+                .map(|_| (id, ty))
+        }) {
+            Some((id, ty)) => Err(TypeError::PolyVarEscapesViaUnification {
+                uvar_id: *id,
+                ty: ty.clone(),
+                span,
+            }),
+            None => Ok(()),
+        }
     }
 }
 

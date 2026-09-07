@@ -135,7 +135,7 @@ fn constraints_check(cs: Constraints, alias_env: &AliasEnv, verbose: bool) -> Re
         println!();
     }
 
-    let cs = cs.solve().map_err(IErr::Typing)?;
+    let (cs, _) = cs.solve().map_err(IErr::Typing)?;
 
     if verbose {
         println!("Constraints:");

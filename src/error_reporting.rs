@@ -720,19 +720,6 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     ),
                 )],
             ),
-            TypeError::PolymorphicFunctionMustBeUnrestricted(ty, id) => report(
-                &src,
-                id.span.clone(),
-                "Type Error",
-                [label(
-                    id.span.clone(),
-                    format!(
-                        "Polymorphic function {} must have an unrestricted function type, but has type {}",
-                        pretty_def(&id),
-                        pretty_def(&ty.val)
-                    ),
-                )],
-            ),
             TypeError::UnrArrMustBeMobile(ty, mob) => report(
                 &src,
                 ty.span.clone(),
@@ -791,15 +778,30 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
             TypeError::TypesAreNotEquivalent { ty1, ty2, reason } => {
                 report(
                     &src,
-                    0..1,
+                    ty1.span.clone(),
                     "Eqivalence Error",
                     [label(
                         0..1,
                         format!(
                             "Type {} is not equivalent to type {}. Reason: {}",
-                            pretty_def(&ty1.val),
-                            pretty_def(&ty2.val),
+                            pretty_def(&ty1),
+                            pretty_def(&ty2),
                             reason
+                        ),
+                    )],
+                );
+            }
+            TypeError::PolyVarEscapesViaUnification { uvar_id, ty, span } => {
+                report(
+                    &src,
+                    0..1,
+                    "Polymorphic variable escapes via unification",
+                    [label(
+                        span,
+                        format!(
+                            "Unification variable {} is assigned to type {} which has escaping polymorphic variables",
+                            uvar_id,
+                            pretty_def(&ty),
                         ),
                     )],
                 );

@@ -64,12 +64,15 @@ impl Constraints {
 
     /// Solve the constraints by propagating assignments to unification variables until a fixed point is reached.
     /// If there is still no solution for some unification variables, `Skip` is substituted instead.
-    pub fn solve(self) -> Result<Constraints, TypeError> {
+    pub fn solve(self) -> Result<(Constraints, Assignments), TypeError> {
         self.solve_with_type_ctx(&TypeCtx::empty())
     }
 
     /// Solve the constraints with a type context for checking mobility.
-    fn solve_with_type_ctx(self, ty_ctx: &TypeCtx) -> Result<Constraints, TypeError> {
+    fn solve_with_type_ctx(
+        self,
+        ty_ctx: &TypeCtx,
+    ) -> Result<(Constraints, Assignments), TypeError> {
         let (assignments, equivalences) = self.equivalences.solve(ty_ctx);
 
         let unsolved_vars = equivalences.unsolved_variables();
@@ -80,10 +83,13 @@ impl Constraints {
         }
 
         self.mobilities.check(ty_ctx, &assignments)?;
-        Ok(Constraints {
-            equivalences,
-            mobilities: Mobilities::new(),
-        })
+        Ok((
+            Constraints {
+                equivalences,
+                mobilities: Mobilities::new(),
+            },
+            assignments,
+        ))
     }
 }
 
@@ -447,7 +453,7 @@ mod tests {
         let solved = constraints.solve();
 
         assert_eq!(
-            solved,
+            solved.map(|(cs, _)| cs),
             Ok(Constraints::from_equivalences(
                 vec![(session1.clone(), session2.clone())]
                     .into_iter()
@@ -478,7 +484,7 @@ mod tests {
         let solved = constraints.solve();
 
         assert_eq!(
-            solved,
+            solved.map(|(cs, _)| cs),
             Ok(Constraints::from_equivalences(
                 vec![(session2, session1)].into_iter().collect()
             ))
@@ -529,7 +535,10 @@ mod tests {
             .add((uvar2.clone(), fake_span(session_type! { ?String }.val)));
 
         let solved = constraints.solve();
-        assert_eq!(solved, Ok(Constraints::from_equivalences(HashSet::new())));
+        assert_eq!(
+            solved.map(|(cs, _)| cs),
+            Ok(Constraints::from_equivalences(HashSet::new()))
+        );
 
         let mut constraints = Constraints::empty();
         constraints.equivalences.add((
@@ -562,7 +571,7 @@ mod tests {
             .add((uvar2.clone(), fake_span(session_type! { ?String }.val)));
 
         let solved = constraints.solve();
-        assert_eq!(solved, Ok(Constraints::empty()));
+        assert_eq!(solved.map(|(cs, _)| cs), Ok(Constraints::empty()));
     }
 
     #[test]
@@ -591,7 +600,10 @@ mod tests {
             .add((uvar2.clone(), fake_span(session_type! { ?String }.val)));
 
         let solved = constraints.solve();
-        assert_eq!(solved, Ok(Constraints::from_equivalences(HashSet::new())));
+        assert_eq!(
+            solved.map(|(cs, _)| cs),
+            Ok(Constraints::from_equivalences(HashSet::new()))
+        );
 
         let mut constraints = Constraints::empty();
         constraints.equivalences.add((
@@ -628,7 +640,7 @@ mod tests {
             .add((uvar2.clone(), fake_span(session_type! { ?String }.val)));
 
         let solved = constraints.solve();
-        assert_eq!(solved, Ok(Constraints::empty()));
+        assert_eq!(solved.map(|(cs, _)| cs), Ok(Constraints::empty()));
     }
 
     #[test]
@@ -654,7 +666,10 @@ mod tests {
             .add((uvar2.clone(), fake_span(session_type! { ?String }.val)));
 
         let solved = constraints.solve();
-        assert_eq!(solved, Ok(Constraints::from_equivalences(HashSet::new())));
+        assert_eq!(
+            solved.map(|(cs, _)| cs),
+            Ok(Constraints::from_equivalences(HashSet::new()))
+        );
 
         let mut constraints = Constraints::empty();
         constraints.equivalences.add((
@@ -685,7 +700,7 @@ mod tests {
             .add((uvar2.clone(), fake_span(session_type! { ?String }.val)));
 
         let solved = constraints.solve();
-        assert_eq!(solved, Ok(Constraints::empty()));
+        assert_eq!(solved.map(|(cs, _)| cs), Ok(Constraints::empty()));
     }
 
     #[test]
@@ -708,7 +723,7 @@ mod tests {
         ));
 
         let solved = constraints.solve();
-        assert_eq!(solved, Ok(Constraints::empty()));
+        assert_eq!(solved.map(|(cs, _)| cs), Ok(Constraints::empty()));
     }
 
     #[test]
@@ -722,7 +737,7 @@ mod tests {
         ));
 
         let solved = constraints.solve();
-        assert_eq!(solved, Ok(Constraints::empty()));
+        assert_eq!(solved.map(|(cs, _)| cs), Ok(Constraints::empty()));
     }
 
     #[test]
@@ -736,7 +751,7 @@ mod tests {
         ));
 
         let solved = constraints.solve();
-        assert_eq!(solved, Ok(Constraints::empty()));
+        assert_eq!(solved.map(|(cs, _)| cs), Ok(Constraints::empty()));
     }
 
     #[test]
@@ -762,7 +777,7 @@ mod tests {
         ));
 
         let solved = constraints.solve();
-        assert_eq!(solved, Ok(Constraints::empty()));
+        assert_eq!(solved.map(|(cs, _)| cs), Ok(Constraints::empty()));
     }
 
     #[test]
@@ -785,6 +800,6 @@ mod tests {
         ));
 
         let solved = constraints.solve();
-        assert_eq!(solved, Ok(Constraints::empty()));
+        assert_eq!(solved.map(|(cs, _)| cs), Ok(Constraints::empty()));
     }
 }

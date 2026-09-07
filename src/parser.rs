@@ -7,8 +7,8 @@ use crate::util::peg_logos::SpannedToks;
 use crate::util::span::fake_span;
 use crate::util::span::{Span, Spanned};
 
-use peg::error::ParseError;
 use Braced::Token as Tok;
+use peg::error::ParseError;
 
 pub type Toks<'a> = SpannedToks<'a, Braced<Token<'a>>>;
 
