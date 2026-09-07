@@ -670,18 +670,11 @@ mod typechecker_tests {
         "#;
 
         let res = typecheck(src, false);
-        assert_matches!(
-            res,
-            Err(IErr::Typing(TypeError::SessionTypeNotMobileInContext(
-                _,
-                _,
-                _
-            )))
-        );
-        let Err(IErr::Typing(TypeError::SessionTypeNotMobileInContext(_, _, id))) = res else {
+        assert_matches!(res, Err(IErr::Typing(TypeError::TypeNotMobile { .. })));
+        let Err(IErr::Typing(TypeError::TypeNotMobile { ty })) = res else {
             unreachable!()
         };
-        assert_eq!(id, fake_span("c1".to_owned()))
+        assert_eq!(&ty.val, &session_type! {!String}.val);
     }
 
     #[test]

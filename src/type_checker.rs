@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    constraint::Constraints,
+    constraint::{Constraints, Equivalences, Mobilities},
     context::{Ctx, JoinOrd, ext},
     equivalence::{EquivalenceResult, check_equivalence},
     kinding,
@@ -67,7 +67,6 @@ pub enum TypeError {
     WfSessionShadowing(SType, SId),
     TypeNotValidForNew(SType),
     SessionTypeOnlySkips(SType),
-    SessionTypeNotMobileInContext(SExpr, Ctx, SId),
     UndefinedAlias(SId),
     QualificationNotWellFormed(TypeCtx, SQuantification),
     KindMismatch(SType, Kind, TypeCtx),
@@ -76,10 +75,8 @@ pub enum TypeError {
     VariablesUnsolvable {
         vars: HashSet<UVarId>,
     },
-    AssignmentNotMobile {
-        expr: SExpr,
-        id: SId,
-        ctx: Ctx,
+    TypeNotMobile {
+        ty: SType,
     },
     TypesAreNotEquivalent {
         ty1: SType,
@@ -1170,16 +1167,18 @@ impl TypeChecker {
                     ty_ctx.extend_qualifications(qualifications.into_iter().map(|q| q.val));
                 let (cs, eff) = self.check(&ctx, &ty_ctx, expr, expr_ty)?;
 
-                let (cs, assignments) = cs.solve()?;
-                self.check_equivalence(&cs, &ty_ctx.vars)?;
+                // Partition generated constraint into local and nonlocal ones depending on
+                // poly variable bindings
+                let (cs_local, cs_other) = Self::partition_constraints(cs, &local_poly_bindings);
+                let (cs_local, assignments) = cs_local.solve()?;
                 Self::check_assignments_escape(
                     &assignments,
                     nonlocal_uvar_limit,
                     &local_poly_bindings,
                     expr.span.clone(),
                 )?;
-
-                Ok((Constraints::empty(), eff))
+                self.check_equivalence(&cs_local, &ty_ctx.vars)?;
+                Ok((cs_other, eff))
             }
             _ => {
                 let (inferred_ty, mut cs, eff) = self.infer(ctx, ty_ctx, e)?;
@@ -1281,24 +1280,49 @@ impl TypeChecker {
         // If we can't ensure that the type is mobile
         // we add a constraint that the type must be mobile
         // to later check that the solution satisfies mobility requirements.
-        let mut non_mobile_ids = HashSet::new();
-        for (id, ty) in ctx.binds_spanned() {
+        for (_, ty) in ctx.binds_spanned() {
             if !ty_ctx.mobile(&normalise(ty_ctx, &self.alias_env, &ty)?.val) {
                 if !ty.is_closed() {
-                    non_mobile_ids.insert(id.clone());
+                    cs.mobilities.add(ty.clone());
                 } else {
-                    return Err(TypeError::SessionTypeNotMobileInContext(
-                        expr.clone(),
-                        ctx.clone(),
-                        id,
-                    ));
+                    return Err(TypeError::TypeNotMobile { ty });
                 }
             }
         }
-        if !non_mobile_ids.is_empty() {
-            cs.mobilities.add(expr.clone(), non_mobile_ids, ctx.clone());
-        }
         Ok(())
+    }
+
+    fn partition_constraints(
+        constraints: Constraints,
+        local_poly_bindings: &HashSet<PVarId>,
+    ) -> (Constraints, Constraints) {
+        let (eqs_local, eqs_other): (Equivalences, Equivalences) = constraints
+            .equivalences
+            .into_iter()
+            .partition(|(ty1, ty2)| {
+                ty1.poly_variables()
+                    .any(|v| local_poly_bindings.contains(&v))
+                    || ty2
+                        .poly_variables()
+                        .any(|v| local_poly_bindings.contains(&v))
+            });
+
+        let (mobs_local, mobs_other): (Mobilities, Mobilities) =
+            constraints.mobilities.into_iter().partition(|(ty)| {
+                ty.poly_variables()
+                    .any(|v| local_poly_bindings.contains(&v))
+            });
+
+        (
+            Constraints {
+                equivalences: eqs_local,
+                mobilities: mobs_local,
+            },
+            Constraints {
+                equivalences: eqs_other,
+                mobilities: mobs_other,
+            },
+        )
     }
 
     /// * `nonlocal_uvar_limit`: Minimum index value for local uvars.

@@ -14,8 +14,14 @@ pub struct Constraints {
     pub mobilities: Mobilities,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct Equivalences(HashSet<(SType, SType)>);
+
+impl Extend<(SType, SType)> for Equivalences {
+    fn extend<T: IntoIterator<Item = (SType, SType)>>(&mut self, iter: T) {
+        self.0.extend(iter);
+    }
+}
 
 impl PartialEq for Equivalences {
     fn eq(&self, other: &Self) -> bool {
@@ -35,8 +41,8 @@ impl PartialEq for Equivalences {
 
 impl Eq for Equivalences {}
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-pub struct Mobilities(Vec<(SExpr, HashSet<SId>, Ctx)>);
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub struct Mobilities(Vec<SType>);
 
 type Assignments = HashMap<UVarId, Type>;
 
@@ -59,6 +65,23 @@ impl Constraints {
         Constraints {
             equivalences: self.equivalences.join(other.equivalences),
             mobilities: self.mobilities.join(other.mobilities),
+        }
+    }
+
+    pub fn subst(self, assignments: &Assignments) -> Self {
+        Constraints {
+            equivalences: Equivalences(
+                self.equivalences
+                    .into_iter()
+                    .map(|(ty1, ty2)| (subst(ty1, assignments), subst(ty2, assignments)))
+                    .collect(),
+            ),
+            mobilities: Mobilities(
+                self.mobilities
+                    .into_iter()
+                    .map(|ty| subst(ty, assignments))
+                    .collect(),
+            ),
         }
     }
 
@@ -326,25 +349,34 @@ impl Mobilities {
         self
     }
 
-    pub fn add(&mut self, expr: SExpr, ids: HashSet<SId>, ctx: Ctx) {
-        self.0.push((expr, ids, ctx));
+    pub fn add(&mut self, ty: SType) {
+        self.0.push(ty);
     }
 
-    fn check(mut self, ty_ctx: &TypeCtx, assignments: &Assignments) -> Result<(), TypeError> {
-        for (expr, ids, ctx) in self.0.iter_mut() {
-            subst_ctx(ctx, &assignments);
-            let binds = ctx.binds();
-            for id in ids.iter() {
-                if !ty_ctx.mobile(binds.get(&id.val).unwrap()) {
-                    return Err(TypeError::AssignmentNotMobile {
-                        expr: expr.clone(),
-                        id: id.clone(),
-                        ctx: ctx.clone(),
-                    });
-                }
+    fn check(self, ty_ctx: &TypeCtx, assignments: &Assignments) -> Result<(), TypeError> {
+        for ty in self.0.into_iter() {
+            let ty = subst(ty, &assignments);
+            if !ty_ctx.mobile(&ty.val) {
+                return Err(TypeError::TypeNotMobile { ty });
             }
         }
         Ok(())
+    }
+}
+
+impl IntoIterator for Mobilities {
+    type Item = SType;
+
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl Extend<SType> for Mobilities {
+    fn extend<T: IntoIterator<Item = SType>>(&mut self, iter: T) {
+        self.0.extend(iter);
     }
 }
 

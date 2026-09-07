@@ -669,21 +669,6 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     )],
                 );
             }
-            TypeError::SessionTypeNotMobileInContext(expr, ctx, id) => {
-                report(
-                    &src,
-                    id.span.clone(),
-                    "Type Error",
-                    [label(
-                        expr.span.clone(),
-                        format!(
-                            "The variable {} is not mobile in the context {}.",
-                            pretty_def(&id),
-                            pretty_def(&ctx.simplify())
-                        ),
-                    )],
-                );
-            }
             TypeError::UndefinedAlias(id) => {
                 report(
                     &src,
@@ -748,19 +733,14 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                 )],
             ),
             TypeError::UndefinedPVar(_, _) => todo!(),
-            TypeError::AssignmentNotMobile { expr, id, ctx } => {
-                let (_, ty) = ctx.lookup_ord_pure(&ty_ctx, &id).unwrap();
+            TypeError::TypeNotMobile { ty } => {
                 report(
                     &src,
-                    expr.span.clone(),
+                    ty.span.clone(),
                     "Constraint Solution Error",
                     [label(
-                        expr.span,
-                        format!(
-                            "Type {} is not mobile in context: {}",
-                            pretty_def(&ty.val),
-                            pretty_def(&ctx.simplify())
-                        ),
+                        ty.span,
+                        format!("Type {} is not mobile", pretty_def(&ty.val),),
                     )],
                 );
             }
