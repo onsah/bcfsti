@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    constraint::{Constraints, Equivalences, Mobilities},
+    constraint::{Assignments, Constraints, Equivalences, Mobilities},
     context::{Ctx, JoinOrd, ext},
     equivalence::{EquivalenceResult, check_equivalence},
     kinding,
@@ -85,8 +85,8 @@ pub enum TypeError {
     },
     // TODO: add polymorphic variables
     PolyVarEscapesViaUnification {
-        uvar_id: UVarId,
-        constraints: Constraints,
+        var: PVarId,
+        assignment: (UVarId, Type),
         span: Span,
     },
 }
@@ -96,11 +96,12 @@ pub fn infer_type(e: &SExpr, alias_env: AliasEnv) -> Result<(SType, Constraints,
         uvar_counter: 0,
         alias_env,
     };
-    let (t, cs, eff) = checker.infer(&Ctx::Empty, &TypeCtx::empty(), e)?;
-    if !TypeCtx::empty().unr(&t) {
+    let type_ctx = TypeCtx::empty();
+    let (t, eff, cs, assignments) = checker.infer(Assignments::new(), &type_ctx, &Ctx::Empty, e)?;
+    if !type_ctx.unr(&t) {
         return Err(TypeError::MainReturnsOrd(e.clone(), t.clone()));
     }
-    Ok((t, cs, eff))
+    Ok((t, cs.subst(&assignments), eff))
 }
 
 struct TypeChecker {
@@ -111,10 +112,11 @@ struct TypeChecker {
 impl TypeChecker {
     fn infer(
         &mut self,
-        ctx: &Ctx,
+        assignments: Assignments,
         ty_ctx: &TypeCtx,
+        ctx: &Ctx,
         e: &SExpr,
-    ) -> Result<(SType, Constraints, Eff), TypeError> {
+    ) -> Result<(SType, Eff, Constraints, Assignments), TypeError> {
         // println!("Infer: {}", pretty_def(&e));
         // println!("Ctx: {}", pretty_context_notype(&ctx.simplify()));
         let ty = match &e.val {
@@ -127,13 +129,13 @@ impl TypeChecker {
                     crate::syntax::Const::String(_) => Type::String,
                 };
 
-                Ok((fake_span(ty), Constraints::empty(), Eff::No))
+                Ok((fake_span(ty), Eff::No, Constraints::empty(), assignments))
             }
             Expr::Var(x) => match ctx.lookup_ord_pure(ty_ctx, x) {
                 Some((ctx, ty)) => {
                     assert_unr_ctx(e, &ctx, ty_ctx)?;
                     let ty = normalise(ty_ctx, &self.alias_env, &ty)?;
-                    Ok((ty, Constraints::empty(), Eff::No))
+                    Ok((ty, Eff::No, Constraints::empty(), assignments))
                 }
                 None => Err(TypeError::UndefinedVariable(x.clone())),
             },
@@ -158,7 +160,7 @@ impl TypeChecker {
                         sess_type.span.clone(),
                     )),
                 });
-                Ok((typ, Constraints::empty(), Eff::No))
+                Ok((typ, Eff::No, Constraints::empty(), assignments))
             }
             Expr::LetPair(id1, id2, expr, body) => {
                 if ctx.vars().contains(&id1.val) {
@@ -183,7 +185,8 @@ impl TypeChecker {
                     }
                 }
 
-                let (expr_ty, expr_constraints, expr_eff) = self.infer(&expr_ctx, ty_ctx, expr)?;
+                let (expr_ty, expr_eff, expr_constraints, assignments) =
+                    self.infer(assignments, ty_ctx, &expr_ctx, expr)?;
 
                 let Type::Prod {
                     mult,
@@ -198,7 +201,7 @@ impl TypeChecker {
                     ));
                 };
 
-                let (body_ty, body_constraints, body_eff) = {
+                let (body_ty, body_eff, body_constraints, assignments) = {
                     let var_ctx = ext(
                         mult.val,
                         Ctx::Bind(id1.clone(), *first.clone()),
@@ -210,13 +213,14 @@ impl TypeChecker {
                         JoinOrd::Unordered
                     };
                     let body_ctx = ctx_join(e, ty_ctx, &var_ctx, &body_ctx, ord)?;
-                    self.infer(&body_ctx, ty_ctx, body)
+                    self.infer(assignments, ty_ctx, &body_ctx, body)
                 }?;
 
                 Ok((
                     body_ty,
-                    expr_constraints.join(body_constraints),
                     Eff::lub(expr_eff, body_eff),
+                    expr_constraints.join(body_constraints),
+                    assignments,
                 ))
             }
             Expr::Seq(e1, e2) => {
@@ -235,14 +239,16 @@ impl TypeChecker {
                     }
                 }
 
-                let (e1_constraints, e1_eff) =
-                    self.check(&e1_ctx, ty_ctx, e1, &fake_span(Type::Unit))?;
-                let (e2_ty, e2_constraints, e2_eff) = self.infer(&e2_ctx, ty_ctx, e2)?;
+                let (e1_eff, e1_constraints, assignments) =
+                    self.check(assignments, ty_ctx, &e1_ctx, e1, &fake_span(Type::Unit))?;
+                let (e2_ty, e2_eff, e2_constraints, assignments) =
+                    self.infer(assignments, ty_ctx, &e2_ctx, e2)?;
 
                 Ok((
                     e2_ty,
-                    e1_constraints.join(e2_constraints),
                     Eff::lub(e1_eff, e2_eff),
+                    e1_constraints.join(e2_constraints),
+                    assignments,
                 ))
             }
             Expr::Send(ty, val, chan) => {
@@ -251,11 +257,13 @@ impl TypeChecker {
                 }
 
                 let val_ctx = ctx.restrict(&val.free_vars());
-                let (val_cs, _) = self.check(&val_ctx, ty_ctx, val, ty)?;
+                let (_, val_cs, assignments) =
+                    self.check(assignments, ty_ctx, &val_ctx, val, ty)?;
 
                 let chan_ctx = ctx.restrict(&chan.free_vars());
                 let expected_chan_ty = fake_span(Type::Op(SessionOp::Send, Box::new(ty.clone())));
-                let (chan_cs, _) = self.check(&chan_ctx, ty_ctx, chan, &expected_chan_ty)?;
+                let (_, chan_cs, assignments) =
+                    self.check(assignments, ty_ctx, &chan_ctx, chan, &expected_chan_ty)?;
 
                 // ctx must be a subcontext of unordered join of val_ctx and chan_ctx must
                 {
@@ -270,7 +278,12 @@ impl TypeChecker {
                     }
                 }
 
-                Ok((fake_span(Type::Unit), val_cs.join(chan_cs), Eff::Yes))
+                Ok((
+                    fake_span(Type::Unit),
+                    Eff::Yes,
+                    val_cs.join(chan_cs),
+                    assignments,
+                ))
             }
             Expr::Recv(ty, chan) => {
                 if !ty_ctx.mobile(&ty.val) {
@@ -279,7 +292,8 @@ impl TypeChecker {
 
                 let chan_ctx = ctx.restrict(&chan.free_vars());
                 let expected_chan_ty = fake_span(Type::Op(SessionOp::Recv, Box::new(ty.clone())));
-                let (chan_cs, _) = self.check(&chan_ctx, ty_ctx, chan, &expected_chan_ty)?;
+                let (_, chan_cs, assignments) =
+                    self.check(assignments, ty_ctx, &chan_ctx, chan, &expected_chan_ty)?;
 
                 if !ctx.is_subctx_of(&ty_ctx, &chan_ctx) {
                     return Err(TypeError::CtxSplitFailed(
@@ -289,7 +303,7 @@ impl TypeChecker {
                     ));
                 }
 
-                Ok((ty.clone(), chan_cs, Eff::Yes))
+                Ok((ty.clone(), Eff::Yes, chan_cs, assignments))
             }
             Expr::Fork(func) => {
                 let body_ctx = ctx.restrict(&func.free_vars());
@@ -309,9 +323,10 @@ impl TypeChecker {
                     param: Box::new(fake_span(Type::Unit)),
                     ret: Box::new(fake_span(Type::Unit)),
                 });
-                let (body_cs, body_eff) = self.check(&body_ctx, ty_ctx, func, &expected_body_ty)?;
+                let (body_eff, body_cs, assignments) =
+                    self.check(assignments, ty_ctx, &body_ctx, func, &expected_body_ty)?;
 
-                Ok((fake_span(Type::Unit), body_cs, body_eff))
+                Ok((fake_span(Type::Unit), body_eff, body_cs, assignments))
             }
             Expr::Discard(chan) => {
                 let chan_ctx = ctx.restrict(&chan.free_vars());
@@ -323,10 +338,10 @@ impl TypeChecker {
                     ));
                 }
 
-                let (chan_cs, chan_eff) =
-                    self.check(&chan_ctx, ty_ctx, chan, &fake_span(Type::Skip))?;
+                let (chan_eff, chan_cs, assignments) =
+                    self.check(assignments, ty_ctx, &chan_ctx, chan, &fake_span(Type::Skip))?;
 
-                Ok((fake_span(Type::Unit), chan_cs, chan_eff))
+                Ok((fake_span(Type::Unit), chan_eff, chan_cs, assignments))
             }
             Expr::BorrowEnd(op, chan) => {
                 let chan_ctx = ctx.restrict(&chan.free_vars());
@@ -339,9 +354,10 @@ impl TypeChecker {
                 }
 
                 let expected_ty = fake_span(Type::BorrowEnd(*op));
-                let (chan_cs, chan_eff) = self.check(&chan_ctx, ty_ctx, chan, &expected_ty)?;
+                let (chan_eff, chan_cs, assignments) =
+                    self.check(assignments, ty_ctx, &chan_ctx, chan, &expected_ty)?;
 
-                Ok((fake_span(Type::Unit), chan_cs, chan_eff))
+                Ok((fake_span(Type::Unit), chan_eff, chan_cs, assignments))
             }
             Expr::End(op, chan) => {
                 let chan_ctx = ctx.restrict(&chan.free_vars());
@@ -354,9 +370,10 @@ impl TypeChecker {
                 }
 
                 let expected_ty = fake_span(Type::End(*op));
-                let (chan_cs, chan_eff) = self.check(&chan_ctx, ty_ctx, chan, &expected_ty)?;
+                let (chan_eff, chan_cs, assignments) =
+                    self.check(assignments, ty_ctx, &chan_ctx, chan, &expected_ty)?;
 
-                Ok((fake_span(Type::Unit), chan_cs, chan_eff))
+                Ok((fake_span(Type::Unit), chan_eff, chan_cs, assignments))
             }
             Expr::LSplit(prefix_session, chan) => {
                 kinding::check(ty_ctx, &self.alias_env, prefix_session, Kind::Session)?;
@@ -373,7 +390,8 @@ impl TypeChecker {
                 let uvar = self.new_uvar();
                 let expected_chan_ty =
                     fake_span(session_type! { prefix_session.clone(); uvar.clone() }.val);
-                let (chan_cs, chan_eff) = self.check(chan_ctx, ty_ctx, chan, &expected_chan_ty)?;
+                let (chan_eff, chan_cs, assignments) =
+                    self.check(assignments, ty_ctx, chan_ctx, chan, &expected_chan_ty)?;
 
                 let ret_ty = Type::Prod {
                     mult: fake_span(Mult::OrdL),
@@ -381,7 +399,7 @@ impl TypeChecker {
                     second: Box::new(fake_span(uvar.val)),
                 };
 
-                Ok((fake_span(ret_ty), chan_cs, chan_eff))
+                Ok((fake_span(ret_ty), chan_eff, chan_cs, assignments))
             }
             Expr::RSplit(prefix_session, chan) => {
                 kinding::check(ty_ctx, &self.alias_env, prefix_session, Kind::Session)?;
@@ -398,7 +416,8 @@ impl TypeChecker {
                 let uvar = self.new_uvar();
                 let expected_chan_ty =
                     fake_span(session_type! { prefix_session.clone(); uvar.clone() }.val);
-                let (chan_cs, chan_eff) = self.check(chan_ctx, ty_ctx, chan, &expected_chan_ty)?;
+                let (chan_eff, chan_cs, assignments) =
+                    self.check(assignments, ty_ctx, chan_ctx, chan, &expected_chan_ty)?;
 
                 let ret_ty = Type::Prod {
                     mult: fake_span(Mult::Lin),
@@ -406,13 +425,14 @@ impl TypeChecker {
                     second: Box::new(fake_span(session_type! { Acq; uvar.clone() }.val)),
                 };
 
-                Ok((fake_span(ret_ty), chan_cs, chan_eff))
+                Ok((fake_span(ret_ty), chan_eff, chan_cs, assignments))
             }
             Expr::App(abs, arg) => {
                 let abs_ctx = ctx.restrict(&abs.free_vars());
                 let arg_ctx = ctx.restrict(&arg.free_vars());
 
-                let (abs_ty, abs_cs, abs_eff) = self.infer(&abs_ctx, ty_ctx, abs)?;
+                let (abs_ty, abs_eff, abs_cs, assignments) =
+                    self.infer(assignments, ty_ctx, &abs_ctx, abs)?;
 
                 let Type::Arr {
                     mult,
@@ -454,7 +474,8 @@ impl TypeChecker {
                     ));
                 }
 
-                let (arg_cs, arg_eff) = self.check(&arg_ctx, ty_ctx, arg, &param)?;
+                let (arg_eff, arg_cs, assignments) =
+                    self.check(assignments, ty_ctx, &arg_ctx, arg, &param)?;
 
                 if mult.val == Mult::OrdR && arg_eff == Eff::Yes {
                     return Err(TypeError::MismatchEff(
@@ -467,19 +488,34 @@ impl TypeChecker {
                 let ret = normalise(ty_ctx, &self.alias_env, &ret)?;
                 Ok((
                     ret,
-                    abs_cs.join(arg_cs),
                     Eff::lub(*eff, Eff::lub(abs_eff, arg_eff)),
+                    abs_cs.join(arg_cs),
+                    assignments,
                 ))
             }
             Expr::Let(var_id, var_expr, body_expr, _) => {
                 let var_ctx = ctx.restrict(&var_expr.free_vars());
-                let (var_ty, var_cs, var_eff) = self.infer(&var_ctx, ty_ctx, var_expr)?;
+                let (var_ty, var_eff, var_cs, assignments) =
+                    self.infer(assignments, ty_ctx, &var_ctx, var_expr)?;
 
-                let (body_ty, body_cs, body_eff) = self.infer_let_body(
-                    ctx, ty_ctx, e, var_id, &var_ctx, &var_ty, var_eff, body_expr,
+                let (body_ty, body_eff, body_cs, assignments) = self.infer_let_body(
+                    assignments,
+                    ty_ctx,
+                    ctx,
+                    e,
+                    var_id,
+                    &var_ctx,
+                    &var_ty,
+                    var_eff,
+                    body_expr,
                 )?;
 
-                Ok((body_ty, var_cs.join(body_cs), Eff::lub(var_eff, body_eff)))
+                Ok((
+                    body_ty,
+                    Eff::lub(var_eff, body_eff),
+                    var_cs.join(body_cs),
+                    assignments,
+                ))
             }
             Expr::LetDecl(id, var_ty, quant, clause, body, is_rec) => {
                 if *is_rec
@@ -504,7 +540,7 @@ impl TypeChecker {
                 // Add the function to the context when the declaration is
                 // recursive (`let rec`)
                 let clause_ctx = ctx.restrict(&clause.body.free_vars());
-                let (var_cs, var_eff) = {
+                let (var_eff, var_cs, assignments) = {
                     let clause_ctx = if *is_rec {
                         ext(
                             Mult::Unr,
@@ -514,17 +550,32 @@ impl TypeChecker {
                     } else {
                         clause_ctx.clone()
                     };
-                    self.check(&clause_ctx, ty_ctx, &var_body, &var_ty)?
+                    self.check(assignments, ty_ctx, &clause_ctx, &var_body, &var_ty)?
                 };
 
-                let (ty, let_cs, let_eff) =
-                    self.infer_let_body(ctx, ty_ctx, e, id, &clause_ctx, &var_ty, var_eff, body)?;
+                let (ty, let_eff, let_cs, assignments) = self.infer_let_body(
+                    assignments,
+                    ty_ctx,
+                    ctx,
+                    e,
+                    id,
+                    &clause_ctx,
+                    &var_ty,
+                    var_eff,
+                    body,
+                )?;
 
-                Ok((ty, var_cs.join(let_cs), Eff::lub(var_eff, let_eff)))
+                Ok((
+                    ty,
+                    Eff::lub(var_eff, let_eff),
+                    var_cs.join(let_cs),
+                    assignments,
+                ))
             }
             Expr::CaseSum(expr, cases) => {
                 let expr_ctx = ctx.restrict(&expr.free_vars());
-                let (expr_ty, expr_cs, expr_eff) = self.infer(&expr_ctx, ty_ctx, expr)?;
+                let (expr_ty, expr_eff, expr_cs, assignments) =
+                    self.infer(assignments, ty_ctx, &expr_ctx, expr)?;
 
                 let Type::Variant(variants) = &expr_ty.val else {
                     return Err(TypeError::Mismatch(
@@ -543,9 +594,10 @@ impl TypeChecker {
                     Self::check_variant_label_eq(e, &expr_ty, &case_labels, &variant_labels)?
                 };
 
-                let case_inferences: Vec<(String, (Spanned<Type>, Constraints, Eff))> = cases
-                    .iter()
-                    .map(|(label, var_name, case_expr)| {
+                let case_inferences: Vec<(String, (Spanned<Type>, Eff, Constraints, Assignments))> =
+                    cases
+                        .iter()
+                        .map(|(label, var_name, case_expr)| {
                         let case_ctx = ctx.restrict(&case_expr.free_vars());
 
                         let res_ctx =
@@ -575,7 +627,7 @@ impl TypeChecker {
                             &case_ctx,
                             JoinOrd::Ordered,
                         )?;
-                        let infer_res = self.infer(&case_ctx, ty_ctx, case_expr)?;
+                        let infer_res = self.infer(assignments.clone(), ty_ctx, &case_ctx, case_expr)?;
                         Ok((label.val.clone(), infer_res))
                     })
                     .collect::<Result<_, _>>()?;
@@ -584,19 +636,19 @@ impl TypeChecker {
                 let expr_cs = case_inferences
                     .iter()
                     .map(|(_, infer_res)| infer_res)
-                    .fold(expr_cs, |acc, (_, cs, _)| acc.join(cs.clone()));
+                    .fold(expr_cs, |acc, (_, _, cs, _)| acc.join(cs.clone()));
                 let expr_eff = case_inferences
                     .iter()
                     .map(|(_, infer_res)| infer_res)
-                    .fold(expr_eff, |acc, (_, _, eff)| Eff::lub(acc, *eff));
+                    .fold(expr_eff, |acc, (_, eff, _, _)| Eff::lub(acc, *eff));
 
                 let mut cs = expr_cs;
-                for (i, (_, (ty1, _, _))) in case_inferences.iter().enumerate() {
-                    for (_, (ty2, _, _)) in case_inferences[i + 1..].iter() {
+                for (i, (_, (ty1, _, _, _))) in case_inferences.iter().enumerate() {
+                    for (_, (ty2, _, _, _)) in case_inferences[i + 1..].iter() {
                         cs.equivalences.add((ty1.clone(), ty2.clone()));
                     }
                 }
-                Ok((expr_ty, cs, expr_eff))
+                Ok((expr_ty, expr_eff, cs, assignments))
             }
             Expr::Select(label, chan_expr) => {
                 let chan_ctx = ctx.restrict(&chan_expr.free_vars());
@@ -609,7 +661,8 @@ impl TypeChecker {
                     ));
                 }
 
-                let (chan_ty, chan_cs, _chan_eff) = self.infer(&chan_ctx, ty_ctx, chan_expr)?;
+                let (chan_ty, _chan_eff, chan_cs, assignments) =
+                    self.infer(assignments, ty_ctx, &chan_ctx, chan_expr)?;
 
                 if let Type::UVar(_) = &chan_ty.val {
                     return Err(TypeError::TypeAnnotationMissing(*chan_expr.clone()));
@@ -640,7 +693,7 @@ impl TypeChecker {
                         chan_ty.clone(),
                     ))?;
 
-                Ok((fake_span(label_ty.val), chan_cs, Eff::Yes))
+                Ok((fake_span(label_ty.val), Eff::Yes, chan_cs, assignments))
             }
             Expr::Branch(chan_expr) => {
                 let chan_ctx = ctx.restrict(&chan_expr.free_vars());
@@ -653,7 +706,8 @@ impl TypeChecker {
                     ));
                 }
 
-                let (chan_ty, chan_cs, _chan_eff) = self.infer(&chan_ctx, ty_ctx, chan_expr)?;
+                let (chan_ty, _chan_eff, chan_cs, assignments) =
+                    self.infer(assignments, ty_ctx, &chan_ctx, chan_expr)?;
 
                 if let Type::UVar(_) = &chan_ty.val {
                     return Err(TypeError::TypeAnnotationMissing(*chan_expr.clone()));
@@ -668,17 +722,23 @@ impl TypeChecker {
                 };
 
                 let ty = Type::Variant(branches);
-                Ok((fake_span(ty), chan_cs, Eff::Yes))
+                Ok((fake_span(ty), Eff::Yes, chan_cs, assignments))
             }
             Expr::Ann(expr, ty) => {
                 let ty = normalise(ty_ctx, &self.alias_env, ty)?;
-                let (expr_cs, expr_eff) =
-                    self.check(&ctx.restrict(&expr.free_vars()), ty_ctx, expr, &ty)?;
+                let (expr_eff, expr_cs, assignments) = self.check(
+                    assignments,
+                    ty_ctx,
+                    &ctx.restrict(&expr.free_vars()),
+                    expr,
+                    &ty,
+                )?;
 
-                Ok((ty, expr_cs, expr_eff))
+                Ok((ty, expr_eff, expr_cs, assignments))
             }
             Expr::Op1(op1, expr) => {
-                let (expr_ty, expr_cs, expr_eff) = self.infer(ctx, ty_ctx, expr)?;
+                let (expr_ty, expr_eff, expr_cs, assignments) =
+                    self.infer(assignments, ty_ctx, ctx, expr)?;
                 let ty = match (op1, &expr_ty.val) {
                     (Op1::Neg, Type::Int) => Type::Int,
                     (Op1::Neg, _) => {
@@ -699,14 +759,16 @@ impl TypeChecker {
                     (Op1::ToStr, _) => Type::String,
                     (Op1::Print, _) => Type::Unit,
                 };
-                Ok((fake_span(ty), expr_cs, expr_eff))
+                Ok((fake_span(ty), expr_eff, expr_cs, assignments))
             }
             Expr::Op2(op2, expr1, expr2) => {
                 let expr1_ctx = ctx.restrict(&expr1.free_vars());
-                let (expr1_ty, expr1_cs, expr1_eff) = self.infer(&expr1_ctx, ty_ctx, expr1)?;
+                let (expr1_ty, expr1_eff, expr1_cs, assignments) =
+                    self.infer(assignments, ty_ctx, &expr1_ctx, expr1)?;
 
                 let expr2_ctx = ctx.restrict(&expr2.free_vars());
-                let (expr2_ty, expr2_cs, expr2_eff) = self.infer(&expr2_ctx, ty_ctx, expr2)?;
+                let (expr2_ty, expr2_eff, expr2_cs, assignments) =
+                    self.infer(assignments, ty_ctx, &expr2_ctx, expr2)?;
 
                 {
                     let res_ctx = ctx_join(e, ty_ctx, &expr1_ctx, &expr2_ctx, JoinOrd::Unordered)?;
@@ -766,14 +828,20 @@ impl TypeChecker {
 
                 Ok((
                     fake_span(ty),
-                    expr1_cs.join(expr2_cs),
                     Eff::lub(expr1_eff, expr2_eff),
+                    expr1_cs.join(expr2_cs),
+                    assignments,
                 ))
             }
             Expr::If(cond_expr, then_expr, else_expr) => {
                 let cond_ctx = ctx.restrict(&cond_expr.free_vars());
-                let (cond_cs, cond_eff) =
-                    self.check(&cond_ctx, ty_ctx, cond_expr, &fake_span(Type::Bool))?;
+                let (cond_eff, cond_cs, assignments) = self.check(
+                    assignments,
+                    ty_ctx,
+                    &cond_ctx,
+                    cond_expr,
+                    &fake_span(Type::Bool),
+                )?;
 
                 let then_ctx = ctx.restrict(&then_expr.free_vars());
                 let else_ctx = ctx.restrict(&else_expr.free_vars());
@@ -802,16 +870,19 @@ impl TypeChecker {
                     }
                 }
 
-                let (then_ty, then_cs, then_eff) = self.infer(&then_ctx, ty_ctx, then_expr)?;
-                let (else_ty, else_cs, else_eff) = self.infer(&else_ctx, ty_ctx, else_expr)?;
+                let (then_ty, then_eff, then_cs, assignments) =
+                    self.infer(assignments, ty_ctx, &then_ctx, then_expr)?;
+                let (else_ty, else_eff, else_cs, assignments) =
+                    self.infer(assignments, ty_ctx, &else_ctx, else_expr)?;
 
                 let mut cs = cond_cs.join(then_cs).join(else_cs);
                 cs.equivalences.add((then_ty.clone(), else_ty.clone()));
 
                 Ok((
                     then_ty,
-                    cs,
                     Eff::lub(cond_eff, Eff::lub(then_eff, else_eff)),
+                    cs,
+                    assignments,
                 ))
             }
             Expr::Inj(_, _) => Err(TypeError::TypeAnnotationMissing(e.clone())),
@@ -821,7 +892,8 @@ impl TypeChecker {
                 unreachable!("type abbreviations are expanded before type checking")
             }
             Expr::TyApp(expr, tys) => {
-                let (expr_ty, expr_cs, expr_eff) = self.infer(ctx, ty_ctx, expr)?;
+                let (expr_ty, expr_eff, expr_cs, assignments) =
+                    self.infer(assignments, ty_ctx, ctx, expr)?;
 
                 let Type::Abstraction {
                     typ: QuantificationType::Universal,
@@ -857,7 +929,7 @@ impl TypeChecker {
                 Self::check_qualifications(ty_ctx, substituted_qualifications.iter())?;
 
                 let app_ty = fake_span(abs_ty.subst_poly(&bindings));
-                Ok((app_ty, expr_cs, expr_eff))
+                Ok((app_ty, expr_eff, expr_cs, assignments))
             }
             Expr::TyAbs { .. } => Err(TypeError::TypeAnnotationMissing(e.clone())),
         }?;
@@ -913,15 +985,16 @@ impl TypeChecker {
     /// Given an already type-checked variable, check the body
     fn infer_let_body(
         &mut self,
-        ctx: &Ctx,
+        assignments: Assignments,
         ty_ctx: &TypeCtx,
+        ctx: &Ctx,
         expr: &SExpr,
         var_id: &SId,
         var_ctx: &Ctx,
         var_ty: &SType,
         var_eff: Eff,
         body_expr: &SExpr,
-    ) -> Result<(SType, Constraints, Eff), TypeError> {
+    ) -> Result<(SType, Eff, Constraints, Assignments), TypeError> {
         if ctx.vars().contains(&var_id.val) {
             return Err(TypeError::Shadowing(expr.clone(), var_id.clone()));
         }
@@ -949,18 +1022,20 @@ impl TypeChecker {
             };
             ctx_join(expr, ty_ctx, &binding, &body_ctx, ord)?
         };
-        let (body_ty, body_cs, body_eff) = self.infer(&body_ctx, ty_ctx, body_expr)?;
+        let (body_ty, body_eff, body_cs, assignments) =
+            self.infer(assignments, ty_ctx, &body_ctx, body_expr)?;
 
-        Ok((body_ty, body_cs, body_eff))
+        Ok((body_ty, body_eff, body_cs, assignments))
     }
 
     fn check(
         &mut self,
-        ctx: &Ctx,
+        assignments: Assignments,
         ty_ctx: &TypeCtx,
+        ctx: &Ctx,
         e: &SExpr,
         expected_ty: &SType,
-    ) -> Result<(Constraints, Eff), TypeError> {
+    ) -> Result<(Eff, Constraints, Assignments), TypeError> {
         // println!(
         //     "Check: {} against {}",
         //     pretty_def(&e),
@@ -1003,7 +1078,8 @@ impl TypeChecker {
                 }
 
                 let ctx = ext(**mult, Ctx::Bind(id.clone(), *param.clone()), ctx.clone());
-                let (body_cs, body_eff) = self.check(&ctx, ty_ctx, body, ret)?;
+                let (body_eff, body_cs, assignments) =
+                    self.check(assignments, ty_ctx, &ctx, body, ret)?;
 
                 if body_eff > eff.val {
                     return Err(TypeError::MismatchEffSub(
@@ -1013,7 +1089,7 @@ impl TypeChecker {
                     ));
                 }
 
-                Ok((ctx_cs.join(body_cs), Eff::No))
+                Ok((Eff::No, ctx_cs.join(body_cs), assignments))
             }
             Expr::Pair(first, second) => {
                 let first_ctx = ctx.restrict(&first.free_vars());
@@ -1032,10 +1108,10 @@ impl TypeChecker {
                     ));
                 };
 
-                let (first_cs, first_eff) =
-                    self.check(&first_ctx, ty_ctx, first, &expected_first)?;
-                let (second_cs, second_eff) =
-                    self.check(&second_ctx, ty_ctx, second, &expected_second)?;
+                let (first_eff, first_cs, assignments) =
+                    self.check(assignments, ty_ctx, &first_ctx, first, &expected_first)?;
+                let (second_eff, second_cs, assignments) =
+                    self.check(assignments, ty_ctx, &second_ctx, second, &expected_second)?;
 
                 if mult.val == Mult::OrdL && second_eff == Eff::Yes {
                     return Err(TypeError::MismatchEff(
@@ -1069,7 +1145,11 @@ impl TypeChecker {
                     }
                 }
 
-                Ok((first_cs.join(second_cs), Eff::lub(first_eff, second_eff)))
+                Ok((
+                    Eff::lub(first_eff, second_eff),
+                    first_cs.join(second_cs),
+                    assignments,
+                ))
             }
             Expr::Inj(label, expr) => {
                 let Type::Variant(variants) = &expected_ty.val else {
@@ -1089,10 +1169,15 @@ impl TypeChecker {
                     ));
                 };
 
-                let (expr_cs, expr_eff) =
-                    self.check(&ctx.restrict(&expr.free_vars()), ty_ctx, expr, actual_ty)?;
+                let (expr_eff, expr_cs, assignments) = self.check(
+                    assignments,
+                    ty_ctx,
+                    &ctx.restrict(&expr.free_vars()),
+                    expr,
+                    actual_ty,
+                )?;
 
-                Ok((expr_cs, expr_eff))
+                Ok((expr_eff, expr_cs, assignments))
             }
             Expr::TyAbs {
                 quantification,
@@ -1159,44 +1244,34 @@ impl TypeChecker {
                     ));
                 }
 
-                // Uvars with ids smaller or equal are generated
-                // outside of the type abstraction, therefore assigning
-                // a polymorphic variable to those would be wrong.
                 let nonlocal_uvar_limit = self.uvar_counter;
 
                 let ty_ctx =
                     ty_ctx.extend_qualifications(qualifications.into_iter().map(|q| q.val));
-                let (cs, eff) = self.check(&ctx, &ty_ctx, expr, expr_ty)?;
+                let (eff, cs, mut assignments) =
+                    self.check(assignments, &ty_ctx, &ctx, expr, expr_ty)?;
 
-                let (cs_local, cs_other, uvars) =
-                    Self::partition_constraints(cs, &local_poly_bindings);
-                // println!("Local constraints:");
-                // for (ty1, ty2) in cs_local.equivalences.iter() {
-                //     println!("{} = {}", pretty_def(&ty1), pretty_def(&ty2));
-                // }
-                // println!("Other constraints:");
-                // for (ty1, ty2) in cs_other.equivalences.iter() {
-                //     println!("{} = {}", pretty_def(&ty1), pretty_def(&ty2));
-                // }
+                // Solve all constraints locally, propagate non-local assignments
+                let (cs, more_assignments) = cs.subst(&assignments).solve()?;
+                self.check_equivalence(&cs, &ty_ctx.vars)?;
 
-                // Check if any unification in local constraints is outside of limits
-                if let Some(uvar) = uvars.iter().find(|uvar| **uvar < nonlocal_uvar_limit) {
-                    return Err(TypeError::PolyVarEscapesViaUnification {
-                        uvar_id: *uvar,
-                        constraints: cs_local,
-                        span: quantification.span.clone(),
-                    });
-                }
-                let (cs_local, _) = cs_local.solve()?;
-                self.check_equivalence(&cs_local, &ty_ctx.vars)?;
-                Ok((cs_other, eff))
+                let nonlocal_assignments = Self::check_assignments_escape(
+                    more_assignments,
+                    nonlocal_uvar_limit,
+                    &local_poly_bindings,
+                    quantification.span.clone(),
+                )?;
+
+                assignments.extend(nonlocal_assignments);
+                Ok((eff, Constraints::empty(), assignments))
             }
             _ => {
-                let (inferred_ty, mut cs, eff) = self.infer(ctx, ty_ctx, e)?;
+                let (inferred_ty, eff, mut cs, assignments) =
+                    self.infer(assignments, ty_ctx, ctx, e)?;
                 if !inferred_ty.sem_eq(&expected_ty) {
                     cs.equivalences.add((inferred_ty, expected_ty.clone()));
                 }
-                Ok((cs, eff))
+                Ok((eff, cs, assignments))
             }
         }
     }
@@ -1279,7 +1354,7 @@ impl TypeChecker {
 
     fn check_mobility(
         &self,
-        expr: &SExpr,
+        _expr: &SExpr,
         ctx: &Ctx,
         ty_ctx: &TypeCtx,
         cs: &mut Constraints,
@@ -1299,66 +1374,36 @@ impl TypeChecker {
         Ok(())
     }
 
-    fn partition_constraints(
-        constraints: Constraints,
-        local_poly_bindings: &HashSet<PVarId>,
-    ) -> (Constraints, Constraints, HashSet<UVarId>) {
-        let (mut eqs_local, mut eqs_other): (Equivalences, Equivalences) = constraints
-            .equivalences
+    /// Nonlocal assignments are the ones that assign to an outer
+    /// unification variable
+    ///
+    /// - `nonlocal_uvar_limit` Uvars with ids smaller or equal are generated
+    /// outside of the type abstraction, therefore assigning
+    /// a polymorphic variable to those would be wrong.
+    fn check_assignments_escape(
+        assignments: Assignments,
+        nonlocal_uvar_limit: usize,
+        local_pvars: &HashSet<String>,
+        span: Span,
+    ) -> Result<Assignments, TypeError> {
+        let non_local_assignments = assignments
             .into_iter()
-            .partition(|(ty1, ty2)| {
-                ty1.poly_variables()
-                    .any(|v| local_poly_bindings.contains(&v))
-                    || ty2
-                        .poly_variables()
-                        .any(|v| local_poly_bindings.contains(&v))
-            });
-        // Keep partitioning until fixpoint reached under transitive closure
-        let uvars = loop {
-            let uvars: HashSet<UVarId> =
-                eqs_local.iter().fold(HashSet::new(), |uvars, (ty1, ty2)| {
-                    union(
-                        union(uvars, ty1.val.unification_variables()),
-                        ty2.val.unification_variables(),
-                    )
-                });
+            .filter(|(uvar_id, _)| *uvar_id < nonlocal_uvar_limit);
 
-            let (more_eqs_local, other): (HashSet<_>, HashSet<_>) =
-                eqs_other.into_iter().partition(|(ty1, ty2)| {
-                    ty1.unification_variables()
-                        .intersection(&uvars)
-                        .any(|_| true)
-                        || ty2
-                            .unification_variables()
-                            .intersection(&uvars)
-                            .any(|_| true)
-                });
-
-            eqs_other = Equivalences::from(other);
-            if more_eqs_local.is_empty() {
-                break uvars;
-            } else {
-                eqs_local.extend(more_eqs_local);
-            }
-        };
-
-        let (mobs_local, mobs_other): (Mobilities, Mobilities) =
-            constraints.mobilities.into_iter().partition(|ty| {
-                ty.poly_variables()
-                    .any(|v| local_poly_bindings.contains(&v))
-            });
-
-        (
-            Constraints {
-                equivalences: eqs_local,
-                mobilities: mobs_local,
-            },
-            Constraints {
-                equivalences: eqs_other,
-                mobilities: mobs_other,
-            },
-            uvars,
-        )
+        non_local_assignments
+            .map(|(uvar, ty)| {
+                let pvars: HashSet<_> = ty.poly_variables().collect();
+                if let Some(pvar) = pvars.into_iter().find(|v| local_pvars.contains(v)) {
+                    Err(TypeError::PolyVarEscapesViaUnification {
+                        var: pvar.clone(),
+                        assignment: (uvar, ty),
+                        span: span.clone(),
+                    })
+                } else {
+                    Ok((uvar, ty))
+                }
+            })
+            .collect()
     }
 }
 

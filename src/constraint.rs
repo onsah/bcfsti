@@ -7,7 +7,7 @@ use crate::{
     type_context::TypeCtx,
     util::{
         pretty::{Pretty, PrettyEnv},
-        span::{fake_span, Spanned},
+        span::{Spanned, fake_span},
     },
 };
 
@@ -47,7 +47,8 @@ impl Eq for Equivalences {}
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct Mobilities(Vec<SType>);
 
-type Assignments = HashMap<UVarId, Type>;
+/// Assigned types can be assumed to contain no unification variables.
+pub type Assignments = HashMap<UVarId, Type>;
 
 impl Constraints {
     pub fn empty() -> Constraints {
@@ -317,7 +318,7 @@ impl Equivalences {
                     Self::unify(ty_ctx, &body1.val, &body2.val).map_err(|_| SolveError::Check)
                 }
                 (Type::UVar(id), other) | (other, Type::UVar(id))
-                    if !matches!(other, Type::UVar(_)) =>
+                    if other.unification_variables().is_empty() =>
                 {
                     Ok(HashMap::from([(*id, other.clone())]))
                 }
@@ -377,6 +378,10 @@ impl Mobilities {
             }
         }
         Ok(())
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &SType> {
+        self.0.iter()
     }
 }
 

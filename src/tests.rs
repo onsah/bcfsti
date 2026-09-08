@@ -24,7 +24,7 @@ mod typechecker_tests {
     use std::assert_matches;
 
     use crate::{
-        constraint::Constraints,
+        constraint::{Constraints, Equivalences},
         error_reporting::IErr,
         session_type,
         syntax::{Eff, Expr, Mult, Type},
@@ -685,6 +685,37 @@ mod typechecker_tests {
 
         let res = typecheck(src, false);
         assert_matches!(res, Err(IErr::Typing(TypeError::UnrArrMustBeMobile(_, _,))));
+    }
+
+    #[test]
+    fn propagate_nonlocal_constraint() {
+        let src = r#"
+            let
+                foo : !Int -[m u 1]-> Unit
+                foo c =
+                    let c1, c2 = lsplit[Skip] c in
+                    discard c1;
+                    let
+                        bar[b: Type]. unr 'b : 'b -[s p 1]-> Unit
+                        bar x =
+                            send[String] "foo" c2;
+                            unit
+                    in
+                        bar[Unit] unit
+            in
+            unit
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Unit, _, _, Eff::No)));
+        let Ok((_, _, _, cs, _)) = res else {
+            unreachable!()
+        };
+        let eqs: Vec<_> = cs.equivalences.into_iter().collect();
+        assert_eq!(eqs.len(), 1);
+        let (ty1, ty2) = eqs.get(0).unwrap();
+        assert!(ty1.sem_eq(&session_type! { !Int }.val));
+        assert!(ty2.sem_eq(&session_type! { Skip; !String }.val));
     }
 }
 
