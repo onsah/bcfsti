@@ -219,7 +219,7 @@ impl TypeChecker {
                 Ok((
                     body_ty,
                     Eff::lub(expr_eff, body_eff),
-                    expr_constraints.join(body_constraints),
+                    expr_constraints.join(body_constraints).subst(&assignments),
                     assignments,
                 ))
             }
@@ -247,7 +247,7 @@ impl TypeChecker {
                 Ok((
                     e2_ty,
                     Eff::lub(e1_eff, e2_eff),
-                    e1_constraints.join(e2_constraints),
+                    e1_constraints.join(e2_constraints).subst(&assignments),
                     assignments,
                 ))
             }
@@ -281,7 +281,7 @@ impl TypeChecker {
                 Ok((
                     fake_span(Type::Unit),
                     Eff::Yes,
-                    val_cs.join(chan_cs),
+                    val_cs.join(chan_cs).subst(&assignments),
                     assignments,
                 ))
             }
@@ -303,7 +303,7 @@ impl TypeChecker {
                     ));
                 }
 
-                Ok((ty.clone(), Eff::Yes, chan_cs, assignments))
+                Ok((ty.clone(), Eff::Yes, chan_cs.subst(&assignments), assignments))
             }
             Expr::Fork(func) => {
                 let body_ctx = ctx.restrict(&func.free_vars());
@@ -326,7 +326,7 @@ impl TypeChecker {
                 let (body_eff, body_cs, assignments) =
                     self.check(assignments, ty_ctx, &body_ctx, func, &expected_body_ty)?;
 
-                Ok((fake_span(Type::Unit), body_eff, body_cs, assignments))
+                Ok((fake_span(Type::Unit), body_eff, body_cs.subst(&assignments), assignments))
             }
             Expr::Discard(chan) => {
                 let chan_ctx = ctx.restrict(&chan.free_vars());
@@ -341,7 +341,7 @@ impl TypeChecker {
                 let (chan_eff, chan_cs, assignments) =
                     self.check(assignments, ty_ctx, &chan_ctx, chan, &fake_span(Type::Skip))?;
 
-                Ok((fake_span(Type::Unit), chan_eff, chan_cs, assignments))
+                Ok((fake_span(Type::Unit), chan_eff, chan_cs.subst(&assignments), assignments))
             }
             Expr::BorrowEnd(op, chan) => {
                 let chan_ctx = ctx.restrict(&chan.free_vars());
@@ -357,7 +357,7 @@ impl TypeChecker {
                 let (chan_eff, chan_cs, assignments) =
                     self.check(assignments, ty_ctx, &chan_ctx, chan, &expected_ty)?;
 
-                Ok((fake_span(Type::Unit), chan_eff, chan_cs, assignments))
+                Ok((fake_span(Type::Unit), chan_eff, chan_cs.subst(&assignments), assignments))
             }
             Expr::End(op, chan) => {
                 let chan_ctx = ctx.restrict(&chan.free_vars());
@@ -373,7 +373,7 @@ impl TypeChecker {
                 let (chan_eff, chan_cs, assignments) =
                     self.check(assignments, ty_ctx, &chan_ctx, chan, &expected_ty)?;
 
-                Ok((fake_span(Type::Unit), chan_eff, chan_cs, assignments))
+                Ok((fake_span(Type::Unit), chan_eff, chan_cs.subst(&assignments), assignments))
             }
             Expr::LSplit(prefix_session, chan) => {
                 kinding::check(ty_ctx, &self.alias_env, prefix_session, Kind::Session)?;
@@ -399,7 +399,7 @@ impl TypeChecker {
                     second: Box::new(fake_span(uvar.val)),
                 };
 
-                Ok((fake_span(ret_ty), chan_eff, chan_cs, assignments))
+                Ok((fake_span(ret_ty), chan_eff, chan_cs.subst(&assignments), assignments))
             }
             Expr::RSplit(prefix_session, chan) => {
                 kinding::check(ty_ctx, &self.alias_env, prefix_session, Kind::Session)?;
@@ -425,7 +425,7 @@ impl TypeChecker {
                     second: Box::new(fake_span(session_type! { Acq; uvar.clone() }.val)),
                 };
 
-                Ok((fake_span(ret_ty), chan_eff, chan_cs, assignments))
+                Ok((fake_span(ret_ty), chan_eff, chan_cs.subst(&assignments), assignments))
             }
             Expr::App(abs, arg) => {
                 let abs_ctx = ctx.restrict(&abs.free_vars());
@@ -489,7 +489,7 @@ impl TypeChecker {
                 Ok((
                     ret,
                     Eff::lub(*eff, Eff::lub(abs_eff, arg_eff)),
-                    abs_cs.join(arg_cs),
+                    abs_cs.join(arg_cs).subst(&assignments),
                     assignments,
                 ))
             }
@@ -513,7 +513,7 @@ impl TypeChecker {
                 Ok((
                     body_ty,
                     Eff::lub(var_eff, body_eff),
-                    var_cs.join(body_cs),
+                    var_cs.join(body_cs).subst(&assignments),
                     assignments,
                 ))
             }
@@ -568,7 +568,7 @@ impl TypeChecker {
                 Ok((
                     ty,
                     Eff::lub(var_eff, let_eff),
-                    var_cs.join(let_cs),
+                    var_cs.join(let_cs).subst(&assignments),
                     assignments,
                 ))
             }
@@ -648,7 +648,7 @@ impl TypeChecker {
                         cs.equivalences.add((ty1.clone(), ty2.clone()));
                     }
                 }
-                Ok((expr_ty, expr_eff, cs, assignments))
+                Ok((expr_ty, expr_eff, cs.subst(&assignments), assignments))
             }
             Expr::Select(label, chan_expr) => {
                 let chan_ctx = ctx.restrict(&chan_expr.free_vars());
@@ -693,7 +693,7 @@ impl TypeChecker {
                         chan_ty.clone(),
                     ))?;
 
-                Ok((fake_span(label_ty.val), Eff::Yes, chan_cs, assignments))
+                Ok((fake_span(label_ty.val), Eff::Yes, chan_cs.subst(&assignments), assignments))
             }
             Expr::Branch(chan_expr) => {
                 let chan_ctx = ctx.restrict(&chan_expr.free_vars());
@@ -722,7 +722,7 @@ impl TypeChecker {
                 };
 
                 let ty = Type::Variant(branches);
-                Ok((fake_span(ty), Eff::Yes, chan_cs, assignments))
+                Ok((fake_span(ty), Eff::Yes, chan_cs.subst(&assignments), assignments))
             }
             Expr::Ann(expr, ty) => {
                 let ty = normalise(ty_ctx, &self.alias_env, ty)?;
@@ -734,7 +734,7 @@ impl TypeChecker {
                     &ty,
                 )?;
 
-                Ok((ty, expr_eff, expr_cs, assignments))
+                Ok((ty, expr_eff, expr_cs.subst(&assignments), assignments))
             }
             Expr::Op1(op1, expr) => {
                 let (expr_ty, expr_eff, expr_cs, assignments) =
@@ -759,7 +759,7 @@ impl TypeChecker {
                     (Op1::ToStr, _) => Type::String,
                     (Op1::Print, _) => Type::Unit,
                 };
-                Ok((fake_span(ty), expr_eff, expr_cs, assignments))
+                Ok((fake_span(ty), expr_eff, expr_cs.subst(&assignments), assignments))
             }
             Expr::Op2(op2, expr1, expr2) => {
                 let expr1_ctx = ctx.restrict(&expr1.free_vars());
@@ -829,7 +829,7 @@ impl TypeChecker {
                 Ok((
                     fake_span(ty),
                     Eff::lub(expr1_eff, expr2_eff),
-                    expr1_cs.join(expr2_cs),
+                    expr1_cs.join(expr2_cs).subst(&assignments),
                     assignments,
                 ))
             }
@@ -881,7 +881,7 @@ impl TypeChecker {
                 Ok((
                     then_ty,
                     Eff::lub(cond_eff, Eff::lub(then_eff, else_eff)),
-                    cs,
+                    cs.subst(&assignments),
                     assignments,
                 ))
             }
@@ -929,7 +929,7 @@ impl TypeChecker {
                 Self::check_qualifications(ty_ctx, substituted_qualifications.iter())?;
 
                 let app_ty = fake_span(abs_ty.subst_poly(&bindings));
-                Ok((app_ty, expr_eff, expr_cs, assignments))
+                Ok((app_ty, expr_eff, expr_cs.subst(&assignments), assignments))
             }
             Expr::TyAbs { .. } => Err(TypeError::TypeAnnotationMissing(e.clone())),
         }?;
@@ -1025,7 +1025,7 @@ impl TypeChecker {
         let (body_ty, body_eff, body_cs, assignments) =
             self.infer(assignments, ty_ctx, &body_ctx, body_expr)?;
 
-        Ok((body_ty, body_eff, body_cs, assignments))
+        Ok((body_ty, body_eff, body_cs.subst(&assignments), assignments))
     }
 
     fn check(
@@ -1089,7 +1089,7 @@ impl TypeChecker {
                     ));
                 }
 
-                Ok((Eff::No, ctx_cs.join(body_cs), assignments))
+                Ok((Eff::No, ctx_cs.join(body_cs).subst(&assignments), assignments))
             }
             Expr::Pair(first, second) => {
                 let first_ctx = ctx.restrict(&first.free_vars());
@@ -1147,7 +1147,7 @@ impl TypeChecker {
 
                 Ok((
                     Eff::lub(first_eff, second_eff),
-                    first_cs.join(second_cs),
+                    first_cs.join(second_cs).subst(&assignments),
                     assignments,
                 ))
             }
@@ -1177,7 +1177,7 @@ impl TypeChecker {
                     actual_ty,
                 )?;
 
-                Ok((expr_eff, expr_cs, assignments))
+                Ok((expr_eff, expr_cs.subst(&assignments), assignments))
             }
             Expr::TyAbs {
                 quantification,
@@ -1271,7 +1271,7 @@ impl TypeChecker {
                 if !inferred_ty.sem_eq(&expected_ty) {
                     cs.equivalences.add((inferred_ty, expected_ty.clone()));
                 }
-                Ok((eff, cs, assignments))
+                Ok((eff, cs.subst(&assignments), assignments))
             }
         }
     }

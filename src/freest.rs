@@ -387,9 +387,17 @@ mod tests {
                         .prop_map(Box::new),
                     (
                         session_op(),
-                        prop::collection::vec((choice_label(), inner.clone()), 1..3)
+                        (
+                            prop::collection::hash_set(choice_label(), 1..3),
+                            prop::collection::hash_set(inner.clone(), 1..3)
+                        )
                     )
-                        .prop_map(|(dir, branches)| { FreestType::Choice { dir, branches } })
+                        .prop_map(|(dir, (labels, tys))| {
+                            FreestType::Choice {
+                                dir,
+                                branches: labels.into_iter().zip(tys.into_iter()).collect(),
+                            }
+                        })
                         .prop_map(Box::new)
                 ]
             },

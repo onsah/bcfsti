@@ -1,0 +1,17 @@
+let
+    foo : !Int -[m u 1]-> Unit
+    foo c =
+        let c1, c2 = lsplit[Skip] c in
+        discard c1;
+        if true then
+            send[Int] 42 c2
+        else
+            let
+                bar[a: Type]. unr 'a : 'a -[s p 1]-> Unit
+                bar x =
+                    send[String] "hi" c2
+            in
+                bar[Unit] unit;
+        unit
+in
+unit
