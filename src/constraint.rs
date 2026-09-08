@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    context::Ctx,
-    syntax::{PVarId, SType, Type, UVarId},
+    syntax::{SType, Type, UVarId},
     type_checker::TypeError,
     type_context::TypeCtx,
     util::{
@@ -152,26 +151,6 @@ impl Equivalences {
 
     pub fn into_iter(self) -> impl Iterator<Item = (SType, SType)> {
         self.0.into_iter()
-    }
-
-    /// Partition equivalences into ones that contains polymorphic variable from
-    /// `pvars` vs ones that don't
-    pub fn partition(self, pvars: &HashSet<PVarId>) -> (Equivalences, Equivalences) {
-        let (with_pvars, without_pvars) = self.into_iter().partition(|(ty1, ty2)| {
-            ty1.val
-                .poly_variables()
-                .collect::<HashSet<_>>()
-                .is_subset(&pvars)
-                || ty2
-                    .poly_variables()
-                    .collect::<HashSet<_>>()
-                    .is_subset(&pvars)
-        });
-
-        (
-            Equivalences::from(with_pvars),
-            Equivalences::from(without_pvars),
-        )
     }
 
     fn solve(self, ty_ctx: &TypeCtx) -> (Assignments, Equivalences) {
@@ -494,12 +473,6 @@ fn subst(ty: SType, assignments: &Assignments) -> SType {
         Type::String => Type::String,
     };
     Spanned::new(val, span)
-}
-
-fn subst_ctx(ctx: &mut Ctx, assignments: &Assignments) {
-    ctx.map_binds_mut(&mut |_, ty| {
-        *ty = subst(fake_span(ty.clone()), assignments).val;
-    })
 }
 
 #[cfg(test)]
