@@ -6,7 +6,7 @@ use crate::{
     type_context::TypeCtx,
     util::{
         pretty::{Pretty, PrettyEnv},
-        span::{Spanned, fake_span},
+        span::{fake_span, Spanned},
     },
 };
 
@@ -47,7 +47,43 @@ impl Eq for Equivalences {}
 pub struct Mobilities(Vec<SType>);
 
 /// Assigned types can be assumed to contain no unification variables.
-pub type Assignments = HashMap<UVarId, Type>;
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Assignments(HashMap<UVarId, Type>);
+
+impl Assignments {
+    pub fn new() -> Assignments {
+        Assignments(HashMap::new())
+    }
+
+    pub fn get(&self, id: &UVarId) -> Option<&Type> {
+        self.0.get(id)
+    }
+
+    pub fn insert(&mut self, id: UVarId, ty: Type) -> Option<Type> {
+        self.0.insert(id, ty)
+    }
+}
+
+impl Extend<(UVarId, Type)> for Assignments {
+    fn extend<T: IntoIterator<Item = (UVarId, Type)>>(&mut self, iter: T) {
+        self.0.extend(iter);
+    }
+}
+
+impl FromIterator<(UVarId, Type)> for Assignments {
+    fn from_iter<T: IntoIterator<Item = (UVarId, Type)>>(iter: T) -> Self {
+        Assignments(iter.into_iter().collect())
+    }
+}
+
+impl IntoIterator for Assignments {
+    type Item = (UVarId, Type);
+    type IntoIter = std::collections::hash_map::IntoIter<UVarId, Type>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
 
 impl Constraints {
     pub fn empty() -> Constraints {
@@ -193,7 +229,7 @@ impl Equivalences {
     /// When a unification variable on one side is found, it's converted to an assignment.
     fn unify(ty_ctx: &TypeCtx, ty1: &Type, ty2: &Type) -> Result<Assignments, SolveError> {
         if ty1.sem_eq(ty2) {
-            Ok(HashMap::new())
+            Ok(Assignments::new())
         } else {
             match (ty1, ty2) {
                 (
@@ -250,10 +286,12 @@ impl Equivalences {
                             .collect::<Vec<(SType, SType)>>(),
                     ))
                 }
-                (Type::Skip, Type::Skip) => Ok(HashMap::new()),
-                (Type::End(op1), Type::End(op2)) if op1 == op2 => Ok(HashMap::new()),
-                (Type::BorrowEnd(op1), Type::BorrowEnd(op2)) if op1 == op2 => Ok(HashMap::new()),
-                (Type::Var(id1), Type::Var(id2)) if id1 == id2 => Ok(HashMap::new()),
+                (Type::Skip, Type::Skip) => Ok(Assignments::new()),
+                (Type::End(op1), Type::End(op2)) if op1 == op2 => Ok(Assignments::new()),
+                (Type::BorrowEnd(op1), Type::BorrowEnd(op2)) if op1 == op2 => {
+                    Ok(Assignments::new())
+                }
+                (Type::Var(id1), Type::Var(id2)) if id1 == id2 => Ok(Assignments::new()),
                 (
                     Type::Semi {
                         first: first1,
@@ -276,7 +314,7 @@ impl Equivalences {
                         return Err(SolveError::Check);
                     }
 
-                    let mut assignments = HashMap::new();
+                    let mut assignments = Assignments::new();
                     for (label, branch1) in branches1.iter() {
                         let Some(branch2) = branches2.iter().find_map(|(label_, branch)| {
                             if &label_.val == &label.val {
@@ -299,7 +337,9 @@ impl Equivalences {
                 (Type::UVar(id), other) | (other, Type::UVar(id))
                     if other.unification_variables().is_empty() =>
                 {
-                    Ok(HashMap::from([(*id, other.clone())]))
+                    let mut assignments = Assignments::new();
+                    assignments.insert(*id, other.clone());
+                    Ok(assignments)
                 }
                 _ => Err(SolveError::Check),
             }
