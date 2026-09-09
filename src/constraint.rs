@@ -1,12 +1,15 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet, hash_map::IntoIter},
+    iter::FilterMap,
+};
 
 use crate::{
-    syntax::{SType, Type, UVarId},
+    syntax::{PVarId, SType, Type, UVarId},
     type_checker::TypeError,
     type_context::TypeCtx,
     util::{
         pretty::{Pretty, PrettyEnv},
-        span::{fake_span, Spanned},
+        span::Spanned,
     },
 };
 
@@ -48,40 +51,80 @@ pub struct Mobilities(Vec<SType>);
 
 /// Assigned types can be assumed to contain no unification variables.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Assignments(HashMap<UVarId, Type>);
+pub struct Assignments(HashMap<UVarId, Option<Type>>);
 
 impl Assignments {
-    pub fn new() -> Assignments {
+    pub(crate) fn new() -> Assignments {
         Assignments(HashMap::new())
     }
 
-    pub fn get(&self, id: &UVarId) -> Option<&Type> {
-        self.0.get(id)
+    pub(crate) fn get(&self, id: &UVarId) -> Option<&Type> {
+        self.0.get(id).map(|opt| opt.as_ref()).flatten()
     }
 
-    pub fn insert(&mut self, id: UVarId, ty: Type) -> Option<Type> {
-        self.0.insert(id, ty)
+    pub(crate) fn insert(&mut self, id: UVarId, ty: Type) {
+        match self.0.get(&id) {
+            Some(Some(_)) => panic!("Can't override assignment of {id}"),
+            None | Some(None) => {
+                self.0.insert(id, Some(ty));
+            }
+        }
+    }
+
+    pub(crate) fn insert_empty(&mut self, id: UVarId) {
+        match self.0.get(&id) {
+            Some(Some(_)) => panic!("Can't override assignment of {id}"),
+            Some(None) => (),
+            None => {
+                self.0.insert(id, None);
+            }
+        }
+    }
+
+    pub(crate) fn domain(&self) -> HashSet<UVarId> {
+        self.0.keys().map(|uvar| *uvar).collect()
+    }
+
+    /// Domain restricted to assignment that at least of the pvars occurs
+    pub(crate) fn domain_restricted(&self, pvars: &HashSet<PVarId>) -> HashSet<UVarId> {
+        self.0
+            .iter()
+            .filter_map(|(uvar, ty)| ty.as_ref().map(|ty| (uvar, ty)))
+            .filter(|(_, ty)| ty.poly_variables().any(|v| pvars.contains(&v)))
+            .map(|(uvar, _)| *uvar)
+            .collect()
     }
 }
 
 impl Extend<(UVarId, Type)> for Assignments {
     fn extend<T: IntoIterator<Item = (UVarId, Type)>>(&mut self, iter: T) {
-        self.0.extend(iter);
-    }
-}
-
-impl FromIterator<(UVarId, Type)> for Assignments {
-    fn from_iter<T: IntoIterator<Item = (UVarId, Type)>>(iter: T) -> Self {
-        Assignments(iter.into_iter().collect())
+        self.0
+            .extend(iter.into_iter().map(|(uvar, ty)| (uvar, Some(ty))));
     }
 }
 
 impl IntoIterator for Assignments {
     type Item = (UVarId, Type);
-    type IntoIter = std::collections::hash_map::IntoIter<UVarId, Type>;
+    // Looks horrible but impl trait in associated types is unstable...
+    type IntoIter = FilterMap<
+        IntoIter<usize, Option<Type>>,
+        fn((usize, Option<Type>)) -> Option<(usize, Type)>,
+    >;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
+        self.0
+            .into_iter()
+            .filter_map(|(uvar, ty)| ty.map(|ty| (uvar, ty)))
+    }
+}
+
+impl FromIterator<(UVarId, Type)> for Assignments {
+    fn from_iter<T: IntoIterator<Item = (UVarId, Type)>>(iter: T) -> Self {
+        Assignments(
+            iter.into_iter()
+                .map(|(uvar, ty)| (uvar, Some(ty)))
+                .collect(),
+        )
     }
 }
 

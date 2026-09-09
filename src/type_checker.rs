@@ -85,7 +85,6 @@ pub enum TypeError {
     },
     // TODO: add polymorphic variables
     PolyVarEscapesViaUnification {
-        var: PVarId,
         assignment: (UVarId, Type),
         span: Span,
     },
@@ -303,7 +302,12 @@ impl TypeChecker {
                     ));
                 }
 
-                Ok((ty.clone(), Eff::Yes, chan_cs.subst(&assignments), assignments))
+                Ok((
+                    ty.clone(),
+                    Eff::Yes,
+                    chan_cs.subst(&assignments),
+                    assignments,
+                ))
             }
             Expr::Fork(func) => {
                 let body_ctx = ctx.restrict(&func.free_vars());
@@ -326,7 +330,12 @@ impl TypeChecker {
                 let (body_eff, body_cs, assignments) =
                     self.check(assignments, ty_ctx, &body_ctx, func, &expected_body_ty)?;
 
-                Ok((fake_span(Type::Unit), body_eff, body_cs.subst(&assignments), assignments))
+                Ok((
+                    fake_span(Type::Unit),
+                    body_eff,
+                    body_cs.subst(&assignments),
+                    assignments,
+                ))
             }
             Expr::Discard(chan) => {
                 let chan_ctx = ctx.restrict(&chan.free_vars());
@@ -341,7 +350,12 @@ impl TypeChecker {
                 let (chan_eff, chan_cs, assignments) =
                     self.check(assignments, ty_ctx, &chan_ctx, chan, &fake_span(Type::Skip))?;
 
-                Ok((fake_span(Type::Unit), chan_eff, chan_cs.subst(&assignments), assignments))
+                Ok((
+                    fake_span(Type::Unit),
+                    chan_eff,
+                    chan_cs.subst(&assignments),
+                    assignments,
+                ))
             }
             Expr::BorrowEnd(op, chan) => {
                 let chan_ctx = ctx.restrict(&chan.free_vars());
@@ -357,7 +371,12 @@ impl TypeChecker {
                 let (chan_eff, chan_cs, assignments) =
                     self.check(assignments, ty_ctx, &chan_ctx, chan, &expected_ty)?;
 
-                Ok((fake_span(Type::Unit), chan_eff, chan_cs.subst(&assignments), assignments))
+                Ok((
+                    fake_span(Type::Unit),
+                    chan_eff,
+                    chan_cs.subst(&assignments),
+                    assignments,
+                ))
             }
             Expr::End(op, chan) => {
                 let chan_ctx = ctx.restrict(&chan.free_vars());
@@ -373,7 +392,12 @@ impl TypeChecker {
                 let (chan_eff, chan_cs, assignments) =
                     self.check(assignments, ty_ctx, &chan_ctx, chan, &expected_ty)?;
 
-                Ok((fake_span(Type::Unit), chan_eff, chan_cs.subst(&assignments), assignments))
+                Ok((
+                    fake_span(Type::Unit),
+                    chan_eff,
+                    chan_cs.subst(&assignments),
+                    assignments,
+                ))
             }
             Expr::LSplit(prefix_session, chan) => {
                 kinding::check(ty_ctx, &self.alias_env, prefix_session, Kind::Session)?;
@@ -387,11 +411,14 @@ impl TypeChecker {
                     ));
                 }
 
-                let uvar = self.new_uvar();
+                let uvar_id = self.new_uvar();
+                let uvar = fake_span(Type::UVar(uvar_id));
                 let expected_chan_ty =
                     fake_span(session_type! { prefix_session.clone(); uvar.clone() }.val);
-                let (chan_eff, chan_cs, assignments) =
+                let (chan_eff, chan_cs, mut assignments) =
                     self.check(assignments, ty_ctx, chan_ctx, chan, &expected_chan_ty)?;
+
+                assignments.insert_empty(uvar_id);
 
                 let ret_ty = Type::Prod {
                     mult: fake_span(Mult::OrdL),
@@ -399,7 +426,12 @@ impl TypeChecker {
                     second: Box::new(fake_span(uvar.val)),
                 };
 
-                Ok((fake_span(ret_ty), chan_eff, chan_cs.subst(&assignments), assignments))
+                Ok((
+                    fake_span(ret_ty),
+                    chan_eff,
+                    chan_cs.subst(&assignments),
+                    assignments,
+                ))
             }
             Expr::RSplit(prefix_session, chan) => {
                 kinding::check(ty_ctx, &self.alias_env, prefix_session, Kind::Session)?;
@@ -413,11 +445,14 @@ impl TypeChecker {
                     ));
                 }
 
-                let uvar = self.new_uvar();
+                let uvar_id = self.new_uvar();
+                let uvar = fake_span(Type::UVar(uvar_id));
                 let expected_chan_ty =
                     fake_span(session_type! { prefix_session.clone(); uvar.clone() }.val);
-                let (chan_eff, chan_cs, assignments) =
+                let (chan_eff, chan_cs, mut assignments) =
                     self.check(assignments, ty_ctx, chan_ctx, chan, &expected_chan_ty)?;
+
+                assignments.insert_empty(uvar_id);
 
                 let ret_ty = Type::Prod {
                     mult: fake_span(Mult::Lin),
@@ -425,7 +460,12 @@ impl TypeChecker {
                     second: Box::new(fake_span(session_type! { Acq; uvar.clone() }.val)),
                 };
 
-                Ok((fake_span(ret_ty), chan_eff, chan_cs.subst(&assignments), assignments))
+                Ok((
+                    fake_span(ret_ty),
+                    chan_eff,
+                    chan_cs.subst(&assignments),
+                    assignments,
+                ))
             }
             Expr::App(abs, arg) => {
                 let abs_ctx = ctx.restrict(&abs.free_vars());
@@ -693,7 +733,12 @@ impl TypeChecker {
                         chan_ty.clone(),
                     ))?;
 
-                Ok((fake_span(label_ty.val), Eff::Yes, chan_cs.subst(&assignments), assignments))
+                Ok((
+                    fake_span(label_ty.val),
+                    Eff::Yes,
+                    chan_cs.subst(&assignments),
+                    assignments,
+                ))
             }
             Expr::Branch(chan_expr) => {
                 let chan_ctx = ctx.restrict(&chan_expr.free_vars());
@@ -722,7 +767,12 @@ impl TypeChecker {
                 };
 
                 let ty = Type::Variant(branches);
-                Ok((fake_span(ty), Eff::Yes, chan_cs.subst(&assignments), assignments))
+                Ok((
+                    fake_span(ty),
+                    Eff::Yes,
+                    chan_cs.subst(&assignments),
+                    assignments,
+                ))
             }
             Expr::Ann(expr, ty) => {
                 let ty = normalise(ty_ctx, &self.alias_env, ty)?;
@@ -759,7 +809,12 @@ impl TypeChecker {
                     (Op1::ToStr, _) => Type::String,
                     (Op1::Print, _) => Type::Unit,
                 };
-                Ok((fake_span(ty), expr_eff, expr_cs.subst(&assignments), assignments))
+                Ok((
+                    fake_span(ty),
+                    expr_eff,
+                    expr_cs.subst(&assignments),
+                    assignments,
+                ))
             }
             Expr::Op2(op2, expr1, expr2) => {
                 let expr1_ctx = ctx.restrict(&expr1.free_vars());
@@ -1089,7 +1144,11 @@ impl TypeChecker {
                     ));
                 }
 
-                Ok((Eff::No, ctx_cs.join(body_cs).subst(&assignments), assignments))
+                Ok((
+                    Eff::No,
+                    ctx_cs.join(body_cs).subst(&assignments),
+                    assignments,
+                ))
             }
             Expr::Pair(first, second) => {
                 let first_ctx = ctx.restrict(&first.free_vars());
@@ -1244,7 +1303,8 @@ impl TypeChecker {
                     ));
                 }
 
-                let nonlocal_uvar_limit = self.uvar_counter;
+                // let nonlocal_uvar_limit = self.uvar_counter;
+                let nonlocal_uvars = assignments.domain();
 
                 let ty_ctx =
                     ty_ctx.extend_qualifications(qualifications.into_iter().map(|q| q.val));
@@ -1257,7 +1317,7 @@ impl TypeChecker {
 
                 let nonlocal_assignments = Self::check_assignments_escape(
                     more_assignments,
-                    nonlocal_uvar_limit,
+                    &nonlocal_uvars,
                     &local_poly_bindings,
                     quantification.span.clone(),
                 )?;
@@ -1328,10 +1388,10 @@ impl TypeChecker {
         Ok(())
     }
 
-    fn new_uvar(&mut self) -> SType {
+    fn new_uvar(&mut self) -> UVarId {
         let id = self.uvar_counter;
         self.uvar_counter += 1;
-        fake_span(Type::UVar(id))
+        id
     }
 
     fn check_equivalence(
@@ -1376,26 +1436,21 @@ impl TypeChecker {
 
     /// Nonlocal assignments are the ones that assign to an outer
     /// unification variable
-    ///
-    /// - `nonlocal_uvar_limit` Uvars with ids smaller or equal are generated
-    /// outside of the type abstraction, therefore assigning
-    /// a polymorphic variable to those would be wrong.
     fn check_assignments_escape(
         assignments: Assignments,
-        nonlocal_uvar_limit: usize,
-        local_pvars: &HashSet<String>,
+        nonlocal_uvars: &HashSet<UVarId>,
+        local_pvars: &HashSet<PVarId>,
         span: Span,
     ) -> Result<Assignments, TypeError> {
+        let pvar_restricted_uvars = assignments.domain_restricted(local_pvars);
         let non_local_assignments = assignments
             .into_iter()
-            .filter(|(uvar_id, _)| *uvar_id < nonlocal_uvar_limit);
+            .filter(|(uvar_id, _)| nonlocal_uvars.contains(uvar_id));
 
         non_local_assignments
             .map(|(uvar, ty)| {
-                let pvars: HashSet<_> = ty.poly_variables().collect();
-                if let Some(pvar) = pvars.into_iter().find(|v| local_pvars.contains(v)) {
+                if pvar_restricted_uvars.contains(&uvar) {
                     Err(TypeError::PolyVarEscapesViaUnification {
-                        var: pvar.clone(),
                         assignment: (uvar, ty),
                         span: span.clone(),
                     })

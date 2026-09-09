@@ -785,7 +785,6 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                 );
             }
             TypeError::PolyVarEscapesViaUnification {
-                var,
                 assignment: (uvar, ty),
                 span,
             } => {
@@ -796,7 +795,7 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     [label(
                         span,
                         format!(
-                            "Polymorphic variable {var} leaks through the assignment {uvar} = {}",
+                            "At least one of the polymorphic variables leaks through the assignment {uvar} = {}",
                             pretty_def(&ty)
                         ),
                     )],
