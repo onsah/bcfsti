@@ -1,0 +1,18 @@
+let rec
+    stream[a : Type]. mbl 'a ^ unr 'a : (mu X. ?'a; X) *[p] (mu X. Acq; !'a; X) -[m u 1]-> Unit
+    stream streams =
+        let sIn, sOut = streams in
+        let sIn1, sIn2 = lsplit[?'a] sIn in
+        let t = recv['a] sIn1 in
+        let sOutRemote, sOutLocal = rsplit[Acq;!'a] sOut in
+        fork (\x.
+            let sOutAcq, sOutRest = lsplit[Acq] sOutRemote in
+            acquire sOutAcq;
+            let sOutSend, sOutDrop = lsplit[!'a] sOutRest in
+            send['a] t sOutSend;
+            drop sOutDrop);
+        let sOutLocalAcq, sOutLocalRest = lsplit[Acq] sOutLocal in
+        acquire sOutLocalAcq;
+        stream['a] (sIn2, sOutLocalRest)
+in
+unit
