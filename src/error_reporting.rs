@@ -250,6 +250,40 @@ pub fn report_error(src_path: &str, src: &str, e: IErr) {
                     [label(e.span, "This expression requires a type annotation")],
                 );
             }
+            TypeError::AppArityMismatch(e, expected, actual) => {
+                report(
+                    &src,
+                    e.span.clone(),
+                    "Type Error",
+                    [label(
+                        e.span,
+                        format!(
+                            "This function expects {} argument{}, but {} {} given",
+                            expected,
+                            if expected == 1 { "" } else { "s" },
+                            actual,
+                            if actual == 1 { "was" } else { "were" },
+                        ),
+                    )],
+                );
+            }
+            TypeError::ClauseArityMismatch(e, expected, actual) => {
+                report(
+                    &src,
+                    e.span.clone(),
+                    "Type Error",
+                    [label(
+                        e.span,
+                        format!(
+                            "This function expects {} parameters {}, but {} {} given",
+                            expected,
+                            if expected == 1 { "" } else { "s" },
+                            actual,
+                            if actual == 1 { "was" } else { "were" },
+                        ),
+                    )],
+                );
+            }
             TypeError::CtxSplitFailed(e, ctx, ctx2) => {
                 report(
                     &src,

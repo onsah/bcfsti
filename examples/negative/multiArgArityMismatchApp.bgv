@@ -1,0 +1,9 @@
+let
+  add : Int -> Int -[m u 1]-> Int
+  add x y = x + y
+in
+let
+  bad : Int -> Int -[m u 1]-> Int
+  bad x y = add x
+in
+unit

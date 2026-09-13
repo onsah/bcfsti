@@ -54,9 +54,12 @@ pub fn check_shadowing(e: &SExpr, alias_env: &AliasEnv) -> Result<(), TypeError>
         Expr::Discard(chan) => check_shadowing(chan, alias_env),
         Expr::Var(_) => Ok(()),
         Expr::Abs(_, body) => check_shadowing(body, alias_env),
-        Expr::App(abs, arg) => {
+        Expr::App(abs, args) => {
             check_shadowing(abs, alias_env)?;
-            check_shadowing(arg, alias_env)
+            for arg in args {
+                check_shadowing(arg, alias_env)?;
+            }
+            Ok(())
         }
         Expr::Seq(e1, e2) => {
             check_shadowing(e1, alias_env)?;
@@ -144,8 +147,10 @@ fn check_type_shadowing(ty: &SType, alias_env: &AliasEnv) -> Result<(), TypeErro
         Type::Var(_) => Ok(()),
         Type::UVar(_) => Ok(()),
         Type::PVar { .. } => Ok(()),
-        Type::Arr { param, ret, .. } => {
-            check_type_shadowing(param, alias_env)?;
+        Type::Arr { params, ret, .. } => {
+            for param in params {
+                check_type_shadowing(param, alias_env)?;
+            }
             check_type_shadowing(ret, alias_env)
         }
         Type::Prod { first, second, .. } => {

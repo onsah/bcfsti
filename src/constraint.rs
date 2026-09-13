@@ -280,21 +280,26 @@ impl Equivalences {
                         mob: mob1,
                         mult: mult1,
                         eff: eff1,
-                        param: p1,
+                        params: params1,
                         ret: r1,
                     },
                     Type::Arr {
                         mob: mob2,
                         mult: mult2,
                         eff: eff2,
-                        param: p2,
+                        params: params2,
                         ret: r2,
                     },
                 ) if mob1 == mob2 && mult1 == mult2 && eff1 == eff2 => {
-                    Err(SolveError::SubEqs(vec![
-                        (*p1.clone(), *p2.clone()),
-                        (*r1.clone(), *r2.clone()),
-                    ]))
+                    if params1.len() != params2.len() {
+                        return Err(SolveError::Check);
+                    }
+                    let mut sub_eqs = Vec::with_capacity(params1.len() + 1);
+                    for (p1, p2) in params1.iter().zip(params2.iter()) {
+                        sub_eqs.push((p1.clone(), p2.clone()));
+                    }
+                    sub_eqs.push((*r1.clone(), *r2.clone()));
+                    Err(SolveError::SubEqs(sub_eqs))
                 }
                 (
                     Type::Prod {
@@ -526,13 +531,13 @@ fn subst(ty: SType, assignments: &Assignments) -> SType {
             mob,
             mult,
             eff,
-            param,
+            params,
             ret,
         } => Type::Arr {
             mob,
             mult,
             eff,
-            param: Box::new(subst(*param, assignments)),
+            params: params.into_iter().map(|p| subst(p, assignments)).collect(),
             ret: Box::new(subst(*ret, assignments)),
         },
         Type::Prod {
@@ -725,7 +730,7 @@ mod tests {
                         mob: fake_span(Mob::Mobile),
                         mult: fake_span(Mult::Lin),
                         eff: fake_span(Eff::No),
-                        param: Box::new(fake_span(Type::Int)),
+                        params: vec![fake_span(Type::Int)],
                         ret: Box::new(fake_span(uvar2.clone().val))
                     })
                 }
@@ -750,7 +755,7 @@ mod tests {
                         mob: fake_span(Mob::Mobile),
                         mult: fake_span(Mult::Lin),
                         eff: fake_span(Eff::No),
-                        param: Box::new(fake_span(uvar1.clone().val)),
+                        params: vec![fake_span(uvar1.clone().val)],
                         ret: Box::new(fake_span(session_type! { ?String }.val))
                     })
                 }
@@ -762,7 +767,7 @@ mod tests {
                         mob: fake_span(Mob::Mobile),
                         mult: fake_span(Mult::Lin),
                         eff: fake_span(Eff::No),
-                        param: Box::new(fake_span(session_type! { !Int }.val)),
+                        params: vec![fake_span(session_type! { !Int }.val)],
                         ret: Box::new(fake_span(uvar2.clone().val))
                     })
                 }
@@ -778,6 +783,62 @@ mod tests {
 
         let solved = constraints.solve();
         assert_eq!(solved.map(|(cs, _)| cs), Ok(Constraints::empty()));
+    }
+
+    #[test]
+    fn test_arr_arity() {
+        let uvar1 = fake_span(Type::UVar(1));
+
+        // A 2-ary Arr unifies with another 2-ary Arr by emitting pairwise
+        // sub-equivalences for each parameter.
+        let mut constraints = Constraints::empty();
+        constraints.equivalences.add((
+            fake_span(Type::Arr {
+                mob: fake_span(Mob::Mobile),
+                mult: fake_span(Mult::Lin),
+                eff: fake_span(Eff::No),
+                params: vec![fake_span(Type::Int), fake_span(uvar1.clone().val)],
+                ret: Box::new(fake_span(Type::Unit)),
+            }),
+            fake_span(Type::Arr {
+                mob: fake_span(Mob::Mobile),
+                mult: fake_span(Mult::Lin),
+                eff: fake_span(Eff::No),
+                params: vec![fake_span(Type::Int), fake_span(Type::Bool)],
+                ret: Box::new(fake_span(Type::Unit)),
+            }),
+        ));
+        constraints
+            .equivalences
+            .add((uvar1.clone(), fake_span(Type::Bool)));
+
+        let solved = constraints.solve();
+        assert_eq!(solved.map(|(cs, _)| cs), Ok(Constraints::empty()));
+
+        // A 2-ary Arr must not unify with a 1-ary Arr; the equivalence is
+        // left unsolved rather than producing a bogus unification.
+        let mut constraints = Constraints::empty();
+        constraints.equivalences.add((
+            fake_span(Type::Arr {
+                mob: fake_span(Mob::Mobile),
+                mult: fake_span(Mult::Lin),
+                eff: fake_span(Eff::No),
+                params: vec![fake_span(Type::Int), fake_span(Type::Bool)],
+                ret: Box::new(fake_span(Type::Unit)),
+            }),
+            fake_span(Type::Arr {
+                mob: fake_span(Mob::Mobile),
+                mult: fake_span(Mult::Lin),
+                eff: fake_span(Eff::No),
+                params: vec![fake_span(Type::Int)],
+                ret: Box::new(fake_span(Type::Unit)),
+            }),
+        ));
+        let solved = constraints.solve();
+        let Ok((cs, _)) = solved else {
+            panic!("expected the constraint to be left unsolved, not an error");
+        };
+        assert_eq!(cs.equivalences.0.len(), 1);
     }
 
     #[test]

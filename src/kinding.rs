@@ -94,8 +94,10 @@ impl KindCheckState<'_> {
                 self.infer(second)?;
                 Ok(Kind::Type)
             }
-            Type::Arr { param, ret, .. } => {
-                self.infer(param)?;
+            Type::Arr { params, ret, .. } => {
+                for param in params {
+                    self.infer(param)?;
+                }
                 self.infer(ret)?;
                 Ok(Kind::Type)
             }

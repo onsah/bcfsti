@@ -1,0 +1,5 @@
+let
+  foo : !String -[m u 1]-> Unit
+  foo a b = unit
+in
+unit

@@ -9,7 +9,7 @@ The implementation supports all features for CSTB mentioned in the paper and add
 - a function that prints to stdout.
 - `new S` differs from the paper that it's not a function but it's as if already applied to `Unit`
 - let binding with explicit type annotation
-- type aliasing to better showcase the examples from the appaer
+- type aliasing to better showcase the examples from the paper
 
 ## Installation
 
@@ -74,7 +74,9 @@ E ::= '0'                           (pure)
     | '1'                           (impure)
 
 Types
-t ::= t '-[' m ';'? d ';'? E ']->' t(function type)
+t ::= t ('->' t)* '-[' m ';'? d ';'? E ']->' t (function type; plain arrows
+    |                                    bind additional parameters and must
+    |                                    appear before the annotated arrow)
     | t '*[' d ']' t                (product type)
     | '<' (l ':' t ',')* '>'        (variant type)
     | 'Chan'? s                     (session type)
@@ -103,7 +105,7 @@ s ::=  s ';' s                      (sequential composition)
 Expressions
 e ::= x                             (variable)
     | '\' x '.' e                   (lambda abstraction)
-    | e e                           (unr/lin/right function application)
+    | e e+                          (unr/lin/right function application)
 
     | 'let' x '=' e 'in' e          (let expression)
     | e ';' e                       (sequencing)
@@ -116,9 +118,9 @@ e ::= x                             (variable)
         (l x '->' '{' e '}')*
       '}'
 
-    | 'let' 'rec'? x ':' t '\n'
-            x x '=' e 'in' e        (let declaration; recursive iff 'rec' is given)
-
+    | 'let' 'rec'? x+ ':' (t ->)* t '\n'
+            x+ '=' e 'in' e        (let declaration; recursive iff 'rec' is given;
+                                    possibly with multiple arguments)
     | 'fork' e                      (thread spawning)
     | 'new' s                       (channel allocation)
     | 'send' @t e1 e2               (channel send operation)
@@ -131,7 +133,7 @@ e ::= x                             (variable)
     | 'wait' e                      (elimination of owned channels)
     | 'lsplit' e                    (local channel split)
     | 'rsplit' e                    (remove channel split)
-    
+
 
     | 'true' | 'false'              (boolean introduction)
     | 'if' e 'then' e 'else' e      (boolean elimination)
@@ -161,7 +163,7 @@ e ::= x                             (variable)
     | e '!=' e                      (inequality)
 
     | e ':' t                       (type annotation)
-    
+
 Variables
 x ::= [a-zA-Z_]+[a-zA-Z0-9_]*
 
@@ -179,7 +181,7 @@ String Literals
 Patterns
 p ::= x                             (variable pattern)
     | '(' p1 ',' p2 ')'             (pair pattern)
-    
+
 Program
 P ::= e                             (main expression)
 ```

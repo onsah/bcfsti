@@ -97,7 +97,7 @@ pub enum Type {
         mob: SMob,
         mult: SMult,
         eff: SEff,
-        param: Box<SType>,
+        params: Vec<SType>,
         ret: Box<SType>,
     },
     Prod {
@@ -148,7 +148,9 @@ impl Type {
             Type::Var(_) => true,
             Type::UVar(_) => false,
             Type::PVar { .. } => true,
-            Type::Arr { param, ret, .. } => param.is_closed() && ret.is_closed(),
+            Type::Arr { params, ret, .. } => {
+                params.iter().all(|p| p.is_closed()) && ret.is_closed()
+            }
             Type::Prod { first, second, .. } => first.is_closed() && second.is_closed(),
             Type::Variant(cs) => cs.iter().all(|(_, t)| t.is_closed()),
             Type::Unit | Type::Int | Type::Bool | Type::String => true,
@@ -175,8 +177,12 @@ impl Type {
             Type::Var(_) => HashSet::new(),
             Type::UVar(x) => HashSet::from([*x]),
             Type::PVar { .. } => HashSet::new(),
-            Type::Arr { param, ret, .. } => {
-                union(param.unification_variables(), ret.unification_variables())
+            Type::Arr { params, ret, .. } => {
+                let mut vars = ret.unification_variables();
+                for param in params {
+                    vars = union(vars, param.unification_variables());
+                }
+                vars
             }
             Type::Prod { first, second, .. } => union(
                 first.unification_variables(),
@@ -205,9 +211,12 @@ impl Type {
             Type::Var(_) => Box::new(iter::empty()),
             Type::UVar(_) => Box::new(iter::empty()),
             Type::PVar { id, .. } => Box::new(iter::once(id.clone())),
-            Type::Arr { param, ret, .. } => {
-                Box::new(param.poly_variables().chain(ret.poly_variables()))
-            }
+            Type::Arr { params, ret, .. } => Box::new(
+                params
+                    .iter()
+                    .flat_map(|p| p.poly_variables())
+                    .chain(ret.poly_variables()),
+            ),
             Type::Prod { first, second, .. } => {
                 Box::new(first.poly_variables().chain(second.poly_variables()))
             }
@@ -291,13 +300,16 @@ impl Type {
                 mob,
                 mult,
                 eff,
-                param,
+                params,
                 ret,
             } => Type::Arr {
                 mob: mob.clone(),
                 mult: mult.clone(),
                 eff: eff.clone(),
-                param: Box::new(fake_span(param.val.subst_poly(bindings))),
+                params: params
+                    .iter()
+                    .map(|p| fake_span(p.val.subst_poly(bindings)))
+                    .collect(),
                 ret: Box::new(fake_span(ret.val.subst_poly(bindings))),
             },
             Type::Prod {
@@ -428,21 +440,25 @@ impl Type {
                     mob: mob1,
                     mult: m1,
                     eff: p1,
-                    param: t11,
+                    params: params1,
                     ret: t12,
                 },
                 Type::Arr {
                     mob: mob2,
                     mult: m2,
                     eff: p2,
-                    param: t21,
+                    params: params2,
                     ret: t22,
                 },
             ) => {
                 mob1 == mob2
                     && m1 == m2
                     && p1 == p2
-                    && t11.sem_eq_(t21, &seen)
+                    && params1.len() == params2.len()
+                    && params1
+                        .iter()
+                        .zip(params2.iter())
+                        .all(|(a, b)| a.sem_eq_(b, &seen))
                     && t12.sem_eq_(t22, &seen)
             }
             (
@@ -576,7 +592,7 @@ pub type SPattern = Spanned<Pattern>;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Clause {
     pub id: SId,
-    pub var_id: SId,
+    pub var_ids: Vec<SId>,
     // pub pats: Vec<SPattern>,
     pub body: SExpr,
 }
@@ -703,8 +719,8 @@ pub enum Expr {
     Discard(Box<SExpr>),
 
     Var(SId),
-    Abs(SId, Box<SExpr>),
-    App(Box<SExpr>, Box<SExpr>),
+    Abs(Vec<SId>, Box<SExpr>),
+    App(Box<SExpr>, Vec<SExpr>),
 
     Seq(Box<SExpr>, Box<SExpr>),
     Pair(Box<SExpr>, Box<SExpr>),
@@ -771,8 +787,12 @@ impl Expr {
             Expr::New(_r) => HashSet::new(),
             Expr::BorrowEnd(_, e) => e.free_vars(),
             Expr::Var(x) => HashSet::from([x.val.clone()]),
-            Expr::Abs(x, e) => without(e.free_vars(), &x.val),
-            Expr::App(e1, e2) => union(e1.free_vars(), e2.free_vars()),
+            Expr::Abs(xs, e) => {
+                xs.iter().fold(e.free_vars(), |acc, x| without(acc, &x.val))
+            }
+            Expr::App(e1, args) => args
+                .iter()
+                .fold(e1.free_vars(), |acc, arg| union(acc, arg.free_vars())),
             Expr::Pair(e1, e2) => union(e1.free_vars(), e2.free_vars()),
             Expr::LetPair(x, y, e1, e2) => {
                 union(e1.free_vars(), without(without(e2.free_vars(), y), x))
@@ -822,7 +842,9 @@ impl Expr {
 impl Clause {
     pub fn free_vars(&self) -> HashSet<Id> {
         let mut vars = self.body.free_vars();
-        vars.remove(self.var_id.as_str());
+        for var_id in &self.var_ids {
+            vars.remove(var_id.as_str());
+        }
         // for p in &self.pats {
         //     vars = vars.difference(&p.bound_vars()).cloned().collect();
         // }

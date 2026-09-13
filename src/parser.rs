@@ -117,7 +117,17 @@ peg::parser! {
         pub rule type_arrow() -> Type
             = param:stype_prod() tok(Minus) tok(BracketL) mob:smob() tok(Semicolon)? mult:smult() tok(Semicolon)? eff:seffect()
               tok(BracketR) tok(Arrow) ret:stype_arrow()
-              { Type::Arr{ mob, mult, eff, param: Box::new(param), ret: Box::new(ret) } }
+              { Type::Arr{ mob, mult, eff, params: vec![param], ret: Box::new(ret) } }
+            / param:stype_prod() tok(Arrow) ret:stype_arrow()
+              {?
+                match ret.val {
+                    Type::Arr { mob, mult, eff, mut params, ret } => {
+                        params.insert(0, param);
+                        Ok(Type::Arr { mob, mult, eff, params, ret })
+                    }
+                    _ => Err("an annotated arrow at the end of the function type"),
+                }
+              }
             / t:type_prod() { t }
         pub rule stype_arrow() -> SType = spanned(<type_arrow()>)
 
@@ -185,7 +195,7 @@ peg::parser! {
         #[cache]
         pub rule expr_lam() -> Expr
             = tok(Lambda) x:sid() tok(Period) e:sexpr_lam()
-              { Expr::Abs(x, Box::new(e)) }
+              { Expr::Abs(vec![x], Box::new(e)) }
             / tok(Rec) tok(TypeKw) x:sid() squant()? tok(Equals) t:ssession() tok(In) e:sexpr_lam()
               { Expr::TypeDef(x, t, Box::new(e), true) }
             / tok(TypeKw) x:sid() tok(Equals) t:ssession() tok(In) e:sexpr_lam()
@@ -279,7 +289,7 @@ peg::parser! {
             / tok(Print) e:sexpr_atom() { Expr::Op1(Op1::Print, Box::new(e)) }
             / tok(LSplit) tok(BracketL) s:ssession() tok(BracketR) e:sexpr_atom() { Expr::LSplit(s, Box::new(e)) }
             / tok(RSplit) tok(BracketL) s:ssession() tok(BracketR) e:sexpr_atom() { Expr::RSplit(s, Box::new(e)) }
-            / e1:sexpr_app() e2:sexpr_atom() { Expr::App(Box::new(e1), Box::new(e2)) }
+            / head:sexpr_app() args:sexpr_atom()+ { Expr::App(Box::new(head), args) }
             / e1:sexpr_app() tok(BracketL) tys:stype()+ tok(BracketR) { Expr::TyApp(Box::new(e1), tys) }
             / e:expr_atom() { e }
         pub rule sexpr_app() -> SExpr = spanned(<expr_app()>)
@@ -301,7 +311,7 @@ peg::parser! {
         pub rule spattern() -> SPattern = spanned(<pattern()>)
 
         pub rule clause() -> Clause
-            = [Braced::Item]? y:sid() var_id:sid() tok(Equals) e:sexpr() { Clause { id: y, var_id, body: e } }
+            = [Braced::Item]? y:sid() var_ids:sid()+ tok(Equals) e:sexpr() { Clause { id: y, var_ids, body: e } }
         pub rule sclause() -> SClause = spanned(<clause()>)
 
         // Whole Programs
@@ -564,5 +574,68 @@ mod tests {
 
         let res = parser::parse(&toks);
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn parse_type_multi_arg() {
+        let src = r#"
+            let
+                fwd0 : !String; !Int -> ?String; ?Int -[m u 1]-> Unit
+                fwd0 cout cin = unit
+            in
+            unit
+        "#;
+        let toks = lexer::lex(&src).unwrap();
+        let mut toks = lexer_offside::process_indent(toks, |_| false, |_| false);
+        toks.toks = toks
+            .toks
+            .into_iter()
+            .filter(|t| t.val != Braced::Token(Token::NewLine))
+            .collect::<Vec<_>>();
+
+        let res = parser::parse(&toks);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn parse_type_three_arg_chain() {
+        let src = r#"
+            let
+                f : Int -> Bool -> String -[m u 1]-> Unit
+                f a b c = unit
+            in
+            unit
+        "#;
+        let toks = lexer::lex(&src).unwrap();
+        let mut toks = lexer_offside::process_indent(toks, |_| false, |_| false);
+        toks.toks = toks
+            .toks
+            .into_iter()
+            .filter(|t| t.val != Braced::Token(Token::NewLine))
+            .collect::<Vec<_>>();
+
+        let res = parser::parse(&toks);
+        assert!(res.is_ok());
+    }
+
+    #[test]
+    fn parse_type_plain_arrow_rejected() {
+        let src = r#"
+            let
+                f : Int -> Bool
+                f a b = unit
+            in
+            unit
+        "#;
+        let toks = lexer::lex(&src).unwrap();
+        let mut toks = lexer_offside::process_indent(toks, |_| false, |_| false);
+        toks.toks = toks
+            .toks
+            .into_iter()
+            .filter(|t| t.val != Braced::Token(Token::NewLine))
+            .collect::<Vec<_>>();
+
+        let res = parser::parse(&toks);
+        assert!(res.is_err());
     }
 }

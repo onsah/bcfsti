@@ -285,7 +285,7 @@ fn convert_type_impl(
             mob,
             mult,
             eff,
-            param,
+            params,
             ret,
         } => {
             let mut labels = vec![mob.to_label(), mult.to_label()];
@@ -293,14 +293,20 @@ fn convert_type_impl(
                 labels.push(label);
             }
 
-            let param = convert_type_impl(&param.val, defs, &HashMap::default(), pvar_bindings);
+            // Encode n-ary Arr as nested arrows over the parameters, with the
+            // annotation labels attached once at the outer level. This keeps
+            // Arr{params:[A,B]} distinct from Arr{params:[A], ret: Arr{params:[B],..}}.
             let ret = convert_type_impl(&ret.val, defs, &HashMap::default(), pvar_bindings);
-            FreestType::Tuple(vec![
+            let arrow = params.iter().rev().fold(ret, |acc, param| {
+                let param =
+                    convert_type_impl(&param.val, defs, &HashMap::default(), pvar_bindings);
                 FreestType::Arrow {
                     param: Box::new(param),
-                    ret: Box::new(ret),
+                    ret: Box::new(acc),
                 }
-                .into(),
+            });
+            FreestType::Tuple(vec![
+                Box::new(arrow),
                 FreestType::Choice {
                     dir: SessionOp::Recv,
                     branches: labels
@@ -362,6 +368,7 @@ mod tests {
         equivalence::{EquivalenceResult, check_equivalence},
         session_type,
         syntax::Type,
+        util::span::fake_span,
     };
 
     fn check_equivalence_sessions(type1: &Type, type2: &Type) -> EquivalenceResult {
@@ -435,5 +442,37 @@ mod tests {
         let type2 = session_type! { Ret };
 
         assert_success(check_equivalence_sessions(&type1, &type2));
+    }
+
+    #[test]
+    fn equivalence_arr_nary_distinct_from_nested() {
+        use crate::syntax::{Eff, Mob, Mult};
+
+        let two_ary = Type::Arr {
+            mob: fake_span(Mob::Mobile),
+            mult: fake_span(Mult::Unr),
+            eff: fake_span(Eff::No),
+            params: vec![fake_span(Type::Int), fake_span(Type::Bool)],
+            ret: Box::new(fake_span(Type::Unit)),
+        };
+        let nested_one_ary = Type::Arr {
+            mob: fake_span(Mob::Mobile),
+            mult: fake_span(Mult::Unr),
+            eff: fake_span(Eff::No),
+            params: vec![fake_span(Type::Int)],
+            ret: Box::new(fake_span(Type::Arr {
+                mob: fake_span(Mob::Mobile),
+                mult: fake_span(Mult::Unr),
+                eff: fake_span(Eff::No),
+                params: vec![fake_span(Type::Bool)],
+                ret: Box::new(fake_span(Type::Unit)),
+            })),
+        };
+
+        // The n-ary encoding is not equivalent to the nested 1-ary encoding.
+        assert!(matches!(
+            check_equivalence_sessions(&two_ary, &nested_one_ary),
+            EquivalenceResult::Error { .. }
+        ));
     }
 }

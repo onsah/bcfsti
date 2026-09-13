@@ -24,7 +24,7 @@ mod typechecker_tests {
     use std::assert_matches;
 
     use crate::{
-        constraint::{Constraints, Equivalences},
+        constraint::Constraints,
         error_reporting::IErr,
         session_type,
         syntax::{Eff, Expr, Mult, Type},
@@ -685,6 +685,149 @@ mod typechecker_tests {
 
         let res = typecheck(src, false);
         assert_matches!(res, Err(IErr::Typing(TypeError::UnrArrMustBeMobile(_, _,))));
+    }
+
+    #[test]
+    fn multi_arg_forward() {
+        let src = r#"
+            let
+              fwd0 : !String; !Int -> ?String; ?Int -[m u 1]-> Unit
+              fwd0 cout cin =
+                let cinStr, cin1 = lsplit[?String] cin in
+                let coutStr, cout1 = lsplit[!String] cout in
+                send[String] (recv[String] cinStr) coutStr;
+                let cinInt, cin2 = lsplit[?Int] cin1 in
+                let coutInt, cout2 = lsplit[!Int] cout1 in
+                send[Int] (recv[Int] cinInt) coutInt;
+                discard cin2;
+                discard cout2
+            in
+            unit
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Unit, _, _, Eff::No)));
+
+        let src = r#"
+            let
+              fwd0 : !String; !Int -> ?String; ?Int -[m u 1]-> Unit
+              fwd0 cout cin =
+                let cinStr, cin1 = lsplit[?String] cin in
+                let coutStr, cout1 = lsplit[!String] cout in
+                send[String] (recv[String] cinStr) coutStr;
+                discard cin1;
+                discard cout1
+            in
+            let
+              client : !String; !Int -> ?String; ?Int -[m u 1]-> Unit
+              client cout cin =
+                let cout1, cout2 = lsplit[!String; !Int] cout in
+                let cin1, cin2 = lsplit[?String; ?Int] cin in
+                fwd0 cout1 cin1;
+                discard cout2;
+                discard cin2
+            in
+            unit
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Unit, _, _, Eff::No)));
+    }
+
+    #[test]
+    fn multi_arg_partial_application() {
+        let src = r#"
+            let
+              fwd0 : !String; !Int -> ?String; ?Int -[m u 1]-> Unit
+              fwd0 cout cin =
+                let cinStr, cin1 = lsplit[?String] cin in
+                let coutStr, cout1 = lsplit[!String] cout in
+                send[String] (recv[String] cinStr) coutStr;
+                discard cin1;
+                discard cout1
+            in
+            let h = fwd0 in
+            let
+              client : !String; !Int -> ?String; ?Int -[m u 1]-> Unit
+              client cout cin =
+                let cout1, cout2 = lsplit[!String; !Int] cout in
+                let cin1, cin2 = lsplit[?String; ?Int] cin in
+                h cout1 cin1;
+                discard cout2;
+                discard cin2
+            in
+            unit
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Unit, _, _, Eff::No)));
+    }
+
+    #[test]
+    fn multi_arg_rec() {
+        let src = r#"
+            let
+              rec sum : Int -> Int -[m u 1]-> Int
+              sum n acc = if n == 0 then acc else sum (n - 1) (acc + n)
+            in
+            unit
+        "#;
+
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Unit, _, _, Eff::No)));
+    }
+
+    #[test]
+    fn multi_arg_arity_clause_mismatch() {
+        let src = r#"
+            let
+                foo : !String -[m u 1]-> Unit
+                foo a b = unit
+            in
+            unit
+        "#;
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::AppArityMismatch(_, 1, 2))));
+
+        let src = r#"
+            let
+                foo : Int -> Int -[m u 1]-> Int
+                foo x = x
+            in
+            unit
+        "#;
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::AppArityMismatch(_, 2, 1))));
+    }
+
+    #[test]
+    fn multi_arg_arity_app_mismatch() {
+        let src = r#"
+            let
+                add : Int -> Int -[m u 1]-> Int
+                add x y = x + y
+            in
+            let
+                bad : Int -> Int -[m u 1]-> Int
+                bad x y = add x
+            in
+            unit
+        "#;
+        let res = typecheck(src, false);
+        assert_matches!(res, Err(IErr::Typing(TypeError::AppArityMismatch(_, 2, 1))));
+    }
+
+    #[test]
+    fn double_regression() {
+        let src = r#"
+            let
+                double : (Int -[m u 1]-> Int) -[m u 1]-> (Int -[m u 1]-> Int)
+                double f = \x. f (f x)
+            in
+            unit
+        "#;
+        let res = typecheck(src, false);
+        assert_matches!(res, Ok((_, Type::Unit, _, _, Eff::No)));
     }
 
     #[test]

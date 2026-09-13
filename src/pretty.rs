@@ -30,10 +30,15 @@ impl Pretty<UserState> for Type {
                 mob,
                 mult,
                 eff,
-                param,
+                params,
                 ret,
             } => p.infix(2, R, |p| {
-                p.pp_arg(L, param);
+                for (i, param) in params.iter().enumerate() {
+                    if i != 0 {
+                        p.pp(" → ");
+                    }
+                    p.pp_arg(L, param);
+                }
                 p.pp(" –[");
                 p.pp(mob);
                 p.pp("; ");
@@ -226,17 +231,24 @@ impl Pretty<UserState> for Expr {
                 p.pp_arg(R, e);
             }),
             Expr::Var(x) => p.str(&x.val),
-            Expr::Abs(x, e) => p.infix(1, R, |p| {
+            Expr::Abs(xs, e) => p.infix(1, R, |p| {
                 p.pp("λ");
-                p.pp(x);
+                for (i, x) in xs.iter().enumerate() {
+                    if i != 0 {
+                        p.pp(" ");
+                    }
+                    p.pp(x);
+                }
                 p.pp(". ");
                 p.pp_arg(R, e);
                 p.pp("");
             }),
-            Expr::App(e1, e2) => p.infix(10, L, |p| {
+            Expr::App(e1, args) => p.infix(10, L, |p| {
                 p.pp_arg(L, e1);
-                p.pp(" ");
-                p.pp_arg(R, e2);
+                for arg in args {
+                    p.pp(" ");
+                    p.pp_arg(R, arg);
+                }
             }),
             Expr::Inj(l, e) => p.infix(10, L, |p| {
                 p.pp("inj ");
@@ -447,7 +459,12 @@ impl Pretty<UserState> for Clause {
     fn pp(&self, p: &mut PrettyEnv<UserState>) {
         p.pp(&self.id);
         p.pp(" ");
-        p.pp(&self.var_id);
+        for (i, var_id) in self.var_ids.iter().enumerate() {
+            if i != 0 {
+                p.pp(" ");
+            }
+            p.pp(var_id);
+        }
         p.pp(" ");
         // for pat in &self.pats {
         //     p.pp(pat);

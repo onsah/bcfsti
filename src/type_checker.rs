@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    constraint::{Assignments, Constraints, Equivalences, Mobilities},
+    constraint::{Assignments, Constraints},
     context::{Ctx, JoinOrd, ext},
     equivalence::{EquivalenceResult, check_equivalence},
     kinding,
@@ -10,7 +10,7 @@ use crate::{
     syntax::{
         Eff, Expr, Id, Kind, Label, Mob, Mult, Op1, Op2, PVarId, Quantification,
         QuantificationType, SEff, SExpr, SId, SMult, SPattern, SQualification, SQuantification,
-        SType, SessionOp, Type, UVarId, union,
+        SType, SessionOp, Type, UVarId,
     },
     type_alias::AliasEnv,
     type_context::TypeCtx,
@@ -31,6 +31,8 @@ pub enum TypeError {
     MismatchLabel(SExpr, Label, SType),
     Op2Mismatch(SExpr, Result<SType, String>, SType, SType),
     TypeAnnotationMissing(SExpr),
+    AppArityMismatch(SExpr, usize, usize),
+    ClauseArityMismatch(SExpr, usize, usize),
     //ClosedUnfinished(SExpr, SRegex),
     //InvalidWrite(SExpr, SRegex, SRegex),
     InvalidSplit(SExpr, SType, SType),
@@ -324,7 +326,7 @@ impl TypeChecker {
                     mob: fake_span(Mob::Mobile),
                     mult: fake_span(Mult::Lin),
                     eff: fake_span(Eff::Yes),
-                    param: Box::new(fake_span(Type::Unit)),
+                    params: vec![fake_span(Type::Unit)],
                     ret: Box::new(fake_span(Type::Unit)),
                 });
                 let (body_eff, body_cs, assignments) =
@@ -467,9 +469,12 @@ impl TypeChecker {
                     assignments,
                 ))
             }
-            Expr::App(abs, arg) => {
+            Expr::App(abs, args) => {
                 let abs_ctx = ctx.restrict(&abs.free_vars());
-                let arg_ctx = ctx.restrict(&arg.free_vars());
+                let arg_ctxs: Vec<Ctx> = args
+                    .iter()
+                    .map(|arg| ctx.restrict(&arg.free_vars()))
+                    .collect();
 
                 let (abs_ty, abs_eff, abs_cs, assignments) =
                     self.infer(assignments, ty_ctx, &abs_ctx, abs)?;
@@ -477,7 +482,7 @@ impl TypeChecker {
                 let Type::Arr {
                     mult,
                     eff,
-                    param,
+                    params,
                     ret,
                     ..
                 } = abs_ty.val
@@ -489,13 +494,38 @@ impl TypeChecker {
                     ));
                 };
 
+                if args.len() != params.len() {
+                    return Err(TypeError::AppArityMismatch(
+                        e.clone(),
+                        params.len(),
+                        args.len(),
+                    ));
+                }
+
                 {
-                    let (c1, c2, o) = match mult.val {
-                        Mult::OrdR => (&arg_ctx, &abs_ctx, JoinOrd::Ordered),
-                        Mult::OrdL => (&abs_ctx, &arg_ctx, JoinOrd::Ordered),
-                        Mult::Unr | Mult::Lin => (&abs_ctx, &arg_ctx, JoinOrd::Unordered),
+                    let res_ctx = match mult.val {
+                        Mult::OrdR => {
+                            let mut c = abs_ctx.clone();
+                            for arg_ctx in arg_ctxs.iter().rev() {
+                                c = ctx_join(e, ty_ctx, arg_ctx, &c, JoinOrd::Ordered)?;
+                            }
+                            c
+                        }
+                        Mult::OrdL => {
+                            let mut c = abs_ctx.clone();
+                            for arg_ctx in arg_ctxs.iter() {
+                                c = ctx_join(e, ty_ctx, &c, arg_ctx, JoinOrd::Ordered)?;
+                            }
+                            c
+                        }
+                        Mult::Unr | Mult::Lin => {
+                            let mut c = abs_ctx.clone();
+                            for arg_ctx in arg_ctxs.iter() {
+                                c = ctx_join(e, ty_ctx, &c, arg_ctx, JoinOrd::Unordered)?;
+                            }
+                            c
+                        }
                     };
-                    let res_ctx = ctx_join(e, ty_ctx, c1, c2, o)?;
 
                     if !ctx.is_subctx_of(&ty_ctx, &res_ctx) {
                         return Err(TypeError::CtxSplitFailed(
@@ -514,24 +544,28 @@ impl TypeChecker {
                     ));
                 }
 
-                let (arg_eff, arg_cs, assignments) =
-                    self.check(assignments, ty_ctx, &arg_ctx, arg, &param)?;
+                let mut total_eff = Eff::lub(*eff, abs_eff);
+                let mut cs = abs_cs;
+                let mut assignments = assignments;
+                for ((arg, arg_ctx), param) in args.iter().zip(arg_ctxs.iter()).zip(params.iter()) {
+                    let (arg_eff, arg_cs, new_assignments) =
+                        self.check(assignments, ty_ctx, arg_ctx, arg, param)?;
+                    assignments = new_assignments;
 
-                if mult.val == Mult::OrdR && arg_eff == Eff::Yes {
-                    return Err(TypeError::MismatchEff(
-                        e.clone(),
-                        fake_span(arg_eff),
-                        fake_span(Eff::No),
-                    ));
+                    if mult.val == Mult::OrdR && arg_eff == Eff::Yes {
+                        return Err(TypeError::MismatchEff(
+                            e.clone(),
+                            fake_span(arg_eff),
+                            fake_span(Eff::No),
+                        ));
+                    }
+
+                    total_eff = Eff::lub(total_eff, arg_eff);
+                    cs = cs.join(arg_cs);
                 }
 
                 let ret = normalise(ty_ctx, &self.alias_env, &ret)?;
-                Ok((
-                    ret,
-                    Eff::lub(*eff, Eff::lub(abs_eff, arg_eff)),
-                    abs_cs.join(arg_cs).subst(&assignments),
-                    assignments,
-                ))
+                Ok((ret, total_eff, cs.subst(&assignments), assignments))
             }
             Expr::Let(var_id, var_expr, body_expr, _) => {
                 let var_ctx = ctx.restrict(&var_expr.free_vars());
@@ -571,7 +605,7 @@ impl TypeChecker {
                 let (var_ty, var_body) = {
                     // Desugar clause to an abstraction
                     let var_body = Spanned::new(
-                        Expr::Abs(clause.var_id.clone(), Box::new(clause.body.clone())),
+                        Expr::Abs(clause.var_ids.clone(), Box::new(clause.body.clone())),
                         clause.span.clone(),
                     );
                     Self::desugar_quantification(quant.clone(), var_ty.clone(), var_body)
@@ -1097,12 +1131,12 @@ impl TypeChecker {
         //     pretty_def(&expected_ty)
         // );
         match &e.val {
-            Expr::Abs(id, body) => {
+            Expr::Abs(ids, body) => {
                 let Type::Arr {
                     mob,
                     mult,
                     eff,
-                    param,
+                    params,
                     ret,
                 } = &expected_ty.val
                 else {
@@ -1112,6 +1146,14 @@ impl TypeChecker {
                         expected_ty.clone(),
                     ));
                 };
+
+                if ids.len() != params.len() {
+                    return Err(TypeError::AppArityMismatch(
+                        e.clone(),
+                        params.len(),
+                        ids.len(),
+                    ));
+                }
 
                 let mut ctx_cs = Constraints::empty();
                 if mob.val == Mob::Mobile {
@@ -1127,12 +1169,23 @@ impl TypeChecker {
                     }
                 }
 
-                // Assert that `x` is not] in the context.
-                if ctx.vars().contains(&id.val) {
-                    Err(TypeError::Shadowing(e.clone(), id.clone()))?
+                // Assert that no parameter is already in the context and that
+                // parameters are distinct.
+                for id in ids {
+                    if ctx.vars().contains(&id.val) {
+                        Err(TypeError::Shadowing(e.clone(), id.clone()))?
+                    }
+                }
+                for (i, id1) in ids.iter().enumerate() {
+                    if ids[i + 1..].iter().any(|id2| id2.val == id1.val) {
+                        Err(TypeError::Shadowing(e.clone(), id1.clone()))?
+                    }
                 }
 
-                let ctx = ext(**mult, Ctx::Bind(id.clone(), *param.clone()), ctx.clone());
+                let mut ctx = ctx.clone();
+                for (id, param) in ids.iter().zip(params.iter()) {
+                    ctx = ext(**mult, Ctx::Bind(id.clone(), param.clone()), ctx);
+                }
                 let (body_eff, body_cs, assignments) =
                     self.check(assignments, ty_ctx, &ctx, body, ret)?;
 
