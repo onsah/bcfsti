@@ -1478,7 +1478,7 @@ impl TypeChecker {
         for (_, ty) in ctx.binds_spanned() {
             if !ty_ctx.mobile(&normalise(ty_ctx, &self.alias_env, &ty)?.val) {
                 if !ty.is_closed() {
-                    cs.mobilities.add(ty.clone());
+                    cs.qualifications.add_mobile(ty.clone());
                 } else {
                     return Err(TypeError::TypeNotMobile { ty });
                 }

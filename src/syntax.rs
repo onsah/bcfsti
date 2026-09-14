@@ -1,4 +1,7 @@
-use crate::util::span::{Spanned, fake_span};
+use crate::util::{
+    pretty::pretty_def,
+    span::{Spanned, fake_span},
+};
 use std::{
     collections::{HashMap, HashSet},
     hash::{Hash, Hasher},
@@ -367,7 +370,7 @@ impl Type {
                 Type::Choice(op.dual(), cs2)
             }
             Type::End(op) => Type::End(op.dual()),
-            Type::BorrowEnd(op) => Type::BorrowEnd(op.dual()),
+            Type::BorrowEnd(_) => panic!("Dual is invalid for type {}", pretty_def(&self)),
             Type::Mu(x, s) => Type::Mu(x.clone(), Box::new(fake_span(s.val.dual()))),
             Type::Var(x) => Type::Var(x.clone()),
             Type::Skip => Type::Skip,
@@ -787,9 +790,7 @@ impl Expr {
             Expr::New(_r) => HashSet::new(),
             Expr::BorrowEnd(_, e) => e.free_vars(),
             Expr::Var(x) => HashSet::from([x.val.clone()]),
-            Expr::Abs(xs, e) => {
-                xs.iter().fold(e.free_vars(), |acc, x| without(acc, &x.val))
-            }
+            Expr::Abs(xs, e) => xs.iter().fold(e.free_vars(), |acc, x| without(acc, &x.val)),
             Expr::App(e1, args) => args
                 .iter()
                 .fold(e1.free_vars(), |acc, arg| union(acc, arg.free_vars())),

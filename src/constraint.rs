@@ -4,19 +4,19 @@ use std::{
 };
 
 use crate::{
-    syntax::{PVarId, SType, Type, UVarId},
+    syntax::{PVarId, Qualification, SSemType, SType, Type, UVarId},
     type_checker::TypeError,
     type_context::TypeCtx,
     util::{
         pretty::{Pretty, PrettyEnv},
-        span::Spanned,
+        span::{Spanned, fake_span},
     },
 };
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Constraints {
     pub equivalences: Equivalences,
-    pub mobilities: Mobilities,
+    pub qualifications: Qualifications,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -47,7 +47,7 @@ impl PartialEq for Equivalences {
 impl Eq for Equivalences {}
 
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub struct Mobilities(Vec<SType>);
+pub struct Qualifications(Vec<Qualification>);
 
 /// Assigned types can be assumed to contain no unification variables.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -132,21 +132,21 @@ impl Constraints {
     pub fn empty() -> Constraints {
         Constraints {
             equivalences: Equivalences::new(),
-            mobilities: Mobilities::new(),
+            qualifications: Qualifications::new(),
         }
     }
 
     pub fn from_equivalences(equivalences: HashSet<(SType, SType)>) -> Constraints {
         Constraints {
             equivalences: Equivalences::from(equivalences),
-            mobilities: Mobilities::new(),
+            qualifications: Qualifications::new(),
         }
     }
 
     pub fn join(self, other: Constraints) -> Constraints {
         Constraints {
             equivalences: self.equivalences.join(other.equivalences),
-            mobilities: self.mobilities.join(other.mobilities),
+            qualifications: self.qualifications.join(other.qualifications),
         }
     }
 
@@ -158,10 +158,10 @@ impl Constraints {
                     .map(|(ty1, ty2)| (subst(ty1, assignments), subst(ty2, assignments)))
                     .collect(),
             ),
-            mobilities: Mobilities(
-                self.mobilities
+            qualifications: Qualifications(
+                self.qualifications
                     .into_iter()
-                    .map(|ty| subst(ty, assignments))
+                    .map(|q| subst_qualification(q, assignments))
                     .collect(),
             ),
         }
@@ -187,11 +187,11 @@ impl Constraints {
             });
         }
 
-        self.mobilities.check(ty_ctx, &assignments)?;
+        self.qualifications.check(ty_ctx, &assignments)?;
         Ok((
             Constraints {
                 equivalences,
-                mobilities: Mobilities::new(),
+                qualifications: Qualifications::new(),
             },
             assignments,
         ))
@@ -423,37 +423,51 @@ impl Pretty<()> for Equivalences {
     }
 }
 
-impl Mobilities {
-    pub fn new() -> Mobilities {
-        Mobilities(Vec::new())
+impl Qualifications {
+    pub fn new() -> Qualifications {
+        Qualifications(Vec::new())
     }
 
-    fn join(mut self, mut other: Mobilities) -> Mobilities {
+    fn join(mut self, mut other: Qualifications) -> Qualifications {
         self.0.append(&mut other.0);
         self
     }
 
-    pub fn add(&mut self, ty: SType) {
-        self.0.push(ty);
+    pub fn add_mobile(&mut self, ty: SType) {
+        self.0.push(Qualification::Mobile(SSemType(ty)));
+    }
+
+    pub(crate) fn add_nonskip(&mut self, ty: SType) {
+        self.0.push(Qualification::NonSkip(SSemType(ty)));
     }
 
     fn check(self, ty_ctx: &TypeCtx, assignments: &Assignments) -> Result<(), TypeError> {
-        for ty in self.0.into_iter() {
-            let ty = subst(ty, &assignments);
-            if !ty_ctx.mobile(&ty.val) {
-                return Err(TypeError::TypeNotMobile { ty });
-            }
-        }
-        Ok(())
+        self.0
+            .into_iter()
+            .map(|q| subst_qualification(q, assignments))
+            .map(|q| {
+                if ty_ctx.entails(&q) {
+                    Ok(())
+                } else {
+                    Err(match q {
+                        Qualification::Mobile(ty) => TypeError::TypeNotMobile { ty: ty.0 },
+                        qualification => TypeError::QualificationNotSatisfied(
+                            ty_ctx.clone(),
+                            fake_span(qualification),
+                        ),
+                    })
+                }
+            })
+            .collect()
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = &SType> {
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &Qualification> {
         self.0.iter()
     }
 }
 
-impl IntoIterator for Mobilities {
-    type Item = SType;
+impl IntoIterator for Qualifications {
+    type Item = Qualification;
 
     type IntoIter = std::vec::IntoIter<Self::Item>;
 
@@ -462,20 +476,19 @@ impl IntoIterator for Mobilities {
     }
 }
 
-impl Extend<SType> for Mobilities {
-    fn extend<T: IntoIterator<Item = SType>>(&mut self, iter: T) {
+impl Extend<Qualification> for Qualifications {
+    fn extend<T: IntoIterator<Item = Qualification>>(&mut self, iter: T) {
         self.0.extend(iter);
     }
 }
 
-impl Pretty<()> for Mobilities {
+impl Pretty<()> for Qualifications {
     fn pp(&self, p: &mut PrettyEnv<()>) {
-        for (i, ty) in self.0.iter().enumerate() {
+        for (i, qualification) in self.0.iter().enumerate() {
             if i != 0 {
                 p.pp(", ");
             }
-            p.pp("mbl ");
-            p.pp(ty);
+            p.pp(qualification);
         }
     }
 }
@@ -487,13 +500,28 @@ impl Pretty<()> for Constraints {
             p.pp(&self.equivalences);
             first = false;
         }
-        if !self.mobilities.0.is_empty() {
+        if !self.qualifications.0.is_empty() {
             if !first {
                 p.pp(", ");
             }
-            p.pp(&self.mobilities);
+            p.pp(&self.qualifications);
         }
     }
+}
+
+fn subst_qualification(qualification: Qualification, assignments: &Assignments) -> Qualification {
+    match qualification {
+        Qualification::Unr(ty) => Qualification::Unr(subst_sem(ty, assignments)),
+        Qualification::Mobile(ty) => Qualification::Mobile(subst_sem(ty, assignments)),
+        Qualification::Bounded(ty) => Qualification::Bounded(subst_sem(ty, assignments)),
+        Qualification::New(ty) => Qualification::New(subst_sem(ty, assignments)),
+        Qualification::Dualable(ty) => Qualification::Dualable(subst_sem(ty, assignments)),
+        Qualification::NonSkip(ty) => Qualification::NonSkip(subst_sem(ty, assignments)),
+    }
+}
+
+fn subst_sem(ty: SSemType, assignments: &Assignments) -> SSemType {
+    SSemType(subst(ty.0, assignments))
 }
 
 fn subst(ty: SType, assignments: &Assignments) -> SType {
