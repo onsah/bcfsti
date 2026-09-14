@@ -143,15 +143,19 @@ impl TypeCtx {
     fn nonskip(&self, session: &Type) -> bool {
         self.or_assumed(
             || Qualification::NonSkip(session.clone().into()),
-            if session.poly_variables().count() == 0 && !session.is_only_skips() {
+            if session.poly_variables_under_prod_and_variant().count() == 0
+                && !session.is_only_skips()
+            {
                 true
-            } else {
+            } else if let Type::Semi { .. } = session {
                 session.poly_variables().any(|var| {
                     self.nonskip(&Type::PVar {
                         id: var.clone(),
                         dual: false,
                     })
                 })
+            } else {
+                false
             },
         )
     }

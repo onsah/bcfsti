@@ -1,5 +1,5 @@
 let
-    bar[a: Session] : !Int; Skip; 'a -[m u 1]-> 'a
+    bar[a: Session]. nonskip 'a : !Int; Skip; 'a -[m u 1]-> 'a
     bar c =
         let c1, c2 = lsplit[!Int] c in
         send[Int] 42 c1;

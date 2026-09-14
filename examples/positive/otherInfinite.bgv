@@ -3,9 +3,7 @@ let
   two_shot c =
     let c1, c2 = lsplit[?Int] c in
     let x = recv[Int] c1 in
-    let c3, c4 = lsplit[?Int] c2 in
-    let y = recv[Int] c3 in
-    discard c4;
+    let y = recv[Int] c2 in
     x + y
 in
 

@@ -83,6 +83,8 @@ pub enum Token<'a> {
     AcqT,
     #[token("unr")]
     Unr,
+    #[token("nonskip")]
+    Nonskip,
     #[token("lin")]
     Lin,
     #[token("left")]
@@ -352,6 +354,7 @@ impl<'a> Token<'a> {
             Token::QAll => "∀",
             Token::Quote => "'",
             Token::Caret => "^",
+            Token::Nonskip => "nonskip",
         }
     }
 }

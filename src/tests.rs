@@ -132,6 +132,7 @@ mod typechecker_tests {
                 fake_span(session_type! { Acq; fake_span(Type::UVar(0)) }.val),
                 fake_span(session_type! { Acq; ?Int }.val),
             ));
+            cs.qualifications.add_nonskip(fake_span(Type::UVar(1)));
             cs
         };
         assert_matches!(res, Ok((_, Type::Unit, _, _, Eff::No)));

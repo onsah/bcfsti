@@ -36,6 +36,7 @@ use crate::{
     syntax::{Eff, Type},
     type_alias::AliasEnv,
     type_checker::TypeError,
+    type_context::TypeCtx,
     util::{
         lexer_offside::{self, Braced},
         pretty::pretty_def,
@@ -135,7 +136,7 @@ fn constraints_check(cs: Constraints, alias_env: &AliasEnv, verbose: bool) -> Re
         println!();
     }
 
-    let (cs, _) = cs.solve().map_err(IErr::Typing)?;
+    let (cs, _) = cs.solve(&TypeCtx::empty()).map_err(IErr::Typing)?;
 
     if verbose {
         println!("Constraints:");

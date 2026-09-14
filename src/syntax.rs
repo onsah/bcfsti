@@ -1,6 +1,6 @@
 use crate::util::{
     pretty::pretty_def,
-    span::{Spanned, fake_span},
+    span::{Span, Spanned, fake_span},
 };
 use std::{
     collections::{HashMap, HashSet},
@@ -577,6 +577,17 @@ impl Qualification {
                 Qualification::Dualable(t.val.subst_poly(bindings).into())
             }
             Qualification::NonSkip(t) => Qualification::NonSkip(t.val.subst_poly(bindings).into()),
+        }
+    }
+
+    pub fn ty_span(&self) -> Span {
+        match self {
+            Qualification::Unr(t)
+            | Qualification::Mobile(t)
+            | Qualification::Bounded(t)
+            | Qualification::New(t)
+            | Qualification::Dualable(t)
+            | Qualification::NonSkip(t) => t.span.clone(),
         }
     }
 }

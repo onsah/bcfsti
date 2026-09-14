@@ -414,7 +414,7 @@ impl TypeChecker {
                 }
 
                 let uvar_id = self.new_uvar();
-                let uvar = fake_span(Type::UVar(uvar_id));
+                let uvar = Spanned::new(Type::UVar(uvar_id), e.span.clone());
                 let expected_chan_ty =
                     fake_span(session_type! { prefix_session.clone(); uvar.clone() }.val);
                 let (chan_eff, chan_cs, mut assignments) =
@@ -425,13 +425,16 @@ impl TypeChecker {
                 let ret_ty = Type::Prod {
                     mult: fake_span(Mult::OrdL),
                     first: Box::new(fake_span(prefix_session.val.clone())),
-                    second: Box::new(fake_span(uvar.val)),
+                    second: Box::new(fake_span(uvar.val.clone())),
                 };
+
+                let mut cs = chan_cs;
+                cs.qualifications.add_nonskip(uvar);
 
                 Ok((
                     fake_span(ret_ty),
                     chan_eff,
-                    chan_cs.subst(&assignments),
+                    cs.subst(&assignments),
                     assignments,
                 ))
             }
@@ -1365,7 +1368,7 @@ impl TypeChecker {
                     self.check(assignments, &ty_ctx, &ctx, expr, expr_ty)?;
 
                 // Solve all constraints locally, propagate non-local assignments
-                let (cs, more_assignments) = cs.subst(&assignments).solve()?;
+                let (cs, more_assignments) = cs.subst(&assignments).solve(&ty_ctx)?;
                 self.check_equivalence(&cs, &ty_ctx.vars)?;
 
                 let nonlocal_assignments = Self::check_assignments_escape(
