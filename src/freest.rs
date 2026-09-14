@@ -258,7 +258,7 @@ mod tests {
         prop_oneof![Just(SessionOp::Recv), Just(SessionOp::Send)]
     }
 
-    const KEYWORDS: [&str; 2] = ["if", "of"];
+    const KEYWORDS: [&str; 3] = ["if", "of", "in"];
 
     fn ty_label() -> impl Strategy<Value = Label> {
         (
