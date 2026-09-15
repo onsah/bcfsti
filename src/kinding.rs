@@ -8,7 +8,7 @@ use crate::{
 };
 
 pub(crate) fn infer(ty_ctx: &TypeCtx, alias_env: &AliasEnv, ty: &SType) -> Result<Kind, TypeError> {
-    let state = KindCheckState::from(ty_ctx.clone(), alias_env);
+    let state = KindingCtx::from(ty_ctx.clone(), alias_env);
     state.infer(ty)
 }
 
@@ -18,29 +18,29 @@ pub(crate) fn check(
     ty: &SType,
     expected: Kind,
 ) -> Result<(), TypeError> {
-    let state = KindCheckState::from(ty_ctx.clone(), alias_env);
-    state.check(ty, expected)
+    let ctx = KindingCtx::from(ty_ctx.clone(), alias_env);
+    ctx.check(ty, expected)
 }
 
-pub(crate) fn check_qualifications_well_formed<'a>(
+pub(crate) fn check_wf<'a>(
     ty_ctx: &TypeCtx,
     alias_env: &AliasEnv,
     qualifications: impl Iterator<Item = &'a SQualification>,
 ) -> Result<(), TypeError> {
-    let state = KindCheckState::from(ty_ctx.clone(), alias_env);
-    state.check_qualifications_well_formed(qualifications)
+    let ctx = KindingCtx::from(ty_ctx.clone(), alias_env);
+    ctx.check_qualifications_well_formed(qualifications)
 }
 
 #[derive(Clone)]
-struct KindCheckState<'a> {
+struct KindingCtx<'a> {
     ty_ctx: TypeCtx,
     alias_env: &'a AliasEnv,
     rvars: HashSet<Id>,
 }
 
-impl KindCheckState<'_> {
-    fn from<'a>(ty_ctx: TypeCtx, alias_env: &'a AliasEnv) -> KindCheckState<'a> {
-        KindCheckState {
+impl KindingCtx<'_> {
+    fn from<'a>(ty_ctx: TypeCtx, alias_env: &'a AliasEnv) -> KindingCtx<'a> {
+        KindingCtx {
             ty_ctx,
             alias_env,
             rvars: HashSet::new(),
@@ -229,8 +229,7 @@ mod tests {
     #[test]
     fn empty_is_well_formed() {
         assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new())
-                .check_qualifications_well_formed([].iter()),
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed([].iter()),
             Ok(())
         );
     }
@@ -238,25 +237,25 @@ mod tests {
     #[test]
     fn unr_and_mobile_of_value_type() {
         assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Unr(Type::Unit.into()))].iter()
             ),
             Ok(())
         );
         assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Unr(Type::Int.into()))].iter()
             ),
             Ok(())
         );
         assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Mobile(Type::Bool.into()))].iter()
             ),
             Ok(())
         );
         assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Unr(Type::Skip.into()))].iter()
             ),
             Ok(())
@@ -267,31 +266,31 @@ mod tests {
     fn session_qualifications_of_closed_session() {
         let s = Type::End(SessionOp::Send);
         assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Bounded(s.clone().into()))].iter()
             ),
             Ok(())
         );
         assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::New(s.clone().into()))].iter()
             ),
             Ok(())
         );
         assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Dualable(s.clone().into()))].iter()
             ),
             Ok(())
         );
         assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::NonSkip(s.into()))].iter()
             ),
             Ok(())
         );
         assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Bounded(Type::Skip.into()))].iter()
             ),
             Ok(())
@@ -301,7 +300,7 @@ mod tests {
     #[test]
     fn conjunction_of_well_formed() {
         assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [
                     fake_span(Qualification::Unr(Type::Unit.into())),
                     fake_span(Qualification::Mobile(Type::Int.into())),
@@ -316,7 +315,7 @@ mod tests {
     #[test]
     fn conjunction_with_one_ill_formed_is_not_well_formed() {
         assert!(matches!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [
                     fake_span(Qualification::Unr(Type::Unit.into())),
                     fake_span(Qualification::Bounded(Type::PVar {
@@ -334,7 +333,7 @@ mod tests {
     fn free_pvar_in_value_type_not_well_formed() {
         let q = fake_span(Qualification::Unr(pvar_chan("a".to_string()).into()));
         assert!(matches!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed([q].iter()),
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed([q].iter()),
             Err(TypeError::UndefinedPVar(_, id)) if id == "a"
         ));
     }
@@ -349,7 +348,7 @@ mod tests {
             .into(),
         ));
         assert!(matches!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed([q].iter()),
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed([q].iter()),
             Err(TypeError::UndefinedPVar(_, id)) if id == "a"
         ));
     }
@@ -357,7 +356,7 @@ mod tests {
     #[test]
     fn in_scope_session_pvar_is_well_formed() {
         assert_eq!(
-            KindCheckState::from(ctx(&[("a".to_string(), Kind::Session)]), &HashMap::new())
+            KindingCtx::from(ctx(&[("a".to_string(), Kind::Session)]), &HashMap::new())
                 .check_qualifications_well_formed(
                     [fake_span(Qualification::Bounded(
                         Type::PVar {
@@ -371,7 +370,7 @@ mod tests {
             Ok(())
         );
         assert_eq!(
-            KindCheckState::from(ctx(&[("a".to_string(), Kind::Session)]), &HashMap::new())
+            KindingCtx::from(ctx(&[("a".to_string(), Kind::Session)]), &HashMap::new())
                 .check_qualifications_well_formed(
                     [fake_span(Qualification::Unr(
                         pvar_chan("a".to_string()).into()
@@ -384,7 +383,7 @@ mod tests {
 
     #[test]
     fn pvar_of_wrong_kind_not_well_formed() {
-        let result = KindCheckState::from(ctx(&[("a".to_string(), Kind::Type)]), &HashMap::new())
+        let result = KindingCtx::from(ctx(&[("a".to_string(), Kind::Type)]), &HashMap::new())
             .check_qualifications_well_formed(
                 [fake_span(Qualification::Bounded(
                     Type::PVar {
@@ -411,7 +410,7 @@ mod tests {
             })),
         };
         assert!(matches!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Bounded(s.into()))].iter()
             ),
             Err(TypeError::UndefinedPVar(_, id)) if id == "a"
@@ -422,7 +421,7 @@ mod tests {
     fn nested_ill_kinded_value_type_not_well_formed() {
         let ty = variant("a", pvar_chan("b".to_string()));
         assert!(matches!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Unr(ty.into()))].iter()
             ),
             Err(TypeError::UndefinedPVar(_, id)) if id == "b"
@@ -436,7 +435,7 @@ mod tests {
             Box::new(session_type! { !String; X }),
         );
         assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Bounded(s.into()))].iter()
             ),
             Ok(())
@@ -446,7 +445,7 @@ mod tests {
     #[test]
     fn mobile_with_free_pvar_not_well_formed() {
         assert!(matches!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Mobile(pvar_chan(
                     "5".to_string()
                 ).into()))]
@@ -459,7 +458,7 @@ mod tests {
     #[test]
     fn new_dualable_nonskip_with_free_pvar_not_well_formed() {
         assert!(matches!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::New(Type::PVar {
                     id: "4".to_string(),
                     dual: false
@@ -469,7 +468,7 @@ mod tests {
             Err(TypeError::UndefinedPVar(_, id)) if id == "4"
         ));
         assert!(matches!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Dualable(Type::PVar {
                     id: "4".to_string(),
                     dual: false
@@ -479,7 +478,7 @@ mod tests {
             Err(TypeError::UndefinedPVar(_, id)) if id == "4"
         ));
         assert!(matches!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::NonSkip(Type::PVar {
                     id: "4".to_string(),
                     dual: false
@@ -497,7 +496,7 @@ mod tests {
             Box::new(fake_span(pvar_chan("9".to_string()))),
         );
         assert!(matches!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Dualable(s.into()))].iter()
             ),
             Err(TypeError::UndefinedPVar(_, id)) if id == "9"
@@ -510,7 +509,7 @@ mod tests {
             fake_span("X".to_string()),
             Box::new(fake_span(Type::Var(fake_span("X".to_string())))),
         );
-        let result = KindCheckState::from(ctx(&[]), &HashMap::new())
+        let result = KindingCtx::from(ctx(&[]), &HashMap::new())
             .check_qualifications_well_formed([fake_span(Qualification::Bounded(s.into()))].iter());
         assert!(matches!(
             result,
@@ -530,7 +529,7 @@ mod tests {
                 })),
             })),
         );
-        let result = KindCheckState::from(ctx(&[]), &HashMap::new())
+        let result = KindingCtx::from(ctx(&[]), &HashMap::new())
             .check_qualifications_well_formed([fake_span(Qualification::Bounded(s.into()))].iter());
         assert!(matches!(result, Err(TypeError::WfNonContractive(_, _))));
     }
@@ -546,7 +545,7 @@ mod tests {
             ty: Box::new(fake_span(Type::Unit)),
         };
         assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Unr(ty.into()))].iter()
             ),
             Ok(())
@@ -564,7 +563,7 @@ mod tests {
             ty: Box::new(fake_span(pvar_chan("b".to_string()))),
         };
         assert!(matches!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Unr(ty.into()))].iter()
             ),
             Err(TypeError::UndefinedPVar(_, _))
@@ -582,7 +581,7 @@ mod tests {
             ty: Box::new(fake_span(pvar_chan("a".to_string()))),
         };
         assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Unr(ty.into()))].iter()
             ),
             Ok(())
@@ -593,7 +592,7 @@ mod tests {
     fn choice_with_well_formed_branches_is_well_formed() {
         let s = session_type! { +{ a: !Int, b: !Bool } };
         assert_eq!(
-            KindCheckState::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
+            KindingCtx::from(ctx(&[]), &HashMap::new()).check_qualifications_well_formed(
                 [fake_span(Qualification::Bounded(SSemType(s)))].iter()
             ),
             Ok(())
@@ -605,7 +604,7 @@ mod tests {
         let s =
             session_type! { &{ a: fake_span(Type::PVar { id: "b".to_string(), dual: false }) } };
         assert!(matches!(
-            KindCheckState::from(ctx(&[]), &HashMap::new())
+            KindingCtx::from(ctx(&[]), &HashMap::new())
                 .check_qualifications_well_formed([fake_span(Qualification::Bounded(SSemType(s)))].iter()),
             Err(TypeError::UndefinedPVar(_, id)) if id == "b"
         ));
@@ -618,7 +617,7 @@ mod tests {
             dual: false,
         };
         assert_eq!(
-            KindCheckState::from(ctx(&[("a".to_string(), Kind::Session)]), &HashMap::new())
+            KindingCtx::from(ctx(&[("a".to_string(), Kind::Session)]), &HashMap::new())
                 .check_qualifications_well_formed(
                     [fake_span(Qualification::Dualable(session.into()))].iter()
                 ),
@@ -632,7 +631,7 @@ mod tests {
             id: "a".to_string(),
             dual: false,
         };
-        let result = KindCheckState::from(ctx(&[("a".to_string(), Kind::Type)]), &HashMap::new())
+        let result = KindingCtx::from(ctx(&[("a".to_string(), Kind::Type)]), &HashMap::new())
             .check_qualifications_well_formed(
                 [fake_span(Qualification::Dualable(session.into()))].iter(),
             );

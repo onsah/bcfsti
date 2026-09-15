@@ -1306,18 +1306,7 @@ impl TypeChecker {
                 let local_poly_bindings: HashSet<_> =
                     bindings.iter().map(|(sid, _)| sid.val.clone()).collect();
                 let ty_ctx = ty_ctx.extend_bindings(Quantification::bindings(bindings.into_iter()));
-                if kinding::check_qualifications_well_formed(
-                    &ty_ctx,
-                    &self.alias_env,
-                    qualifications.iter(),
-                )
-                .is_err()
-                {
-                    return Err(TypeError::QualificationNotWellFormed(
-                        ty_ctx,
-                        quantification.clone(),
-                    ));
-                }
+                kinding::check_wf(&ty_ctx, &self.alias_env, qualifications.iter())?;
 
                 if let Some(id) = quantification
                     .val
