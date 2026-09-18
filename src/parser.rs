@@ -103,6 +103,7 @@ peg::parser! {
               { Type::Var(x) }
             / id:polyid() { Type::PVar { id, dual: false } }
             / tok(ParenL) s:session() tok(ParenR) { s }
+            / tok(Dual) s:ssession() { s.dual() }
         pub rule ssession() -> SType = spanned(<session()>)
 
         pub rule type_() -> Type = t:type_quantify() { t }
@@ -150,7 +151,6 @@ peg::parser! {
             / tok(ParenL) t:type_() tok(ParenR) { t }
             / id:polyid() { Type::PVar { id, dual: false } }
             / tok(Chan)? s:ssession() { s.val }
-            / tok(Dual) s:ssession() { s.dual() }
             / tok(Lt) cs:((l:sid() tok(Colon) t:stype() { (l , t) }) ** tok(Comma)) tok(Comma)? tok(Gt) { Type::Variant(cs) }
         pub rule stype_atom() -> SType = spanned(<type_atom()>)
 
@@ -167,6 +167,7 @@ peg::parser! {
             = tok(QMbl) ty:stype() { Qualification::Mobile(SSemType(ty)) }
             / tok(Unr) ty:stype() { Qualification::Unr(SSemType(ty)) }
             / tok(Nonskip) ty:stype() { Qualification::NonSkip(SSemType(ty)) }
+            / tok(New) ty:stype() { Qualification::New(SSemType(ty)) }
 
         pub rule quals() -> Vec<Qualification>
             = q:qual() tok(Caret) qs:quals() { let mut v = vec![q]; v.extend(qs); v }
