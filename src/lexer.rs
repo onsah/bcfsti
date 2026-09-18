@@ -109,6 +109,8 @@ pub enum Token<'a> {
     Skip,
     #[token("Chan")]
     Chan,
+    #[token("dual")]
+    Dual,
     #[token("|>")]
     TriRight,
     #[token("case")]
@@ -355,6 +357,7 @@ impl<'a> Token<'a> {
             Token::Quote => "'",
             Token::Caret => "^",
             Token::Nonskip => "nonskip",
+            Token::Dual => "dual",
         }
     }
 }

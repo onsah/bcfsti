@@ -96,9 +96,9 @@ impl KindingCtx<'_> {
             }
             Type::Arr { params, ret, .. } => {
                 for param in params {
-                    self.infer(param)?;
+                    self.check(param, Kind::Type)?;
                 }
-                self.infer(ret)?;
+                self.check(ret, Kind::Type)?;
                 Ok(Kind::Type)
             }
             Type::Abstraction {
