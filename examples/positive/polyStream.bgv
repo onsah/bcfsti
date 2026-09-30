@@ -1,18 +1,29 @@
 let rec
-    stream[a : Type]. mbl 'a ^ unr 'a : (mu X. ?'a; X) *[p] (mu X. Acq; !'a; X) -[m u 1]-> Unit
-    stream streams =
-        let sIn, sOut = streams in
-        let sIn1, sIn2 = lsplit[?'a] sIn in
-        let t = recv['a] sIn1 in
-        let sOutRemote, sOutLocal = rsplit[Acq;!'a] sOut in
-        fork (\x.
-            let sOutAcq, sOutRest = lsplit[Acq] sOutRemote in
+    stream[a b : Type]. mbl 'a ^ mbl 'b :  (mu X. &{ more: ?'a; X, done: Skip })
+                                        -> (mu X. +{ more: Acq; !'b; X, done: Skip })
+                                        -> ('a -[m u 0]-> 'b)
+                                        -[m u 1]-> Unit
+    stream sIn sOut f = case (branch sIn) {
+        more sIn1 -> {
+            let sInRecv, sIn2 = lsplit[?'a] sIn1 in
+            let a = recv['a] sInRecv in
+            let b = f a in
+            let sOut1 = select more sOut in
+            let sOutSend, sOut2 = rsplit[Acq; !'b] sOut1 in
+            fork (\x.
+                let sOutAcq, sOutRest = lsplit[Acq] sOutSend in
+                acquire sOutAcq;
+                let sOutSend2, sOutDrop = lsplit[!'b] sOutRest in
+                send['b] b sOutSend2;
+                drop sOutDrop);
+            let sOutAcq, sOut3 = lsplit[Acq] sOut2 in
             acquire sOutAcq;
-            let sOutSend, sOutDrop = lsplit[!'a] sOutRest in
-            send['a] t sOutSend;
-            drop sOutDrop);
-        let sOutLocalAcq, sOutLocalRest = lsplit[Acq] sOutLocal in
-        acquire sOutLocalAcq;
-        stream['a] (sIn2, sOutLocalRest)
+            stream['a 'b] sIn2 sOut3 f
+        }
+        done sIn1 -> {
+            discard sIn1;
+            discard (select done sOut)
+        }
+    }
 in
 unit
