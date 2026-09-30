@@ -59,6 +59,8 @@ pub enum Token<'a> {
     Not,
     #[token("new")]
     New,
+    #[token("bnd")]
+    Bnd,
     #[token("lsplit")]
     LSplit,
     #[token("rsplit")]
@@ -358,6 +360,7 @@ impl<'a> Token<'a> {
             Token::Caret => "^",
             Token::Nonskip => "nonskip",
             Token::Dual => "dual",
+            Token::Bnd => "bnd",
         }
     }
 }

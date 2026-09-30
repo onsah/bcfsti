@@ -9,7 +9,7 @@ use crate::{
     type_context::TypeCtx,
     util::{
         pretty::{Pretty, PrettyEnv},
-        span::{Spanned, fake_span},
+        span::Spanned,
     },
 };
 
@@ -171,6 +171,10 @@ impl Constraints {
     /// If there is still no solution for some unification variables, `Skip` is substituted instead.
     pub fn solve(self, ty_ctx: &TypeCtx) -> Result<(Constraints, Assignments), TypeError> {
         let (assignments, equivalences) = self.equivalences.solve(ty_ctx);
+
+        // for (ty1, ty2) in equivalences.iter() {
+        //     println!("{} = {}", pretty_def(ty1), pretty_def(ty2));
+        // }
 
         let unsolved_vars = equivalences.unsolved_variables();
         if !unsolved_vars.is_empty() {

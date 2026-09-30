@@ -5,7 +5,11 @@ use crate::{
     util::span::fake_span,
 };
 
-use std::{collections::HashMap, io::Write, process::Command};
+use std::{
+    collections::{HashMap, HashSet},
+    io::Write,
+    process::Command,
+};
 
 #[allow(dead_code)]
 pub enum EquivalenceResult {
@@ -97,7 +101,7 @@ fn write_fn_type(
 ) {
     write!(test_file, "{} : ", name).unwrap();
 
-    let mut poly_ids: Vec<_> = type1.free_poly_variables().into_keys().collect();
+    let mut poly_ids: HashSet<_> = type1.free_poly_variables().into_keys().collect();
     poly_ids.extend(type2.free_poly_variables().into_keys());
 
     if !poly_ids.is_empty() {
@@ -298,8 +302,7 @@ fn convert_type_impl(
             // Arr{params:[A,B]} distinct from Arr{params:[A], ret: Arr{params:[B],..}}.
             let ret = convert_type_impl(&ret.val, defs, &HashMap::default(), pvar_bindings);
             let arrow = params.iter().rev().fold(ret, |acc, param| {
-                let param =
-                    convert_type_impl(&param.val, defs, &HashMap::default(), pvar_bindings);
+                let param = convert_type_impl(&param.val, defs, &HashMap::default(), pvar_bindings);
                 FreestType::Arrow {
                     param: Box::new(param),
                     ret: Box::new(acc),

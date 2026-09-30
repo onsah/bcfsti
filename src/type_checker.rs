@@ -1358,6 +1358,10 @@ impl TypeChecker {
 
                 // Solve all constraints locally, propagate non-local assignments
                 let (cs, more_assignments) = cs.subst(&assignments).solve(&ty_ctx)?;
+                // println!("LOCAL CONSTRAINT SOLVING");
+                // for (ty1, ty2) in cs.equivalences.iter() {
+                //     println!("{} = {}", pretty_def(ty1), pretty_def(ty2));
+                // }
                 self.check_equivalence(&cs, &ty_ctx.vars)?;
 
                 let nonlocal_assignments = Self::check_assignments_escape(
