@@ -1,6 +1,6 @@
 let rec
     stream[a b : Type]. mbl 'a ^ mbl 'b :  (mu X. &{ more: ?'a; X, done: Skip })
-                                        -> (mu X. +{ more: Acq; !'b; X, done: Skip })
+                                        -> Acq; (mu X. +{ more: !'b; X, done: Skip })
                                         -> ('a -[m u 0]-> 'b)
                                         -[m u 1]-> Unit
     stream sIn sOut f = case (branch sIn) {
@@ -8,21 +8,25 @@ let rec
             let sInRecv, sIn2 = lsplit[?'a] sIn1 in
             let a = recv['a] sInRecv in
             let b = f a in
-            let sOut1 = select more sOut in
-            let sOutSend, sOut2 = rsplit[Acq; !'b] sOut1 in
+            let sOutAcq, sOutSelect = lsplit[Acq] sOut in
+            acquire sOutAcq;
+            let sOutMore = select more (sOutSelect : (mu X. +{ more: !'b; X, done: Skip })) in
+            let sOutSkip, sOut2 = rsplit[Skip] sOutMore in
+            drop sOutSkip;
+            let sOutSend, sOut3 = rsplit[Acq; !'b] sOut2 in
             fork (\x.
                 let sOutAcq, sOutRest = lsplit[Acq] sOutSend in
                 acquire sOutAcq;
                 let sOutSend2, sOutDrop = lsplit[!'b] sOutRest in
                 send['b] b sOutSend2;
                 drop sOutDrop);
-            let sOutAcq, sOut3 = lsplit[Acq] sOut2 in
-            acquire sOutAcq;
             stream['a 'b] sIn2 sOut3 f
         }
         done sIn1 -> {
             discard sIn1;
-            discard (select done sOut)
+            let sOutAcq, sOutDone = lsplit[Acq] sOut in
+            acquire sOutAcq;
+            discard (select done (sOutDone : (mu X. +{ more: !'b; X, done: Skip })))
         }
     }
 in

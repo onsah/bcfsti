@@ -8,7 +8,7 @@ use crate::{
     type_checker::TypeError,
     type_context::TypeCtx,
     util::{
-        pretty::{Pretty, PrettyEnv},
+        pretty::{Pretty, PrettyEnv, pretty_def},
         span::Spanned,
     },
 };
@@ -172,9 +172,9 @@ impl Constraints {
     pub fn solve(self, ty_ctx: &TypeCtx) -> Result<(Constraints, Assignments), TypeError> {
         let (assignments, equivalences) = self.equivalences.solve(ty_ctx);
 
-        // for (ty1, ty2) in equivalences.iter() {
-        //     println!("{} = {}", pretty_def(ty1), pretty_def(ty2));
-        // }
+        for (ty1, ty2) in equivalences.iter() {
+            println!("{} = {}", pretty_def(ty1), pretty_def(ty2));
+        }
 
         let unsolved_vars = equivalences.unsolved_variables();
         if !unsolved_vars.is_empty() {
@@ -267,7 +267,9 @@ impl Equivalences {
     /// Unifies two types. When structures match, further subconstraints are generated.
     /// When a unification variable on one side is found, it's converted to an assignment.
     fn unify(ty_ctx: &TypeCtx, ty1: &Type, ty2: &Type) -> Result<Assignments, SolveError> {
-        if ty1.sem_eq(ty2) {
+        let ty1 = ty1.prune_skips();
+        let ty2 = ty2.prune_skips();
+        if ty1.sem_eq(&ty2) {
             Ok(Assignments::new())
         } else {
             match (ty1, ty2) {
@@ -382,7 +384,7 @@ impl Equivalences {
                     if other.unification_variables().is_empty() =>
                 {
                     let mut assignments = Assignments::new();
-                    assignments.insert(*id, other.clone());
+                    assignments.insert(id, other.clone());
                     Ok(assignments)
                 }
                 _ => Err(SolveError::Check),

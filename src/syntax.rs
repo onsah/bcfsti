@@ -541,6 +541,30 @@ impl Type {
             _ => false,
         }
     }
+
+    /// Remove sequencing with skips
+    pub fn prune_skips(&self) -> Type {
+        match self {
+            Type::Semi { first, second } => match (first.is_only_skips(), second.is_only_skips()) {
+                (true, true) => Type::Skip,
+                (true, false) => second.prune_skips(),
+                (false, true) => first.prune_skips(),
+                (false, false) => Type::Semi {
+                    first: Box::new(fake_span(first.prune_skips())),
+                    second: Box::new(fake_span(second.prune_skips())),
+                },
+            },
+            Type::Choice(session_op, items) => Type::Choice(
+                session_op.clone(),
+                items
+                    .iter()
+                    .map(|(label, sess)| (label.clone(), fake_span(sess.prune_skips())))
+                    .collect(),
+            ),
+            Type::Mu(var, body) => Type::Mu(var.clone(), Box::new(fake_span(body.prune_skips()))),
+            _ => self.clone(),
+        }
+    }
 }
 
 fn merge_clauses<T: Clone>(
